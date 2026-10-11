@@ -561,6 +561,36 @@ service PasskeyAdminService {
   rpc FinishOneOperation (FinishOneOperationRequest) returns (OneOperationAuthorizationResponse);
   rpc LockContent (LockContentRequest) returns (LockContentResponse);
   rpc ListRecentApprovals (ListRecentApprovalsRequest) returns (ListRecentApprovalsResponse);
+
+  // Browser hand-off for callers that cannot run a passkey ceremony themselves - the --export-conversations CLI
+  // on every platform (ADR-0020, Amendment 1; docs/plans/issue-165-phase3-export.md PR 3c). The caller files a
+  // pending request, the dashboard shows it and runs the ceremony, and the caller collects the one-operation
+  // authorization. The authorization is minted by the router when the caller collects it, so it never passes
+  // through the browser and is bound to the digest of exactly the request that was shown.
+  //
+  // Creates a pending approval request for one gated operation and returns its id and the dashboard URL that
+  // shows it. Bounded: at most a handful of requests are pending at once (RESOURCE_EXHAUSTED beyond that), and
+  // each lapses five minutes after it is created.
+  rpc CreateApprovalRequest (CreateApprovalRequestRequest) returns (CreateApprovalRequestResponse);
+
+  // Blocks until the request is approved, denied or expires, then returns the outcome. On approval the response
+  // carries a one-operation authorization bound to the request and the request is removed, so it is collected
+  // once. NOT_FOUND for an unknown, already collected or long expired id.
+  rpc WaitForApproval (WaitForApprovalRequest) returns (WaitForApprovalResponse);
+
+  // Lists the requests still waiting for a decision, oldest first, for the dashboard's approval view.
+  rpc ListPendingApprovals (ListPendingApprovalsRequest) returns (ListPendingApprovalsResponse);
+
+  // Starts the passkey ceremony for one pending request. The router binds the challenge to the request's own
+  // operation and digest, so the dashboard cannot approve anything other than what the request describes.
+  rpc BeginApproval (BeginApprovalRequest) returns (WebAuthnOptionsResponse);
+
+  // Completes the ceremony begun by BeginApproval and marks the request approved. FAILED_PRECONDITION when the
+  // request was already decided or has lapsed.
+  rpc FinishApproval (FinishApprovalRequest) returns (FinishApprovalResponse);
+
+  // Refuses a pending request. The waiting caller sees DENIED.
+  rpc DenyApproval (DenyApprovalRequest) returns (DenyApprovalResponse);
 }
 
 message GetPasskeyGateStatusRequest {}
@@ -659,6 +689,88 @@ message PasskeyApproval {
 message ListRecentApprovalsResponse {
   repeated PasskeyApproval approvals = 1;
 }
+
+// What an export approval request asks to do: the same filter and destination ExportConversationsRequest
+// carries, which the router hashes into the digest the approval is bound to (GatedOperation.ExportParameters).
+message ExportApprovalDetails {
+  google.protobuf.Timestamp from_utc = 1;
+  google.protobuf.Timestamp to_utc = 2;
+  optional string session_id = 3;
+  optional string harness = 4;
+  optional string provider = 5;
+  optional string model = 6;
+  // Absolute path of the zip, exactly as the export call will send it.
+  string destination_path = 7;
+}
+
+message CreateApprovalRequestRequest {
+  // The operation to approve. Only export exists today; a later gated operation adds a case.
+  oneof operation {
+    ExportApprovalDetails export = 1;
+  }
+}
+
+message CreateApprovalRequestResponse {
+  // Opaque id of the pending request; pass it to WaitForApproval.
+  string approval_id = 1;
+  // Where the operator approves it: the dashboard at the WebAuthn origin, opened on this request.
+  string dashboard_url = 2;
+  // When the request lapses if nobody decides it.
+  google.protobuf.Timestamp expires_at_utc = 3;
+}
+
+message WaitForApprovalRequest {
+  string approval_id = 1;
+}
+
+// How a pending approval request ended.
+enum ApprovalOutcome {
+  APPROVAL_OUTCOME_UNSPECIFIED = 0;
+  // The operator approved with a passkey; authorization_token is set.
+  APPROVAL_OUTCOME_APPROVED = 1;
+  // The operator refused it in the dashboard.
+  APPROVAL_OUTCOME_DENIED = 2;
+  // Nobody decided before it lapsed.
+  APPROVAL_OUTCOME_EXPIRED = 3;
+}
+
+message WaitForApprovalResponse {
+  ApprovalOutcome outcome = 1;
+  // One-operation authorization bound to the request's operation and digest. Set only when approved.
+  string authorization_token = 2;
+}
+
+message ListPendingApprovalsRequest {}
+
+message PendingApproval {
+  string approval_id = 1;
+  oneof operation {
+    ExportApprovalDetails export = 2;
+  }
+  google.protobuf.Timestamp created_at_utc = 3;
+  google.protobuf.Timestamp expires_at_utc = 4;
+}
+
+message ListPendingApprovalsResponse {
+  repeated PendingApproval approvals = 1;
+}
+
+message BeginApprovalRequest {
+  string approval_id = 1;
+}
+
+message FinishApprovalRequest {
+  string approval_id = 1;
+  string assertion_json = 2;
+}
+
+message FinishApprovalResponse {}
+
+message DenyApprovalRequest {
+  string approval_id = 1;
+}
+
+message DenyApprovalResponse {}
 
 // The Governance UI's System Settings window's "Adaptive Routing", "Shadow Judge", and "Transcription
 // Capture" rows (docs/router/self-organizing-classification-plan.md Phase T6,
@@ -1280,3 +1392,85 @@ message CostReconciliationStatusResponse {
   repeated ProviderReconciliationStatus providers = 1;
 }
 
+
+// Conversation export (#165 phase 3, docs/plans/issue-165-phase3-export.md PR 3b): the Sessions tab's Export
+// dialog. Its own service rather than a ManagementFacade method or an ExportUsageRollup change - exporting
+// captured conversation text is gated by a one-operation passkey authorization (ADR-0020) and writes a zip on
+// the router machine, neither of which belongs on the usage-rollup or provider-management surfaces. Mapped on
+// the same loopback TLS endpoint as the other admin services.
+service ConversationAdminService {
+  // The counts the Export dialog shows before the operator picks a destination: sessions and turns in the
+  // session store and the bytes their files occupy. Not gated - it carries no conversation text - and it never
+  // creates the store: a router that has not captured anything reports zeros.
+  rpc GetConversationExportSummary (GetConversationExportSummaryRequest) returns (ConversationExportSummaryResponse);
+
+  // Writes the conversations that match the filter to a new zip at destination_path on the router machine,
+  // streaming zero or more ExportProgress events and then exactly one ExportResult as the final message. The
+  // router consumes authorization_token (a one-operation passkey authorization bound to the SHA-256 of the
+  // filter and destination - see GatedOperation.ExportParameters) before touching any file, so an approval for
+  // one export cannot run another. Failures use standard gRPC status codes: UNAUTHENTICATED (missing, spent or
+  // mismatched authorization), FAILED_PRECONDITION (no passkey enrolled, an export already running, or too
+  // little free disk space) and INVALID_ARGUMENT (a destination that breaks the path rules, or a bad timestamp).
+  rpc ExportConversations (ExportConversationsRequest) returns (stream ExportConversationsEvent);
+}
+
+message GetConversationExportSummaryRequest {}
+
+message ConversationExportSummaryResponse {
+  // Sessions in the store (one encrypted file each).
+  int32 session_count = 1;
+  // Committed turns across those sessions.
+  int64 turn_count = 2;
+  // Committed bytes of the session files on disk (encrypted and compressed, so not the size of the export).
+  int64 bytes_on_disk = 3;
+}
+
+// Selects the turns to export. Every filter is optional and all that are set must match; the values are the same
+// ones the one-operation approval is bound to, so a client sends exactly what it asked the passkey to approve.
+message ExportConversationsRequest {
+  // Earliest and latest turn time to include (inclusive).
+  google.protobuf.Timestamp from_utc = 1;
+  google.protobuf.Timestamp to_utc = 2;
+  // An archive session id or a client session id.
+  optional string session_id = 3;
+  optional string harness = 4;
+  optional string provider = 5;
+  optional string model = 6;
+  // Absolute path of the zip to create on the router machine. Must not exist and must be outside the router's
+  // data directory.
+  string destination_path = 7;
+  // One-operation passkey authorization token (ADR-0020) bound to the export operation and this request's
+  // filter and destination. Optional on the wire; the router refuses the call without a valid one.
+  optional string authorization_token = 8;
+}
+
+// How far the export has got. Sent after each turn; a slow client may see fewer events than turns.
+message ExportProgress {
+  int32 turns_written = 1;
+  // Stored plaintext bytes of the bodies written so far, before the zip compresses them.
+  int64 bytes_written = 2;
+}
+
+// The finished export.
+message ExportResult {
+  // The zip's path on the router machine.
+  string path = 1;
+  int32 conversations = 2;
+  int32 turns = 3;
+  // Bodies recorded as missing rather than written.
+  int32 missing_bodies = 4;
+  // Turns that failed verification and were left out.
+  int32 corrupt_turns = 5;
+  // Sessions deleted (retention or Clear) before all their turns were written.
+  int32 incomplete_sessions = 6;
+  // Stored plaintext bytes of every body written, before the zip compresses them.
+  int64 body_bytes = 7;
+}
+
+// One message on the ExportConversations stream: zero or more progress events, then one result.
+message ExportConversationsEvent {
+  oneof event {
+    ExportProgress progress = 1;
+    ExportResult result = 2;
+  }
+}

@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Unicode;
 using TotallyHot.ArcRouter.Logging;
@@ -21,7 +22,31 @@ public static class SessionRecordCodec
     /// </summary>
     /// <param name="plaintext">Raw body bytes as received or relayed.</param>
     /// <returns>The Brotli stream of the obscured body.</returns>
-    public static byte[] ObscureAndCompress(ReadOnlySpan<byte> plaintext) => BrotliCompress(ObscureBytes(plaintext));
+    public static byte[] ObscureAndCompress(ReadOnlySpan<byte> plaintext) => Compress(ObscureBytes(plaintext));
+
+    /// <summary>
+    /// Obscures, hashes and compresses a body in one step. The hash is of the obscured plaintext, which is
+    /// the form the body is stored in, so it is what an export reads back and verifies; it is not a hash of
+    /// the compressed bytes or of the raw input.
+    /// </summary>
+    /// <param name="plaintext">Raw body bytes as received or relayed.</param>
+    /// <returns>
+    /// The Brotli stream, the SHA-256 of the obscured plaintext, the obscured plaintext's length, and whether
+    /// obscuring changed any byte.
+    /// </returns>
+    internal static (byte[] Compressed, byte[] Sha256, long Length, bool Obscured) ObscureCompressAndHash(
+        ReadOnlySpan<byte> plaintext)
+    {
+        var obscured = ObscureBytes(plaintext);
+        return (Compress(obscured), SHA256.HashData(obscured), obscured.Length, !obscured.AsSpan().SequenceEqual(plaintext));
+    }
+
+    /// <summary>
+    /// Brotli-compresses an already obscured body at the fastest level.
+    /// </summary>
+    /// <param name="obscured">The obscured plaintext.</param>
+    /// <returns>The Brotli stream.</returns>
+    internal static byte[] Compress(byte[] obscured) => BrotliCompress(obscured);
 
     /// <summary>
     /// Reverses the compression of <see cref="ObscureAndCompress"/>. Does not reverse secret obscuring.
@@ -38,7 +63,7 @@ public static class SessionRecordCodec
     /// </summary>
     /// <param name="input">Raw body bytes.</param>
     /// <returns>The body with matched secrets replaced and all other bytes unchanged.</returns>
-    private static byte[] ObscureBytes(ReadOnlySpan<byte> input)
+    internal static byte[] ObscureBytes(ReadOnlySpan<byte> input)
     {
         if (Utf8.IsValid(input))
         {

@@ -1,4 +1,5 @@
 using TotallyHot.ArcRouter.Proxy.Auth.Passkey;
+using TotallyHot.ArcRouter.Sessions.Export;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy.Auth.Passkey;
 
@@ -20,9 +21,10 @@ public sealed class OneOperationAuthorizationTableTests
     public void TryConsume_WrongBinding_FailsAndConsumes()
     {
         var table = new OneOperationAuthorizationTable();
-        var token = table.Issue(GatedOperation.Export, GatedOperation.ExportParameters());
+        var parameters = GatedOperation.ExportParameters(new ConversationExportFilter(), @"C:\exports\a.zip");
+        var token = table.Issue(GatedOperation.Export, parameters);
 
         Assert.False(table.TryConsume(token, GatedOperation.Import, GatedOperation.ImportParameters("abc")));
-        Assert.False(table.TryConsume(token, GatedOperation.Export, GatedOperation.ExportParameters()));
+        Assert.False(table.TryConsume(token, GatedOperation.Export, parameters));
     }
 }

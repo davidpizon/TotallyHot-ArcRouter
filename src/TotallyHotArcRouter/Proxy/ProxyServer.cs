@@ -304,6 +304,7 @@ public class ProxyServer : IAsyncDisposable, IDisposable
                         services.AddSingleton(passkeyGate.ApprovalLog);
                         services.AddSingleton(passkeyGate.CredentialStore);
                         services.AddSingleton(passkeyGate.Options);
+                        services.AddSingleton(passkeyGate.PendingApprovals);
                     }
 
                     // Same reasoning as the broadcaster: every optional admin feature's collaborators live

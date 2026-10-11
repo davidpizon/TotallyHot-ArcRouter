@@ -90,6 +90,8 @@ builder.Services.AddSingleton(sp => new ManagementTokenAdminStore(
 // Backs the Model Distribution / Cost Analytics history / Report Card / header ticker's real data. See
 // Services/UsageStore.cs.
 builder.Services.AddSingleton<UsageStore>();
+// Backs the Sessions tab's Export dialog (#165 phase 3). See Services/ConversationExportStore.cs.
+builder.Services.AddSingleton<ConversationExportStore>();
 
 var host = builder.Build();
 

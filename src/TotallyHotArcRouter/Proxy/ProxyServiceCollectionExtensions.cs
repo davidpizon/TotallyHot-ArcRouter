@@ -21,6 +21,7 @@ using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Router.TextGeneration;
 using TotallyHot.ArcRouter.Sessions;
+using TotallyHot.ArcRouter.Sessions.Export;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Transcripts;
 using TotallyHot.ArcRouter.Update;
@@ -327,6 +328,10 @@ internal static class ProxyServiceCollectionExtensions
         services.AddSingleton<ChallengeStore>();
         services.AddSingleton<ContentGrantTable>();
         services.AddSingleton<OneOperationAuthorizationTable>();
+        // Approval requests a caller without a browser (the --export-conversations command) files for the operator.
+        // Its dashboard address is the WebAuthn origin, the only place the ceremony can run.
+        services.AddSingleton(sp => new PendingApprovalTable(
+            new Uri($"https://localhost:{sp.GetRequiredService<IOptions<WebInterfaceOptions>>().Value.Port}")));
         services.AddSingleton<PasskeyApprovalLog>();
         services.AddSingleton<ContentGate>();
         services.AddSingleton<IWebAuthnCeremonyService>(sp => new WebAuthnCeremonyService(
@@ -402,7 +407,8 @@ internal static class ProxyServiceCollectionExtensions
                         OneOperationAuthorizations: sp.GetRequiredService<OneOperationAuthorizationTable>(),
                         ApprovalLog: sp.GetRequiredService<PasskeyApprovalLog>(),
                         CredentialStore: sp.GetRequiredService<IPasskeyCredentialStore>(),
-                        Options: sp.GetRequiredService<PasskeyOptions>()),
+                        Options: sp.GetRequiredService<PasskeyOptions>(),
+                        PendingApprovals: sp.GetRequiredService<PendingApprovalTable>()),
                     // Routes the inner Kestrel host's own logs (routing, endpoint dispatch, bind
                     // failures) through the same Serilog pipeline (console + file) the rest of the
                     // application uses - see ProxyServerDependencies.SerilogLogger's remarks. Read once
@@ -516,7 +522,17 @@ internal static class ProxyServiceCollectionExtensions
                     CostReconciliationAdmin = new CostReconciliationAdminDependencies(
                         Store: sp.GetRequiredService<IProviderCostReconciliationStore>(),
                         ReconciliationService: sp.GetRequiredService<CostReconciliationService>(),
-                        Reconcilers: sp.GetRequiredService<IReadOnlyList<IProviderCostReconciler>>())
+                        Reconcilers: sp.GetRequiredService<IReadOnlyList<IProviderCostReconciler>>()),
+
+                    // Backs the Sessions tab's Export dialog gRPC API (#165 phase 3). The store is the lazily
+                    // opened one capture writes to and the writer is the single shared instance, so the
+                    // export's single-flight rule holds across calls; the gate is the same singleton the
+                    // passkey service issues one-operation approvals from.
+                    ConversationAdmin = new ConversationAdminDependencies(
+                        Store: sp.GetRequiredService<Lazy<SessionStore>>(),
+                        Writer: sp.GetRequiredService<ConversationExportWriter>(),
+                        Gate: sp.GetRequiredService<ContentGate>(),
+                        Database: sp.GetRequiredService<TranscriptDatabase>())
                 }));
 
         return services;

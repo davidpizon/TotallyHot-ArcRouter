@@ -268,4 +268,80 @@ public sealed class PasskeyAdminStore : AdminStoreBase<IPasskeyAdminClient>
             throw;
         }
     }
+
+    /// <summary>
+    /// Gets the approval requests command-line callers have filed and nobody has decided, as of the last
+    /// <see cref="RefreshPendingApprovalsAsync"/>. Empty before one. The list is a snapshot: a request can lapse or
+    /// be decided from another tab after it was read, which the router then reports on approve or deny.
+    /// </summary>
+    public IReadOnlyList<PendingApprovalInfo> PendingApprovals { get; private set; } = [];
+
+    /// <summary>
+    /// Reads the pending approval requests (ADR-0020, Amendment 1). A failure is swallowed into the reachability
+    /// state, like <see cref="RefreshAsync"/>, and leaves the previous list in place.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    public Task RefreshPendingApprovalsAsync(CancellationToken cancellationToken = default)
+    {
+        return LoadGuardedAsync(
+            async ct => PendingApprovals = await Client.ListPendingApprovalsAsync(ct).ConfigureAwait(false),
+            "read the pending approval requests",
+            cancellationToken,
+            marksLoaded: false);
+    }
+
+    /// <summary>
+    /// Approves one pending request with a passkey: the router begins a ceremony bound to the request's own
+    /// operation and digest, the browser answers it with user verification, and the router marks the request
+    /// approved so the waiting command can collect its authorization. The dashboard never receives that
+    /// authorization. Refreshes the pending list afterwards.
+    /// </summary>
+    /// <param name="approvalId">The request's id from <see cref="PendingApprovals"/>.</param>
+    /// <param name="cancellationToken">Cancels the ceremony.</param>
+    /// <exception cref="GrpcAdminException">The request is no longer waiting, the router rejected the assertion, or it is unreachable.</exception>
+    /// <exception cref="WebAuthnCeremonyException">The browser ceremony was dismissed or failed.</exception>
+    public async Task ApprovePendingAsync(string approvalId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(approvalId);
+
+        try
+        {
+            var options = await Client.BeginApprovalAsync(approvalId, cancellationToken).ConfigureAwait(false);
+            var assertion = await _ceremony.GetAssertionAsync(options, cancellationToken).ConfigureAwait(false);
+            await Client.FinishApprovalAsync(approvalId, assertion, cancellationToken).ConfigureAwait(false);
+            RecordSuccess(marksLoaded: false);
+        }
+        catch (GrpcAdminException ex)
+        {
+            RecordFailure(exception: ex, description: "an approval of a pending request");
+            throw;
+        }
+
+        await RefreshPendingApprovalsAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Refuses one pending request; the command waiting on it stops with a denial and writes nothing. No passkey
+    /// is needed to say no. Refreshes the pending list afterwards.
+    /// </summary>
+    /// <param name="approvalId">The request's id from <see cref="PendingApprovals"/>.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <exception cref="GrpcAdminException">The request is no longer waiting, or the router is unreachable.</exception>
+    public async Task DenyPendingAsync(string approvalId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(approvalId);
+
+        try
+        {
+            await Client.DenyApprovalAsync(approvalId, cancellationToken).ConfigureAwait(false);
+            RecordSuccess(marksLoaded: false);
+        }
+        catch (GrpcAdminException ex)
+        {
+            RecordFailure(exception: ex, description: "a denial of a pending request");
+            throw;
+        }
+
+        await RefreshPendingApprovalsAsync(cancellationToken).ConfigureAwait(false);
+    }
 }

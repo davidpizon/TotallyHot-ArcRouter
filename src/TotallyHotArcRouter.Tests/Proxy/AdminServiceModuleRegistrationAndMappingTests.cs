@@ -14,6 +14,7 @@ using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Router.TextGeneration;
 using TotallyHot.ArcRouter.Sessions;
+using TotallyHot.ArcRouter.Sessions.Export;
 using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
@@ -37,7 +38,8 @@ public sealed class AdminServiceModuleRegistrationAndMappingTests
         (typeof(ClusterModelAdminDependencies), typeof(ClusterModelAdminGrpcService)),
         (typeof(LogRegModelAdminDependencies), typeof(LogRegModelAdminGrpcService)),
         (typeof(RouterSettingsAdminDependencies), typeof(RouterSettingsAdminGrpcService)),
-        (typeof(CostReconciliationAdminDependencies), typeof(CostReconciliationAdminGrpcService))
+        (typeof(CostReconciliationAdminDependencies), typeof(CostReconciliationAdminGrpcService)),
+        (typeof(ConversationAdminDependencies), typeof(ConversationAdminGrpcService))
     ];
 
     public static TheoryData<string> ModuleGroupNames()

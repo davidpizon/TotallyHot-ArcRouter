@@ -39,6 +39,7 @@ public sealed class DashboardTests
         ctx.Services.AddSingleton(new UpdateStore(channelProvider: unreachable));
         ctx.Services.AddSingleton(new CostReconciliationStore(channelProvider: unreachable));
         ctx.Services.AddSingleton(new ManagementTokenAdminStore(channelProvider: unreachable));
+        ctx.Services.AddSingleton(new ConversationExportStore(new FakeConversationAdminClient()));
         ctx.Services.AddSingleton(new ToastService());
         ctx.Services.AddSingleton<IClipboardService>(new FakeClipboardService());
         return ctx;
@@ -139,6 +140,66 @@ public sealed class DashboardTests
     }
 
     [Fact]
+    public async Task Approvals_button_opens_the_approval_view_and_Done_removes_it()
+    {
+        await using var ctx = NewContext();
+        var cut = ctx.Render<Dashboard>();
+
+        await cut.InvokeAsync(() => cut.Find("[data-testid='open-approvals']").Click());
+        cut.Markup.Should().Contain("Close approvals dialog");
+
+        await cut.InvokeAsync(() => cut.Find("[data-testid='approvals-done']").Click());
+
+        cut.Markup.Should().NotContain("Close approvals dialog");
+    }
+
+    [Fact]
+    public void A_link_with_an_approval_id_opens_the_approval_view_on_that_request()
+    {
+        // The link `--export-conversations` prints: the dashboard origin with ?approval=<id>.
+        var passkeys = new FakePasskeyAdminClient
+        {
+            Pending =
+            [
+                new PendingApprovalInfo("a1", new ConversationExportFilterInfo(), "/exports/out.zip",
+                    DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5))
+            ]
+        };
+        using var ctx = NewContext(passkeyClient: passkeys);
+        ctx.Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>()
+            .NavigateTo("/?approval=a1");
+
+        var cut = ctx.Render<Dashboard>();
+
+        cut.Markup.Should().Contain("Close approvals dialog");
+        cut.Find("[data-testid='approval-a1']").ClassList.Should().Contain("border-sky-500");
+    }
+
+    [Fact]
+    public async Task Closing_the_approval_view_opened_by_a_link_drops_the_id_from_the_address()
+    {
+        await using var ctx = NewContext();
+        var navigation = ctx.Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>();
+        navigation.NavigateTo("/?approval=a1");
+        var cut = ctx.Render<Dashboard>();
+
+        await cut.InvokeAsync(() => cut.Find("[data-testid='approvals-done']").Click());
+
+        cut.Markup.Should().NotContain("Close approvals dialog");
+        navigation.Uri.Should().NotContain("approval=");
+    }
+
+    [Fact]
+    public void An_address_without_an_approval_id_does_not_open_the_approval_view()
+    {
+        using var ctx = NewContext();
+
+        var cut = ctx.Render<Dashboard>();
+
+        cut.Markup.Should().NotContain("Close approvals dialog");
+    }
+
+    [Fact]
     public async Task Sessions_tab_shows_a_persisted_session_when_no_live_session_exists()
     {
         var client = new FakePersistedSessionsClient
@@ -185,6 +246,21 @@ public sealed class DashboardTests
         var store = grant is null ? new PersistedSessionStore(client) : new PersistedSessionStore(client, grant);
         await store.LoadAsync(TestContext.Current.CancellationToken);
         return store;
+    }
+
+    [Fact]
+    public async Task Sessions_tab_Export_button_opens_the_Export_dialog_and_closing_it_removes_it()
+    {
+        var store = await LoadedStoreAsync();
+        await using var ctx = NewContext(store);
+        var cut = ctx.Render<Dashboard>();
+        cut.FindAll("[data-testid='export-state']").Should().BeEmpty();
+
+        await cut.InvokeAsync(() => cut.Find("[data-testid='sessions-export']").Click());
+
+        cut.Find("[data-testid='export-state']").Should().NotBeNull();
+        await cut.InvokeAsync(() => cut.Find("button[aria-label='Close export dialog']").Click());
+        cut.FindAll("[data-testid='export-state']").Should().BeEmpty();
     }
 
     [Fact]

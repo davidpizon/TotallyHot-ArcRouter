@@ -286,3 +286,62 @@ On a named pipe, Windows reports the client's account, and the pipe's ACL limits
   - the format of enrolled-credential entries in the secret store;
   - the names of the enrollment pipe and socket, and their request format.
 - **Related:** [ADR-0012](0012-loopback-session-auth-and-token-in-secret-store.md), [ADR-0013](0013-name-constrained-local-ca-for-router-tls.md), [ADR-0014](0014-cross-platform-service-layout-and-secret-backend.md), [ADR-0015](0015-machine-scoped-protection-for-the-shared-secret-store.md), [ADR-0019](0019-store-conversation-text-in-encrypted-per-session-files.md), the [#165 plan](../plans/issue-165-export-import-history.md), the [#179 plan](../plans/issue-179-persisted-sessions-list-size.md), and [#176](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/176).
+
+## Amendment 1 (2026-10-10): the CLI hands export approval off to the dashboard
+
+**Status:** accepted. Amends the **macOS and Linux** bullet and the Windows `webauthn.dll` bullets of the Decision Outcome above, for the export command only. It does not change the chosen option, the credential rules, the origin rules, enrollment, or the router's checks on an assertion.
+
+### Why
+
+The Decision Outcome has the CLI refuse a gated operation on macOS and Linux, and on Windows 10 1809, and send the operator to the dashboard. That was written when the only gated CLI action was printing the management token. [#165](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/165) phase 3 adds `--export-conversations`, whose whole purpose is to run headless, so "go to the dashboard and do it there" would leave the CLI with nothing to do on two of the three platforms.
+
+David chose a hand-off (2026-10-10, [phase 3 plan](../plans/issue-165-phase3-export.md), decision 1): the command starts the export, the operator approves it in the dashboard with a passkey, and the command writes the zip afterwards. It is the same on every platform, and it needs no native WebAuthn library.
+
+### Decision
+
+- **The CLI hands the approval off to the dashboard on every platform.** `--export-conversations` no longer refuses on macOS and Linux, and it does not run a native ceremony on Windows either: the passkey ceremony always runs in the browser, where it already works everywhere. A native CLI ceremony stays a separate decision, as the Decision Outcome says.
+- **Scope.** This covers the export command, and the import command when phase 4 adds one. `--print-management-token` is unchanged: it still refuses and sends the operator to the dashboard.
+
+```mermaid
+sequenceDiagram
+    participant CLI as CLI (--export-conversations)
+    participant R as Router (loopback gRPC)
+    participant D as Dashboard (browser)
+    CLI->>R: CreateApprovalRequest(export, filter, destination), x-admin-token
+    R-->>CLI: approval id and dashboard URL
+    CLI->>CLI: print the URL
+    D->>R: ListPendingApprovals
+    R-->>D: destination and filter, as filed
+    D->>R: BeginApproval(id)
+    R-->>D: challenge bound to the request's own digest
+    D->>R: FinishApproval(id, assertion)
+    R->>R: verify the assertion, mark the request approved
+    CLI->>R: WaitForApproval(id)
+    R-->>CLI: one-operation authorization, minted now
+    CLI->>R: ExportConversations(filter, destination, authorization)
+    R-->>CLI: progress, then the result
+```
+
+- **The request is bound to the digest, and the browser cannot change it.** The router stores the filter and destination the CLI filed and hashes them with the same canonical encoding the dashboard's own export uses (`GatedOperation.ExportParameters`). The dashboard sends only the request id; the router derives the ceremony's operation and digest from the stored request. An approval for one request cannot be turned into another.
+- **The authorization never passes through the browser.** The ceremony marks the request approved. The router mints the one-operation authorization when the CLI collects it with `WaitForApproval`, so it lives two minutes from the moment the CLI can use it. It is bound to that digest, and the export RPC refuses any other filter or destination. A decision is collected once.
+- **Limits.** At most 16 requests are pending, and each lapses five minutes after it is filed. The table is in memory, so a router restart drops every request, which only means the command is run again. A request that nobody approves writes nothing.
+- **The CLI authenticates to loopback gRPC with `x-admin-token`, taken from the elevated secret-store path.** It does what `--print-management-token` does: `EnsureServiceDataDirectory` fails closed unless the account can open the service's protected data directory ([ADR-0015](0015-machine-scoped-protection-for-the-shared-secret-store.md): `SYSTEM` and administrators on Windows, the service account or root elsewhere), then `ManagementAccessToken.GetOrCreate()` loads the token from the secret store ([ADR-0012](0012-loopback-session-auth-and-token-in-secret-store.md)). It does not call the gated `GetManagementToken` RPC. No new local channel, so no new ADR: the elevated pipe and socket above exist to mint enrollment codes, and this reuses neither.
+- **The CLI reads no session file.** It is a gRPC client of the running router, so there is one export code path and the gate cannot be bypassed.
+
+### Threat analysis
+
+- **Another local app files a request.** It needs the management token, which only an elevated account can read from the store, or a dashboard session. An application that holds one can already call every admin RPC, including `ListPendingApprovals`. What it can add is a pending request; nothing is written until the operator approves it with a passkey. The dashboard shows the destination and filter in full, and the approval is bound to them, so the app cannot widen it after the fact.
+- **Flooding.** An app that files requests until the table is full only stops further requests for up to five minutes. That is the denial of service this ADR already accepts for the challenge bucket and the 32-entry challenge store. Once the table is full the CLI is refused with a clear message; nothing is evicted, so a request the operator is reading is never replaced.
+- **A misleading request.** A request with a plausible destination is a social-engineering risk the passkey cannot remove: the gesture proves a person approved, not that the person read the path. The view shows the destination and filter, nothing else, so there is little to hide behind.
+- **Collecting someone else's authorization.** Any holder of the management token can call `WaitForApproval` for an id it lists. What it would collect is an authorization for that exact filter and destination, so the most it can do is run the export the operator approved, to the path the operator approved. The legitimate CLI then fails with "destination exists" and writes nothing more. That reveals no new data and creates no new location.
+- **The token stays in the router.** The CLI receives the authorization for one call, bound to one digest. The browser never receives it.
+- **The management token.** The CLI reads it with the access that already lets an administrator read the whole secret store, and sends it only to `https://localhost:<web port>` over TLS, after checking the certificate subject and the loopback host as the dashboard's own clients do. No new disclosure channel appears, and a caller without that access still cannot get it, because the gated RPC is unchanged.
+- **Not covered.** If a malicious process can drive the operator's browser, it can approve its own request. That is the same exposure as the dashboard's own export; the user-verification gesture is the boundary, as above.
+
+### Consequences
+
+- Good, because the export CLI works on macOS, Linux and Windows 10 1809 as well as newer Windows, with no new native dependency.
+- Good, because the passkey ceremony, the origin check and the assertion checks stay in one place, the router.
+- Bad, because the operator needs a browser on the router machine to approve a CLI export. A headless server has nowhere to approve, which is a limit of the dashboard origin, not of this amendment.
+- Bad, because the dashboard has to be opened on the printed link; a request nobody opens lapses after five minutes.
+- The Consequences above that say the CLI cannot run a ceremony on Windows 10 1809, macOS and Linux no longer limit export: the CLI does not need one. They still describe the other gated CLI actions.

@@ -10,6 +10,7 @@ limits, unrestored artifacts). Those two files are the source of truth; this pag
 | What the product is, how to install (MSI / tarball / GHCR), routing headers, license | [`README.md`](../README.md) |
 | Router quick start, Docker, **how to run tests** | [`src/README.md`](../src/README.md) |
 | CodeRouterBench tables, sync, known fidelity limit, unrestored `outputs/` | [`data/README.md`](../data/README.md) |
+| Exporting captured conversations from the command line (`--export-conversations`): options, the browser approval, **exit codes** | [`README.md`](../README.md#exporting-conversations), [ADR-0020 Amendment 1](adr/0020-require-passkey-verification-for-conversation-content.md#amendment-1-2026-10-10-the-cli-hands-export-approval-off-to-the-dashboard) |
 | Unfinished work only | [`src/PLAN.md`](../src/PLAN.md) |
 | Index of living router docs | [`README.md`](README.md) |
 | Architecture decisions | [`adr/README.md`](adr/README.md) |

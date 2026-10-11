@@ -2,6 +2,7 @@ using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Text.Json;
+using TotallyHot.ArcRouter.Sessions.Export;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Proxy.Auth.Passkey;
@@ -16,10 +17,28 @@ namespace TotallyHot.ArcRouter.Proxy.Auth.Passkey;
 /// <see cref="Management.ManagementTokenAdminGrpcService"/>, only when a management token provider and the
 /// passkey gate collaborators are configured.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>Browser hand-off (ADR-0020, Amendment 1).</b> A caller that cannot run a passkey ceremony - the
+/// <c>--export-conversations</c> command, on every platform - files a request with
+/// <see cref="CreateApprovalRequest"/>, the dashboard lists it (<see cref="ListPendingApprovals"/>) and runs the
+/// ceremony for it (<see cref="BeginApproval"/>, <see cref="FinishApproval"/>) or refuses it
+/// (<see cref="DenyApproval"/>), and the caller collects the outcome with <see cref="WaitForApproval"/>. The
+/// router derives the ceremony's operation and digest from the stored request, never from the dashboard's
+/// call, so the browser can approve only what it was shown. The one-operation authorization is minted when the
+/// caller collects it, not when the operator approves: it never passes through the browser, and its short
+/// lifetime starts when the caller can use it.
+/// </para>
+/// </remarks>
 public sealed class PasskeyAdminGrpcService : Contract.PasskeyAdminService.PasskeyAdminServiceBase
 {
     private const string OutcomeSucceeded = "succeeded";
     private const string OutcomeFailed = "failed";
+    private const string OutcomeDenied = "denied";
+
+    /// <summary>Operator-facing detail when an approval request is unknown, already decided, or has lapsed.</summary>
+    private const string NoLongerWaitingDetail =
+        "This approval request is no longer waiting: it was already decided, has lapsed, or does not exist.";
 
     private readonly ContentGate _contentGate;
     private readonly EnrollmentCodeService _enrollmentCodes;
@@ -29,6 +48,7 @@ public sealed class PasskeyAdminGrpcService : Contract.PasskeyAdminService.Passk
     private readonly PasskeyApprovalLog _approvalLog;
     private readonly IPasskeyCredentialStore _credentialStore;
     private readonly PasskeyOptions _options;
+    private readonly PendingApprovalTable _pendingApprovals;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<PasskeyAdminGrpcService> _logger;
 
@@ -41,6 +61,7 @@ public sealed class PasskeyAdminGrpcService : Contract.PasskeyAdminService.Passk
     /// <param name="approvalLog">Receives one entry per approval or refusal.</param>
     /// <param name="credentialStore">Lists enrolled credentials for the status and list RPCs.</param>
     /// <param name="options">Supplies the content-grant lifetime reported in grant responses.</param>
+    /// <param name="pendingApprovals">Holds the requests a caller without a browser has filed for the operator to approve.</param>
     /// <param name="timeProvider">Clock for timestamps and expiries; defaults to <see cref="TimeProvider.System"/>.</param>
     /// <param name="logger">Records gate decisions. Optional so tests can omit it.</param>
     public PasskeyAdminGrpcService(
@@ -52,9 +73,11 @@ public sealed class PasskeyAdminGrpcService : Contract.PasskeyAdminService.Passk
         PasskeyApprovalLog approvalLog,
         IPasskeyCredentialStore credentialStore,
         PasskeyOptions options,
+        PendingApprovalTable pendingApprovals,
         TimeProvider? timeProvider = null,
         ILogger<PasskeyAdminGrpcService>? logger = null)
     {
+        ArgumentNullException.ThrowIfNull(pendingApprovals);
         ArgumentNullException.ThrowIfNull(contentGate);
         ArgumentNullException.ThrowIfNull(enrollmentCodes);
         ArgumentNullException.ThrowIfNull(ceremonies);
@@ -71,6 +94,7 @@ public sealed class PasskeyAdminGrpcService : Contract.PasskeyAdminService.Passk
         _approvalLog = approvalLog;
         _credentialStore = credentialStore;
         _options = options;
+        _pendingApprovals = pendingApprovals;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger ?? NullLogger<PasskeyAdminGrpcService>.Instance;
     }
@@ -263,6 +287,158 @@ public sealed class PasskeyAdminGrpcService : Contract.PasskeyAdminService.Passk
 
         return Task.FromResult(response);
     }
+
+    /// <inheritdoc/>
+    public override Task<Contract.CreateApprovalRequestResponse> CreateApprovalRequest(
+        Contract.CreateApprovalRequestRequest request,
+        ServerCallContext context)
+    {
+        return Guarded(() =>
+        {
+            // Fails fast with the enrollment message instead of leaving the caller waiting on an approval that
+            // no dashboard could ever give.
+            _contentGate.EnsureEnrolled();
+
+            if (request.OperationCase != Contract.CreateApprovalRequestRequest.OperationOneofCase.Export)
+                throw new RpcException(new Status(StatusCode.InvalidArgument,
+                    "The approval request names no supported operation."));
+
+            var details = request.Export;
+            if (string.IsNullOrWhiteSpace(details.DestinationPath))
+                throw new RpcException(new Status(StatusCode.InvalidArgument,
+                    "An export approval request needs a destination path."));
+
+            var pending = _pendingApprovals.CreateExport(
+                ConversationExportWire.ToFilter(details), details.DestinationPath);
+            _logger.LogInformation("Approval requested for operation {Operation}", pending.Operation);
+            return new Contract.CreateApprovalRequestResponse
+            {
+                ApprovalId = pending.Id,
+                DashboardUrl = _pendingApprovals.DashboardUrlFor(pending.Id),
+                ExpiresAtUtc = Timestamp.FromDateTimeOffset(pending.ExpiresAtUtc),
+            };
+        });
+    }
+
+    /// <inheritdoc/>
+    public override async Task<Contract.WaitForApprovalResponse> WaitForApproval(
+        Contract.WaitForApprovalRequest request,
+        ServerCallContext context)
+    {
+        _contentGate.EnsureEnrolled();
+
+        var decision = await _pendingApprovals.WaitAsync(request.ApprovalId, context.CancellationToken)
+            .ConfigureAwait(false)
+            ?? throw new RpcException(new Status(StatusCode.NotFound, NoLongerWaitingDetail));
+
+        var response = new Contract.WaitForApprovalResponse
+        {
+            Outcome = decision.Outcome switch
+            {
+                PendingApprovalOutcome.Approved => Contract.ApprovalOutcome.Approved,
+                PendingApprovalOutcome.Denied => Contract.ApprovalOutcome.Denied,
+                _ => Contract.ApprovalOutcome.Expired,
+            },
+        };
+
+        if (decision.Outcome == PendingApprovalOutcome.Approved)
+        {
+            // Re-checked at hand-off: the last passkey may have been removed since the operator approved.
+            _contentGate.EnsureEnrolled();
+            response.AuthorizationToken = _oneOperationAuthorizations.Issue(
+                decision.Request.Operation, decision.Request.Parameters);
+        }
+
+        _logger.LogInformation("Approval for operation {Operation} collected with outcome {Outcome}",
+            decision.Request.Operation, decision.Outcome);
+        return response;
+    }
+
+    /// <inheritdoc/>
+    public override Task<Contract.ListPendingApprovalsResponse> ListPendingApprovals(
+        Contract.ListPendingApprovalsRequest request,
+        ServerCallContext context)
+    {
+        var response = new Contract.ListPendingApprovalsResponse();
+        foreach (var pending in _pendingApprovals.ListPending())
+        {
+            response.Approvals.Add(new Contract.PendingApproval
+            {
+                ApprovalId = pending.Id,
+                Export = ConversationExportWire.ToApprovalDetails(pending.Filter, pending.DestinationPath),
+                CreatedAtUtc = Timestamp.FromDateTimeOffset(pending.CreatedAtUtc),
+                ExpiresAtUtc = Timestamp.FromDateTimeOffset(pending.ExpiresAtUtc),
+            });
+        }
+
+        return Task.FromResult(response);
+    }
+
+    /// <inheritdoc/>
+    public override Task<Contract.WebAuthnOptionsResponse> BeginApproval(
+        Contract.BeginApprovalRequest request,
+        ServerCallContext context)
+    {
+        return Guarded(() =>
+        {
+            _contentGate.EnsureEnrolled();
+
+            // Operation and digest come from the stored request: the browser cannot choose what it approves.
+            var pending = RequirePending(request.ApprovalId);
+            return new Contract.WebAuthnOptionsResponse
+            {
+                OptionsJson = _ceremonies.BeginAssertion(pending.Operation, pending.Parameters)
+            };
+        });
+    }
+
+    /// <inheritdoc/>
+    public override Task<Contract.FinishApprovalResponse> FinishApproval(
+        Contract.FinishApprovalRequest request,
+        ServerCallContext context)
+    {
+        return Guarded(() =>
+        {
+            _contentGate.EnsureEnrolled();
+
+            var pending = RequirePending(request.ApprovalId);
+            var credentialName = RunCeremony(
+                () => _ceremonies.FinishAssertion(request.AssertionJson, pending.Operation, pending.Parameters),
+                operation: pending.Operation,
+                credentialName: string.Empty);
+
+            // A second dashboard, a denial, or the request lapsing during the ceremony can win the race.
+            if (!_pendingApprovals.TryApprove(pending.Id, credentialName))
+                throw new RpcException(new Status(StatusCode.FailedPrecondition, NoLongerWaitingDetail));
+
+            _approvalLog.Record(pending.Operation, credentialName, _timeProvider.GetUtcNow(), OutcomeSucceeded);
+            _logger.LogInformation("Passkey approved pending operation {Operation} with {CredentialName}",
+                pending.Operation, credentialName);
+            return new Contract.FinishApprovalResponse();
+        });
+    }
+
+    /// <inheritdoc/>
+    public override Task<Contract.DenyApprovalResponse> DenyApproval(
+        Contract.DenyApprovalRequest request,
+        ServerCallContext context)
+    {
+        var pending = _pendingApprovals.TryGetPending(request.ApprovalId);
+        if (pending is null || !_pendingApprovals.TryDeny(pending.Id))
+            throw new RpcException(new Status(StatusCode.NotFound, NoLongerWaitingDetail));
+
+        _approvalLog.Record(pending.Operation, string.Empty, _timeProvider.GetUtcNow(), OutcomeDenied);
+        _logger.LogInformation("Operator denied pending operation {Operation}", pending.Operation);
+        return Task.FromResult(new Contract.DenyApprovalResponse());
+    }
+
+    /// <summary>Returns the open request with this id, or throws the refusal the approval RPCs share.</summary>
+    /// <param name="approvalId">The request's id.</param>
+    /// <returns>The request, still waiting for a decision.</returns>
+    /// <exception cref="RpcException">With <see cref="StatusCode.NotFound"/> when it is unknown, decided or lapsed.</exception>
+    private PendingApprovalRequest RequirePending(string approvalId) =>
+        _pendingApprovals.TryGetPending(approvalId)
+        ?? throw new RpcException(new Status(StatusCode.NotFound, NoLongerWaitingDetail));
 
     /// <summary>
     /// Runs <paramref name="body"/> and maps <see cref="PasskeyGateException"/> onto the

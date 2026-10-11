@@ -167,7 +167,7 @@ internal static class ShredConversationsCommand
 
             // The wrapped session keys and turn positions are not text, but with the files and master key
             // gone they are meaningless, and an uninstall should leave no trace of what sessions existed.
-            foreach (var table in new[] { "session_turns", "session_files" })
+            foreach (var table in new[] { "session_bodies", "session_turns", "session_files" })
             {
                 using var present = connection.CreateCommand();
                 present.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $name;";
