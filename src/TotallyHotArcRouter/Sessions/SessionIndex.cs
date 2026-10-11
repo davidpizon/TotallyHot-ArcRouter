@@ -289,15 +289,16 @@ public sealed class SessionIndex
     /// </summary>
     /// <remarks>
     /// The turn's body hashes commit in the same transaction, and the session's <c>session_sha256</c> is
-    /// recomputed from every body hash of the session. The checksum is the SHA-256 of, for each turn in
-    /// <c>turn_sequence</c> order, the turn's 16-byte archive id (<see cref="Guid.TryWriteBytes(Span{byte})"/>
+    /// advanced by one hash: it is a chain, <c>H(n) = SHA-256(H(n-1) || turn record)</c> with <c>H(0)</c> 32 zero
+    /// bytes, where a turn record is the turn's 16-byte archive id (<see cref="Guid.TryWriteBytes(Span{byte})"/>
     /// layout) and then, for each exchange kind in the fixed order <see cref="SessionBodyKind.ClientRequest"/>,
     /// <see cref="SessionBodyKind.ClientResponse"/>, <see cref="SessionBodyKind.ProviderRequest"/>,
     /// <see cref="SessionBodyKind.ProviderResponse"/>, one byte for the kind and the body's 32-byte SHA-256,
-    /// or 32 zero bytes when the body is missing or was never written. Metadata, extracts and every timestamp
-    /// are excluded, so re-importing a session cannot change it. A session with a turn that has no body hashes
-    /// at all (captured before they existed) keeps a <see langword="null"/> checksum until
-    /// <see cref="ReplaceBodyHashes"/> backfills it.
+    /// or 32 zero bytes when the body is missing or was never written. An append therefore costs one hash however
+    /// long the session is, and the value depends only on the turns' ids and bodies in order. Metadata, extracts
+    /// and every timestamp are excluded, so re-importing a session cannot change it. A session with a turn that
+    /// has no body hashes at all (captured before they existed) keeps a <see langword="null"/> checksum until
+    /// <see cref="ReplaceBodyHashes"/> backfills it, which folds every turn through the same chain.
     /// </remarks>
     /// <param name="turn">The turn's row; its sequence must equal the session's current turn count.</param>
     /// <param name="bodies">The hashes of every body the turn wrote, including metadata and extracts.</param>
@@ -308,6 +309,8 @@ public sealed class SessionIndex
 
         using var connection = _database.OpenConnection();
         using var transaction = connection.BeginTransaction();
+
+        var checksum = NextChecksum(connection, transaction, turn, bodies);
 
         using (var insert = connection.CreateCommand())
         {
@@ -337,10 +340,12 @@ public sealed class SessionIndex
                                  SET committed_length = $end,
                                      committed_frames = $firstPlusCount,
                                      turn_count = turn_count + 1,
+                                     session_sha256 = $sha,
                                      last_turn_at_utc = CASE WHEN last_turn_at_utc IS NULL OR last_turn_at_utc < $created
                                                              THEN $created ELSE last_turn_at_utc END
                                  WHERE archive_session_id = $session AND turn_count = $seq;
                                  """;
+            update.Parameters.AddWithValue("$sha", checksum is null ? DBNull.Value : checksum);
             update.Parameters.AddWithValue("$end", turn.EndOffset);
             update.Parameters.AddWithValue("$firstPlusCount", turn.FirstFrameOrdinal + turn.FrameCount);
             update.Parameters.AddWithValue("$created", Format(turn.CreatedAtUtc));
@@ -354,8 +359,76 @@ public sealed class SessionIndex
         }
 
         InsertBodies(connection, transaction, bodies);
-        UpdateSessionSha256(connection, transaction, turn.ArchiveSessionId);
         transaction.Commit();
+    }
+
+    /// <summary>
+    /// Computes the session checksum after <paramref name="turn"/> by chaining it onto the stored one, so an append
+    /// costs one hash however long the session is.
+    /// </summary>
+    /// <param name="connection">The open connection.</param>
+    /// <param name="transaction">The commit's transaction, which the read joins.</param>
+    /// <param name="turn">The turn being committed.</param>
+    /// <param name="bodies">The hashes of every body the turn wrote.</param>
+    /// <returns>
+    /// The new checksum, or <see langword="null"/> when an earlier turn has no body hashes (the session predates
+    /// them), which stays <see langword="null"/> until a backfill.
+    /// </returns>
+    private static byte[]? NextChecksum(
+        SqliteConnection connection, SqliteTransaction transaction, SessionTurnRow turn, IReadOnlyList<SessionBodyHashRow> bodies)
+    {
+        byte[]? previous;
+        using (var read = connection.CreateCommand())
+        {
+            read.Transaction = transaction;
+            read.CommandText = "SELECT turn_count, session_sha256 FROM session_files WHERE archive_session_id = $id;";
+            read.Parameters.AddWithValue("$id", turn.ArchiveSessionId.ToString("D"));
+            using var reader = read.ExecuteReader();
+
+            // An unknown session fails the update that follows, with the usual message.
+            if (!reader.Read()) return null;
+
+            previous = reader.GetInt32(0) == 0 ? new byte[HashLength] : reader.IsDBNull(1) ? null : (byte[])reader["session_sha256"];
+        }
+
+        if (previous is null) return null;
+
+        var slots = new SessionBodyHashRow?[ExchangeKindCount];
+        foreach (var body in bodies)
+        {
+            if ((int)body.Kind is >= 1 and <= ExchangeKindCount) slots[(int)body.Kind - 1] = body;
+        }
+
+        return ChainTurn(previous, turn.ArchiveTurnId, slots);
+    }
+
+    /// <summary>
+    /// Folds one turn into the running session checksum: SHA-256 of the previous checksum, the turn's 16-byte id,
+    /// and for each exchange kind one byte for the kind and the body's 32-byte SHA-256, or 32 zero bytes when the
+    /// body is missing or was never written.
+    /// </summary>
+    /// <param name="previous">The checksum before this turn (32 zero bytes for the first turn).</param>
+    /// <param name="archiveTurnId">The turn's archive id.</param>
+    /// <param name="slots">The turn's exchange body rows by kind order, with null for a kind it does not have.</param>
+    /// <returns>The checksum after this turn.</returns>
+    private static byte[] ChainTurn(byte[] previous, Guid archiveTurnId, SessionBodyHashRow?[] slots)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        Span<byte> id = stackalloc byte[16];
+        Span<byte> kindByte = stackalloc byte[1];
+        Span<byte> zero = stackalloc byte[HashLength];
+        hash.AppendData(previous);
+        archiveTurnId.TryWriteBytes(id);
+        hash.AppendData(id);
+        for (var i = 0; i < ExchangeKindCount; i++)
+        {
+            kindByte[0] = (byte)(i + 1);
+            hash.AppendData(kindByte);
+            if (slots[i] is { Missing: false, Sha256: { Length: HashLength } digest }) hash.AppendData(digest);
+            else hash.AppendData(zero);
+        }
+
+        return hash.GetHashAndReset();
     }
 
     /// <summary>
@@ -540,19 +613,19 @@ public sealed class SessionIndex
             while (reader.Read()) turnIds.Add(Guid.Parse(reader.GetString(0)));
         }
 
-        var byTurn = new Dictionary<Guid, SessionBodyHashRow[]>();
+        var byTurn = new Dictionary<Guid, SessionBodyHashRow?[]>();
         foreach (var row in ListBodies(connection, transaction, archiveSessionId))
         {
             if ((int)row.Kind is < 1 or > ExchangeKindCount)
             {
                 // Metadata and extracts are not part of the checksum, but they count as "this turn has hashes".
-                byTurn.TryAdd(row.ArchiveTurnId, new SessionBodyHashRow[ExchangeKindCount]);
+                byTurn.TryAdd(row.ArchiveTurnId, new SessionBodyHashRow?[ExchangeKindCount]);
                 continue;
             }
 
             if (!byTurn.TryGetValue(row.ArchiveTurnId, out var slots))
             {
-                slots = new SessionBodyHashRow[ExchangeKindCount];
+                slots = new SessionBodyHashRow?[ExchangeKindCount];
                 byTurn[row.ArchiveTurnId] = slots;
             }
 
@@ -562,31 +635,8 @@ public sealed class SessionIndex
         byte[]? checksum = null;
         if (turnIds.TrueForAll(byTurn.ContainsKey))
         {
-            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            Span<byte> id = stackalloc byte[16];
-            Span<byte> kindByte = stackalloc byte[1];
-            Span<byte> zero = stackalloc byte[HashLength];
-            foreach (var turnId in turnIds)
-            {
-                turnId.TryWriteBytes(id);
-                hash.AppendData(id);
-                var slots = byTurn[turnId];
-                for (var i = 0; i < ExchangeKindCount; i++)
-                {
-                    kindByte[0] = (byte)(i + 1);
-                    hash.AppendData(kindByte);
-                    if (slots[i] is { Missing: false, Sha256: { Length: HashLength } digest })
-                    {
-                        hash.AppendData(digest);
-                    }
-                    else
-                    {
-                        hash.AppendData(zero);
-                    }
-                }
-            }
-
-            checksum = hash.GetHashAndReset();
+            checksum = new byte[HashLength];
+            foreach (var turnId in turnIds) checksum = ChainTurn(checksum, turnId, byTurn[turnId]);
         }
 
         using var update = connection.CreateCommand();

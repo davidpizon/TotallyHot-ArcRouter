@@ -42,6 +42,13 @@ public sealed class ConversationExportWriter
     public const int SchemaVersion = 1;
 
     private const long MinimumReserveBytes = 1L << 30;
+
+    // Worst-case allowances for the free-space check. A stored Deflate block adds 5 bytes per 64 KiB, each entry
+    // costs a local header and a central-directory record, and every body has a line in the manifest.
+    private const long EntryOverheadBytes = 768;
+    private const long StoredBlockBytes = 65535;
+    private const long TurnLineBytes = 4096;
+    private const long ScratchReserveBytes = 64L << 20;
     private const int CopyBufferBytes = 80 * 1024;
     private const long MaxMetadataBytes = 1024 * 1024;
 
@@ -132,7 +139,8 @@ public sealed class ConversationExportWriter
         {
             var destination = ValidateDestination(store, path);
             var plan = Plan(store, filter, ct);
-            EnsureFreeSpace(destination, plan.Sum(session => session.BodyBytes));
+            EnsureFreeSpace(destination, plan.Sum(session => session.ZipBytes));
+            EnsureScratchSpace(store, plan.Sum(session => session.ScratchBytes));
             return Write(store, filter, plan, destination, progress, ct);
         }
         finally
@@ -235,21 +243,40 @@ public sealed class ConversationExportWriter
     }
 
     /// <summary>
-    /// Refuses the export unless the volume has room for every body plus the larger of 1 GiB and 10% of the
-    /// volume. The body total is an upper bound, because the zip compresses.
+    /// Refuses the export unless the volume has room for the zip's worst-case size plus the larger of 1 GiB and
+    /// 10% of the volume. The estimate counts Deflate's worst-case expansion and each entry's zip and manifest
+    /// overhead, so it is an upper bound even for many small turns.
     /// </summary>
     /// <param name="destination">The destination, whose volume is checked.</param>
-    /// <param name="bodyBytes">The sum of the stored plaintext lengths to be written.</param>
+    /// <param name="zipBytes">The worst-case size of the zip to be written.</param>
     /// <exception cref="ConversationExportException">When the volume is too full.</exception>
-    private void EnsureFreeSpace(string destination, long bodyBytes)
+    private void EnsureFreeSpace(string destination, long zipBytes)
     {
         var (free, total) = _volumeSpace(destination);
         var reserve = Math.Max(MinimumReserveBytes, total / 10);
-        if (free < bodyBytes + reserve)
+        if (free < zipBytes + reserve)
         {
             throw new ConversationExportException(
                 ConversationExportFailure.InsufficientDiskSpace,
                 "The destination volume does not have enough free space for this export.");
+        }
+    }
+
+    /// <summary>
+    /// Refuses the export unless the session folder's volume has room for the scratch file that collects
+    /// <c>turns.jsonl</c>. That folder can be on a different volume from the destination.
+    /// </summary>
+    /// <param name="store">The store whose folder holds the scratch file.</param>
+    /// <param name="scratchBytes">The estimated size of the scratch file.</param>
+    /// <exception cref="ConversationExportException">When the volume is too full.</exception>
+    private void EnsureScratchSpace(SessionStore store, long scratchBytes)
+    {
+        var (free, _) = _volumeSpace(store.Folder);
+        if (free < scratchBytes + ScratchReserveBytes)
+        {
+            throw new ConversationExportException(
+                ConversationExportFailure.InsufficientDiskSpace,
+                "The router's data volume does not have enough free space for this export's working file.");
         }
     }
 
@@ -290,7 +317,7 @@ public sealed class ConversationExportWriter
             // Only the total is kept: the hash rows are read again, one session at a time, while that session is
             // written, so memory does not grow with the number of sessions in the export.
             var verified = false;
-            var bodyBytes = 0L;
+            var zipBytes = turns.Count * TurnLineBytes;
             if (store.HasBodyHashes(session.ArchiveSessionId) || store.BackfillBodyHashes(session.ArchiveSessionId))
             {
                 verified = true;
@@ -300,12 +327,20 @@ public sealed class ConversationExportWriter
                 {
                     foreach (var kind in ExchangeKinds)
                     {
-                        if (hashes.TryGetValue((turn.ArchiveTurnId, kind), out var row)) bodyBytes += row.Length;
+                        if (hashes.TryGetValue((turn.ArchiveTurnId, kind), out var row))
+                        {
+                            zipBytes += row.Length + (row.Length / StoredBlockBytes + 1) * 5 + EntryOverheadBytes;
+                        }
                     }
                 }
             }
+            else
+            {
+                // No plaintext lengths exist for a session that could not be hashed; its stored size is the best estimate.
+                zipBytes += session.CommittedLength;
+            }
 
-            plan.Add(new PlannedSession(session, turns, verified, bodyBytes));
+            plan.Add(new PlannedSession(session, turns, verified, zipBytes, turns.Count * TurnLineBytes));
         }
 
         return plan;
@@ -968,12 +1003,14 @@ public sealed class ConversationExportWriter
     /// <param name="Row">The session's index row.</param>
     /// <param name="Turns">The selected turns in order.</param>
     /// <param name="Verified">Whether stored body hashes exist for the session, so its turns can be verified.</param>
-    /// <param name="BodyBytes">The sum of the selected turns' exchange body lengths, for the free-space check.</param>
+    /// <param name="ZipBytes">The worst-case size of this session's part of the zip, for the free-space check.</param>
+    /// <param name="ScratchBytes">The estimated size of this session's lines in the scratch file.</param>
     private sealed record PlannedSession(
         SessionFileRow Row,
         List<SessionTurnRow> Turns,
         bool Verified,
-        long BodyBytes);
+        long ZipBytes,
+        long ScratchBytes);
 
     /// <summary>One body written to the zip, or recorded as missing.</summary>
     /// <param name="Path">The entry name, or <see langword="null"/> for a missing body.</param>

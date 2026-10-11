@@ -106,11 +106,11 @@ public sealed class SessionBodyHashTests : IDisposable
         Store.AppendTurn(sessionId, "client-1", first);
         Store.AppendTurn(sessionId, "client-1", second);
 
-        using var expected = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        AppendExpected(expected, first.ArchiveTurnId, "req-1", "res-1", null, null);
-        AppendExpected(expected, second.ArchiveTurnId, "req-2", null, "preq-2", null);
+        var expected = new byte[32];
+        expected = ExpectedChain(expected, first.ArchiveTurnId, "req-1", "res-1", null, null);
+        expected = ExpectedChain(expected, second.ArchiveTurnId, "req-2", null, "preq-2", null);
 
-        Assert.Equal(expected.GetHashAndReset(), Store.GetSessionSha256(sessionId));
+        Assert.Equal(expected, Store.GetSessionSha256(sessionId));
         Assert.Equal(Store.GetSessionSha256(sessionId), Store.ListSessions().Single().SessionSha256);
     }
 
@@ -167,6 +167,7 @@ public sealed class SessionBodyHashTests : IDisposable
         var sessionId = Store.ResolveArchiveSessionId("client-1");
         Store.AppendTurn(sessionId, "client-1", Turn("a"u8.ToArray(), "b"u8.ToArray()));
         _fixture.Execute("DELETE FROM session_bodies;");
+        _fixture.Execute("UPDATE session_files SET session_sha256 = NULL;");
 
         Store.AppendTurn(sessionId, "client-1", Turn("c"u8.ToArray(), "d"u8.ToArray()));
 
@@ -345,9 +346,11 @@ public sealed class SessionBodyHashTests : IDisposable
         return new SessionTurnInput(turnId, DateTimeOffset.UtcNow, bodies);
     }
 
-    private static void AppendExpected(
-        IncrementalHash hash, Guid turnId, string? request, string? response, string? providerRequest, string? providerResponse)
+    private static byte[] ExpectedChain(
+        byte[] previous, Guid turnId, string? request, string? response, string? providerRequest, string? providerResponse)
     {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        hash.AppendData(previous);
         hash.AppendData(turnId.ToByteArray());
         var bodies = new[] { request, response, providerRequest, providerResponse };
         for (var i = 0; i < bodies.Length; i++)
@@ -355,5 +358,7 @@ public sealed class SessionBodyHashTests : IDisposable
             hash.AppendData([(byte)(i + 1)]);
             hash.AppendData(bodies[i] is null ? new byte[32] : SHA256.HashData(Encoding.UTF8.GetBytes(bodies[i]!)));
         }
+
+        return hash.GetHashAndReset();
     }
 }
