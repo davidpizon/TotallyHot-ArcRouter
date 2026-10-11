@@ -467,6 +467,11 @@ public sealed class SessionStore : ISessionExtractReader
             frame.ArchiveTurnId, frame.Kind, hashing.FinishHash(), hashing.BytesWritten, Missing: false, Obscured: null);
     }
 
+    /// <summary>Looks up one session's index row, which carries its turn count and checksum together.</summary>
+    /// <param name="archiveSessionId">The session's archive id.</param>
+    /// <returns>The row, or <see langword="null"/> when the session is unknown.</returns>
+    public SessionFileRow? TryGetSession(Guid archiveSessionId) => _index.TryGetSession(archiveSessionId);
+
     /// <summary>Lists a session's committed turns in order.</summary>
     /// <param name="archiveSessionId">The session's archive id.</param>
     /// <returns>The turns, or an empty list for an unknown session.</returns>

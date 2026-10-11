@@ -297,12 +297,24 @@ public sealed class ConversationExportWriter
             .ToList();
 
         var plan = new List<PlannedSession>();
-        foreach (var session in sessions)
+        foreach (var listed in sessions)
         {
             ct.ThrowIfCancellationRequested();
+            bool InWindow(SessionTurnRow turn) =>
+                (filter.From is null || turn.CreatedAtUtc >= filter.From) && (filter.To is null || turn.CreatedAtUtc <= filter.To);
+
+            // A session with nothing in the window is skipped before any backfill is spent on it.
+            if (!store.ListTurns(listed.ArchiveSessionId).Any(InWindow)) continue;
+
+            // Backfill first, so the checksum read next is final. Then take the session's row and its turn list as
+            // one snapshot: the row's turn count bounds the list, so the checksum written to the manifest describes
+            // exactly the turns this export could include, and a turn appended later is in neither.
+            var verified = store.HasBodyHashes(listed.ArchiveSessionId) || store.BackfillBodyHashes(listed.ArchiveSessionId);
+            var session = store.TryGetSession(listed.ArchiveSessionId);
+            if (session is null) continue;
+
             var turns = store.ListTurns(session.ArchiveSessionId)
-                .Where(turn => (filter.From is null || turn.CreatedAtUtc >= filter.From)
-                               && (filter.To is null || turn.CreatedAtUtc <= filter.To))
+                .Where(turn => turn.TurnSequence < session.TurnCount && InWindow(turn))
                 .ToList();
             if (turns.Count > 0 && filter.NeedsMetadata)
             {
@@ -316,11 +328,9 @@ public sealed class ConversationExportWriter
 
             // Only the total is kept: the hash rows are read again, one session at a time, while that session is
             // written, so memory does not grow with the number of sessions in the export.
-            var verified = false;
             var zipBytes = turns.Count * TurnLineBytes;
-            if (store.HasBodyHashes(session.ArchiveSessionId) || store.BackfillBodyHashes(session.ArchiveSessionId))
+            if (verified)
             {
-                verified = true;
                 var hashes = store.ListBodyHashes(session.ArchiveSessionId)
                     .ToDictionary(row => (row.ArchiveTurnId, row.Kind));
                 foreach (var turn in turns)
@@ -918,8 +928,8 @@ public sealed class ConversationExportWriter
             json.WriteString("archive_session_id", planned.Row.ArchiveSessionId);
             json.WriteString("client_session_id", planned.Row.ClientSessionId);
 
-            // The checksum covers the whole session as stored, not only the turns this filter selected.
-            var checksum = store.GetSessionSha256(planned.Row.ArchiveSessionId);
+            // The checksum covers the whole session as of the plan's snapshot, not only the turns this filter selected.
+            var checksum = planned.Row.SessionSha256;
             if (checksum is null) json.WriteNull("session_sha256");
             else json.WriteString("session_sha256", Convert.ToHexStringLower(checksum));
             json.WriteNumber("turns_selected", planned.Turns.Count);
@@ -1000,7 +1010,7 @@ public sealed class ConversationExportWriter
     }
 
     /// <summary>A session chosen for export, with its selected turns and the hashes to verify them against.</summary>
-    /// <param name="Row">The session's index row.</param>
+    /// <param name="Row">The session's index row, taken together with its turn list; its checksum is the one the manifest reports.</param>
     /// <param name="Turns">The selected turns in order.</param>
     /// <param name="Verified">Whether stored body hashes exist for the session, so its turns can be verified.</param>
     /// <param name="ZipBytes">The worst-case size of this session's part of the zip, for the free-space check.</param>

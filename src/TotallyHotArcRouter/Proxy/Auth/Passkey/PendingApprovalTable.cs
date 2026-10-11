@@ -79,6 +79,7 @@ public sealed class PendingApprovalTable
     private const int IdBytes = 16;
 
     private readonly ConcurrentDictionary<string, Entry> _entries = new(StringComparer.Ordinal);
+    private readonly object _admission = new();
     private readonly Uri _dashboardBaseUrl;
     private readonly TimeProvider _time;
 
@@ -108,31 +109,38 @@ public sealed class PendingApprovalTable
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(destinationPath);
 
-        Sweep();
-        if (_entries.Count >= MaxPending)
+        var parameters = GatedOperation.ExportParameters(filter, destinationPath);
+
+        // The sweep, the capacity check and the insertion happen under one lock, so concurrent callers cannot all
+        // see room below the limit and each add an entry; the bound on memory holds.
+        lock (_admission)
         {
-            throw new RpcException(new Status(
-                StatusCode.ResourceExhausted,
-                "Too many approval requests are waiting. Decide or let the open ones lapse, then try again."));
+            Sweep();
+            if (_entries.Count >= MaxPending)
+            {
+                throw new RpcException(new Status(
+                    StatusCode.ResourceExhausted,
+                    "Too many approval requests are waiting. Decide or let the open ones lapse, then try again."));
+            }
+
+            var now = _time.GetUtcNow();
+            var request = new PendingApprovalRequest(
+                Id: Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(IdBytes)),
+                Operation: GatedOperation.Export,
+                Parameters: parameters,
+                Filter: filter,
+                DestinationPath: destinationPath,
+                CreatedAtUtc: now,
+                ExpiresAtUtc: now + RequestTtl);
+
+            // A 128-bit random id cannot collide in practice; TryAdd keeps that from being an assumption.
+            if (!_entries.TryAdd(request.Id, new Entry(request)))
+            {
+                throw new RpcException(new Status(StatusCode.Internal, "Could not allocate an approval request id."));
+            }
+
+            return request;
         }
-
-        var now = _time.GetUtcNow();
-        var request = new PendingApprovalRequest(
-            Id: Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(IdBytes)),
-            Operation: GatedOperation.Export,
-            Parameters: GatedOperation.ExportParameters(filter, destinationPath),
-            Filter: filter,
-            DestinationPath: destinationPath,
-            CreatedAtUtc: now,
-            ExpiresAtUtc: now + RequestTtl);
-
-        // A 128-bit random id cannot collide in practice; TryAdd keeps that from being an assumption.
-        if (!_entries.TryAdd(request.Id, new Entry(request)))
-        {
-            throw new RpcException(new Status(StatusCode.Internal, "Could not allocate an approval request id."));
-        }
-
-        return request;
     }
 
     /// <summary>Builds the dashboard address that opens the approval view on a request.</summary>

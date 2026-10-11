@@ -76,7 +76,11 @@ public static class Program
             // RUNNING router to do it. It is a gRPC client, never a reader of the session files, so it is
             // dispatched before the host builds (there is nothing to build) and the passkey gate cannot be
             // bypassed. The destination and filter options stay in `args`; ExportConversationsCommand parses them.
-            var (exportConversations, _) = ExtractFlag(args: args, flagName: ExportConversationsCommand.FlagName);
+            // The command takes `--export-conversations <path>` or `--export-conversations=<path>`, so the
+            // equals form is recognized here as well; ExtractFlag matches only the bare flag.
+            var exportConversations = args.Any(arg =>
+                string.Equals(a: arg, b: ExportConversationsCommand.FlagName, comparisonType: StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith(value: ExportConversationsCommand.FlagName + "=", comparisonType: StringComparison.OrdinalIgnoreCase));
             if (exportConversations)
             {
                 Environment.ExitCode = await RunExportConversationsAsync(args);
