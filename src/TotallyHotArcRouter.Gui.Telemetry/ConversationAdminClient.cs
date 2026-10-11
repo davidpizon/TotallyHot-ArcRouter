@@ -171,6 +171,12 @@ public sealed class ConversationAdminClient
             {
                 hasNext = await stream.MoveNext(cancellationToken).ConfigureAwait(false);
             }
+            catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled && cancellationToken.IsCancellationRequested)
+            {
+                // The caller cancelled (the dialog was closed): that is not a failed export, and callers already
+                // treat OperationCanceledException as "the user left".
+                throw new OperationCanceledException(cancellationToken);
+            }
             catch (RpcException ex)
             {
                 // Not caught inside a try that also yields: an iterator cannot yield from within a catch
@@ -185,9 +191,9 @@ public sealed class ConversationAdminClient
     }
 
     /// <summary>
-    /// Converts a gRPC-contract stream message into the client's <see cref="ConversationExportEvent"/>. Switches
-    /// explicitly on every defined <see cref="Contract.ExportConversationsEvent.EventOneofCase"/>, including
-    /// <c>None</c>, so a message kind added to the contract later is a visible gap rather than a silent default.
+    /// Converts a gRPC-contract stream message into the client's <see cref="ConversationExportEvent"/>. Maps the
+    /// progress and result cases; any other message (an empty one, or a kind a newer router adds) becomes an event
+    /// with neither field set, which consumers skip, so an older client keeps working against a newer router.
     /// </summary>
     private static ConversationExportEvent MapEvent(Contract.ExportConversationsEvent wire)
     {

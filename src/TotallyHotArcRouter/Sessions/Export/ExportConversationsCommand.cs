@@ -403,8 +403,11 @@ internal static class ExportConversationsCommand
                 return ExitRouterUnreachable;
 
             case StatusCode.NotFound:
-                // The router no longer holds the request: it lapsed before the command asked for its outcome.
-                return await TimedOutAsync(stderr).ConfigureAwait(false);
+                // The router no longer holds the request: it lapsed, or another caller already collected it.
+                await stderr.WriteLineAsync(
+                    "The router no longer holds this approval request: it expired or was already collected. Nothing was written.")
+                    .ConfigureAwait(false);
+                return ExitTimedOut;
 
             case StatusCode.Unauthenticated or StatusCode.PermissionDenied or StatusCode.FailedPrecondition
                 or StatusCode.InvalidArgument or StatusCode.ResourceExhausted or StatusCode.AlreadyExists:
