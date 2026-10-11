@@ -1,6 +1,5 @@
 using AwesomeAssertions;
 using Bunit;
-using Microsoft.Extensions.DependencyInjection;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Models;
 using TotallyHot.ArcRouter.Gui.Services;

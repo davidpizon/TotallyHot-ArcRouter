@@ -142,7 +142,7 @@ public sealed class PendingApprovalTableTests
         var decision = await waiting;
 
         decision.Should().NotBeNull();
-        decision!.Outcome.Should().Be(PendingApprovalOutcome.Approved);
+        decision.Outcome.Should().Be(PendingApprovalOutcome.Approved);
         decision.CredentialName.Should().Be("laptop");
         decision.Request.Should().Be(request);
     }

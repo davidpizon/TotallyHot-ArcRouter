@@ -457,7 +457,7 @@ public sealed class ConversationExportWriter
         byte[] buffer,
         CancellationToken ct)
     {
-        var sessionState = new SessionState(session.Row);
+        var sessionState = new SessionState();
         state.Sessions[session.Row.ArchiveSessionId] = sessionState;
 
         // Null when no stored hashes could be had for this session: its turns are then exported unverified.
@@ -995,11 +995,8 @@ public sealed class ConversationExportWriter
     private sealed record CorruptTurn(Guid ArchiveSessionId, Guid ArchiveTurnId, string Reason);
 
     /// <summary>Per-session totals the manifest reports.</summary>
-    private sealed class SessionState(SessionFileRow row)
+    private sealed class SessionState
     {
-        /// <summary>Gets the session's index row.</summary>
-        public SessionFileRow Row { get; } = row;
-
         /// <summary>Gets or sets how many of the session's turns were written.</summary>
         public int TurnsExported { get; set; }
 

@@ -643,8 +643,8 @@ public sealed record CostReconciliationAdminDependencies(
 public sealed record ConversationAdminDependencies(
     Lazy<Sessions.SessionStore> Store,
     Sessions.Export.ConversationExportWriter Writer,
-    Auth.Passkey.ContentGate Gate,
-    Transcripts.TranscriptDatabase Database) : IAdminServiceModule
+    ContentGate Gate,
+    TranscriptDatabase Database) : IAdminServiceModule
 {
     /// <inheritdoc/>
     void IAdminServiceModule.Register(IServiceCollection services)

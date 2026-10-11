@@ -3,7 +3,6 @@
    what is waiting, shows the destination and filter exactly as the router will bind the approval to them, and runs
    the passkey ceremony for the one the operator chooses. The router derives the ceremony's operation and digest from
    the stored request, so what is approved is what is shown. Follows the DialogShell contract (docs/gui/DESIGN.md 4.1). *@
-@using System.Globalization
 @implements IDisposable
 @inject PasskeyAdminStore PasskeyStore
 <DialogShell Title="Approvals" CloseAriaLabel="Close approvals dialog" OnClose="OnClose" EnableEscapeToClose="true">
