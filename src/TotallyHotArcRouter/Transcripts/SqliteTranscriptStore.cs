@@ -583,7 +583,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
             ArchiveTurnId: reader.FieldCount > 23 && !reader.IsDBNull(23) && Guid.TryParse(reader.GetString(23), out var turnId)
                 ? turnId
                 : null,
-            Origin: reader.FieldCount > 24 && !reader.IsDBNull(24) ? reader.GetString(24) : Sessions.SessionTurnOrigin.Captured);
+            Origin: reader.FieldCount > 24 && !reader.IsDBNull(24) ? reader.GetString(24) : SessionTurnOrigin.Captured);
     }
 
     /// <inheritdoc/>
