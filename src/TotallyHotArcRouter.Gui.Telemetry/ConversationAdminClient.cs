@@ -90,6 +90,47 @@ public interface IConversationAdminClient
         string destinationPath,
         string authorizationToken,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Asks the router to copy the zip at <paramref name="sourcePath"/> into private staging and hash the copy
+    /// (#165 phase 4). The returned digest is what the passkey approval for the import is bound to, so the approved
+    /// bytes are the imported bytes.
+    /// </summary>
+    /// <param name="sourcePath">The zip's absolute path on the router machine.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <exception cref="GrpcAdminException">The source was refused (not an absolute path to a zip outside the data folder), too many copies are staged, or the router is unreachable.</exception>
+    Task<StagedImportInfo> StageImportAsync(string sourcePath, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Imports a staged copy, yielding one <see cref="ConversationImportEvent"/> per progress report and a final one
+    /// carrying the result. The router refuses the call unless <paramref name="authorizationToken"/> is a
+    /// one-operation passkey authorization bound to the staged copy's digest
+    /// (<see cref="PasskeyOperations.ImportParameters"/>, ADR-0020), and discards the copy afterwards.
+    /// </summary>
+    /// <param name="stagedId">The copy to import, from <see cref="StageImportAsync"/>.</param>
+    /// <param name="options">How the import runs.</param>
+    /// <param name="authorizationToken">The single-use authorization from <see cref="IPasskeyAdminClient.FinishOneOperationAsync"/>.</param>
+    /// <param name="cancellationToken">Cancels the import; what was stored stays stored and a re-run fills in the rest.</param>
+    /// <exception cref="GrpcAdminException">The call failed, was not authorized, was refused, or the router is unreachable.</exception>
+    IAsyncEnumerable<ConversationImportEvent> ImportAsync(
+        string stagedId,
+        ConversationImportOptionsInfo options,
+        string authorizationToken,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Lists past imports, newest first.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
+    Task<IReadOnlyList<ConversationImportRowInfo>> ListImportsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes one import: the sessions it created leave whole and the turns it added to older sessions are
+    /// retired.
+    /// </summary>
+    /// <param name="importId">The import to delete.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <exception cref="GrpcAdminException">No such import, or the call failed.</exception>
+    Task<ConversationImportDeleteInfo> DeleteImportAsync(string importId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -188,6 +229,168 @@ public sealed class ConversationAdminClient
 
             yield return MapEvent(stream.Current);
         }
+    }
+
+    /// <inheritdoc/>
+    public async Task<StagedImportInfo> StageImportAsync(string sourcePath, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(sourcePath);
+
+        var response = await CallAsync(
+                call: (client, ct) => client.StageImportAsync(
+                    new Contract.StageImportRequest { SourcePath = sourcePath }, cancellationToken: ct),
+                action: "Could not stage the import",
+                cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        return new StagedImportInfo(
+            response.StagedId, response.Sha256, response.SizeBytes, response.ExpiresAtUtc.ToDateTimeOffset());
+    }
+
+    /// <inheritdoc/>
+    public async IAsyncEnumerable<ConversationImportEvent> ImportAsync(
+        string stagedId,
+        ConversationImportOptionsInfo options,
+        string authorizationToken,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(stagedId);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentException.ThrowIfNullOrEmpty(authorizationToken);
+
+        var request = new Contract.ImportConversationsRequest
+        {
+            StagedId = stagedId,
+            Options = ToWire(options),
+            AuthorizationToken = authorizationToken,
+        };
+
+        using var call = Client.ImportConversations(request, cancellationToken: cancellationToken);
+        var stream = call.ResponseStream;
+
+        while (true)
+        {
+            bool hasNext;
+            try
+            {
+                hasNext = await stream.MoveNext(cancellationToken).ConfigureAwait(false);
+            }
+            catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled && cancellationToken.IsCancellationRequested)
+            {
+                // The caller cancelled (the dialog was closed): that is not a failed import.
+                throw new OperationCanceledException(cancellationToken);
+            }
+            catch (RpcException ex)
+            {
+                throw Wrap(ex: ex, action: "The conversation import failed");
+            }
+
+            if (!hasNext) yield break;
+
+            yield return MapImportEvent(stream.Current);
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<ConversationImportRowInfo>> ListImportsAsync(CancellationToken cancellationToken = default)
+    {
+        var response = await CallAsync(
+                call: (client, ct) => client.ListConversationImportsAsync(
+                    new Contract.ListConversationImportsRequest(), cancellationToken: ct),
+                action: "Could not list the imports",
+                cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        return
+        [
+            .. response.Imports.Select(row => new ConversationImportRowInfo(
+                row.ImportId,
+                row.ImportedAtUtc.ToDateTimeOffset(),
+                row.SourceSha256,
+                row.SessionsAdded,
+                row.TurnsAdded,
+                row.TurnsSkipped,
+                row.TurnsRejected)),
+        ];
+    }
+
+    /// <inheritdoc/>
+    public async Task<ConversationImportDeleteInfo> DeleteImportAsync(
+        string importId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(importId);
+
+        var response = await CallAsync(
+                call: (client, ct) => client.DeleteConversationImportAsync(
+                    new Contract.DeleteConversationImportRequest { ImportId = importId }, cancellationToken: ct),
+                action: "Could not delete the import",
+                cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        return new ConversationImportDeleteInfo(response.SessionsDeleted, response.TurnsRetired);
+    }
+
+    /// <summary>Describes import options for the wire.</summary>
+    /// <param name="options">The options.</param>
+    /// <returns>The wire message; <see cref="ConversationImportOptionsInfo.KeepLocalCopy"/> is carried as its inverse so the zero value is the safe default.</returns>
+    public static Contract.ImportOptions ToWire(ConversationImportOptionsInfo options) => new()
+    {
+        Timestamps = options.ImportTime
+            ? Contract.ImportTimestampMode.ImportTime
+            : Contract.ImportTimestampMode.Original,
+        OnConflict = options.OnConflict switch
+        {
+            ConversationImportConflictChoice.Overwrite => Contract.ImportConflictMode.Overwrite,
+            ConversationImportConflictChoice.KeepBoth => Contract.ImportConflictMode.KeepBoth,
+            _ => Contract.ImportConflictMode.Skip,
+        },
+        ReplaceLocalOnConflict = !options.KeepLocalCopy,
+    };
+
+    /// <summary>Reads import options from the wire; an absent message is the defaults.</summary>
+    /// <param name="wire">The wire options, or <see langword="null"/>.</param>
+    /// <returns>The options.</returns>
+    public static ConversationImportOptionsInfo FromWire(Contract.ImportOptions? wire) =>
+        wire is null
+            ? new ConversationImportOptionsInfo()
+            : new ConversationImportOptionsInfo(
+                ImportTime: wire.Timestamps == Contract.ImportTimestampMode.ImportTime,
+                OnConflict: wire.OnConflict switch
+                {
+                    Contract.ImportConflictMode.Overwrite => ConversationImportConflictChoice.Overwrite,
+                    Contract.ImportConflictMode.KeepBoth => ConversationImportConflictChoice.KeepBoth,
+                    _ => ConversationImportConflictChoice.Skip,
+                },
+                KeepLocalCopy: !wire.ReplaceLocalOnConflict);
+
+    /// <summary>
+    /// Converts a gRPC-contract import stream message into the client's <see cref="ConversationImportEvent"/>. Any
+    /// message that is neither progress nor a result becomes an event with neither field set, which consumers skip.
+    /// </summary>
+    private static ConversationImportEvent MapImportEvent(Contract.ImportConversationsEvent wire)
+    {
+        return wire.EventCase switch
+        {
+            Contract.ImportConversationsEvent.EventOneofCase.Progress =>
+                new ConversationImportEvent(
+                    Progress: new ConversationImportProgressInfo(wire.Progress.TurnsProcessed, wire.Progress.TurnsStored),
+                    Result: null),
+            Contract.ImportConversationsEvent.EventOneofCase.Result =>
+                new ConversationImportEvent(
+                    Progress: null,
+                    Result: new ConversationImportResultInfo(
+                        ImportId: wire.Result.ImportId,
+                        SessionsAdded: wire.Result.SessionsAdded,
+                        SessionsSkipped: wire.Result.SessionsSkipped,
+                        TurnsAdded: wire.Result.TurnsAdded,
+                        TurnsAlreadyPresent: wire.Result.TurnsAlreadyPresent,
+                        TurnsConflictKept: wire.Result.TurnsConflictKept,
+                        TurnsRejected: wire.Result.TurnsRejected,
+                        TurnsToGrade: wire.Result.TurnsToGrade,
+                        BodyBytes: wire.Result.BodyBytes,
+                        TurnsDueForRetention: wire.Result.TurnsDueForRetention)),
+            _ => new ConversationImportEvent(Progress: null, Result: null),
+        };
     }
 
     /// <summary>

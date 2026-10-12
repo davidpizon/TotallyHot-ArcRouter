@@ -83,15 +83,16 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
                                   difficulty, language, is_utility, prompt_text, response_text, score, cost, is_exploratory,
                                   propensity, input_tokens, output_tokens, memory_entry_id, dim_best_model,
                                   untrained_baseline_model, untrained_baseline_predicted_score,
-                                  archive_session_id, archive_turn_id, prompt_text_length, response_text_length)
+                                  archive_session_id, archive_turn_id, prompt_text_length, response_text_length, origin)
                               VALUES (
                                   $correlationId, $sessionId, $createdAtUtc, $requestedModel, $routedModel, $dimension,
                                   $difficulty, $language, $isUtility, NULL, NULL, $score, $cost,
                                   $isExploratory, $propensity, $inputTokens, $outputTokens, $memoryEntryId, $dimBestModel,
                                   $untrainedBaselineModel, $untrainedBaselinePredictedScore,
-                                  $archiveSessionId, $archiveTurnId, $promptTextLength, $responseTextLength);
+                                  $archiveSessionId, $archiveTurnId, $promptTextLength, $responseTextLength, $origin);
                               SELECT last_insert_rowid();
                               """;
+        command.Parameters.AddWithValue(parameterName: "$origin", value: record.Origin);
         command.Parameters.AddWithValue(parameterName: "$correlationId", value: record.CorrelationId);
         command.Parameters.AddWithValue(parameterName: "$sessionId",
             value: CorrelationIdParser.SessionIdOf(record.CorrelationId));
@@ -612,6 +613,42 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
             delete.Transaction = transaction;
             delete.CommandText = "DELETE FROM request_transcripts WHERE archive_session_id = $id;";
             delete.Parameters.AddWithValue("$id", archiveSessionId.ToString("D"));
+            delete.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+        TruncateWalAfterDelete(connection);
+        return memoryIds;
+    }
+
+    /// <inheritdoc/>
+    public IReadOnlyList<long> DeleteByArchiveTurns(IReadOnlyCollection<Guid> archiveTurnIds)
+    {
+        ArgumentNullException.ThrowIfNull(archiveTurnIds);
+        if (archiveTurnIds.Count == 0) return [];
+
+        EnsureSchema();
+        using var connection = _database.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+        var memoryIds = new List<long>();
+        foreach (var archiveTurnId in archiveTurnIds.Distinct())
+        {
+            using var select = connection.CreateCommand();
+            select.Transaction = transaction;
+            select.CommandText = """
+                                 SELECT memory_entry_id FROM request_transcripts
+                                 WHERE archive_turn_id = $id AND memory_entry_id IS NOT NULL;
+                                 """;
+            select.Parameters.AddWithValue("$id", archiveTurnId.ToString("D"));
+            using (var reader = select.ExecuteReader())
+            {
+                while (reader.Read()) memoryIds.Add(reader.GetInt64(0));
+            }
+
+            using var delete = connection.CreateCommand();
+            delete.Transaction = transaction;
+            delete.CommandText = "DELETE FROM request_transcripts WHERE archive_turn_id = $id;";
+            delete.Parameters.AddWithValue("$id", archiveTurnId.ToString("D"));
             delete.ExecuteNonQuery();
         }
 

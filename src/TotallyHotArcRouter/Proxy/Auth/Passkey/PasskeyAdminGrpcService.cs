@@ -3,6 +3,7 @@ using Grpc.Core;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Text.Json;
 using TotallyHot.ArcRouter.Sessions.Export;
+using TotallyHot.ArcRouter.Sessions.Import;
 using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 
 namespace TotallyHot.ArcRouter.Proxy.Auth.Passkey;
@@ -51,6 +52,7 @@ public sealed class PasskeyAdminGrpcService : Contract.PasskeyAdminService.Passk
     private readonly PendingApprovalTable _pendingApprovals;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<PasskeyAdminGrpcService> _logger;
+    private readonly ImportStagingArea? _importStaging;
 
     /// <summary>Initializes a new instance of the <see cref="PasskeyAdminGrpcService"/> class.</summary>
     /// <param name="contentGate">Shared gate rules: store ACL posture, enrollment state, grant header checks.</param>
@@ -64,6 +66,7 @@ public sealed class PasskeyAdminGrpcService : Contract.PasskeyAdminService.Passk
     /// <param name="pendingApprovals">Holds the requests a caller without a browser has filed for the operator to approve.</param>
     /// <param name="timeProvider">Clock for timestamps and expiries; defaults to <see cref="TimeProvider.System"/>.</param>
     /// <param name="logger">Records gate decisions. Optional so tests can omit it.</param>
+    /// <param name="importStaging">Holds the staged copies an import approval request names; optional, and without it an import request is refused.</param>
     public PasskeyAdminGrpcService(
         ContentGate contentGate,
         EnrollmentCodeService enrollmentCodes,
@@ -75,8 +78,10 @@ public sealed class PasskeyAdminGrpcService : Contract.PasskeyAdminService.Passk
         PasskeyOptions options,
         PendingApprovalTable pendingApprovals,
         TimeProvider? timeProvider = null,
-        ILogger<PasskeyAdminGrpcService>? logger = null)
+        ILogger<PasskeyAdminGrpcService>? logger = null,
+        ImportStagingArea? importStaging = null)
     {
+        _importStaging = importStaging;
         ArgumentNullException.ThrowIfNull(pendingApprovals);
         ArgumentNullException.ThrowIfNull(contentGate);
         ArgumentNullException.ThrowIfNull(enrollmentCodes);
@@ -299,17 +304,33 @@ public sealed class PasskeyAdminGrpcService : Contract.PasskeyAdminService.Passk
             // no dashboard could ever give.
             _contentGate.EnsureEnrolled();
 
-            if (request.OperationCase != Contract.CreateApprovalRequestRequest.OperationOneofCase.Export)
-                throw new RpcException(new Status(StatusCode.InvalidArgument,
-                    "The approval request names no supported operation."));
+            PendingApprovalRequest pending;
+            switch (request.OperationCase)
+            {
+                case Contract.CreateApprovalRequestRequest.OperationOneofCase.Export:
+                    var details = request.Export;
+                    if (string.IsNullOrWhiteSpace(details.DestinationPath))
+                        throw new RpcException(new Status(StatusCode.InvalidArgument,
+                            "An export approval request needs a destination path."));
 
-            var details = request.Export;
-            if (string.IsNullOrWhiteSpace(details.DestinationPath))
-                throw new RpcException(new Status(StatusCode.InvalidArgument,
-                    "An export approval request needs a destination path."));
+                    pending = _pendingApprovals.CreateExport(
+                        ConversationExportWire.ToFilter(details), details.DestinationPath);
+                    break;
 
-            var pending = _pendingApprovals.CreateExport(
-                ConversationExportWire.ToFilter(details), details.DestinationPath);
+                case Contract.CreateApprovalRequestRequest.OperationOneofCase.Import:
+                    // The digest comes from the router's own staged copy, never from the request: a client names
+                    // the copy and cannot name a digest, so it cannot get approval for bytes it did not stage.
+                    var staged = _importStaging?.TryGet(request.Import.StagedId)
+                                 ?? throw new RpcException(new Status(StatusCode.NotFound,
+                                     "No staged import has that id. It was imported, discarded, or lapsed; stage the zip again."));
+                    pending = _pendingApprovals.CreateImport(staged, ConversationImportWire.ToOptions(request.Import.Options));
+                    break;
+
+                default:
+                    throw new RpcException(new Status(StatusCode.InvalidArgument,
+                        "The approval request names no supported operation."));
+            }
+
             _logger.LogInformation("Approval requested for operation {Operation}", pending.Operation);
             return new Contract.CreateApprovalRequestResponse
             {
@@ -362,13 +383,15 @@ public sealed class PasskeyAdminGrpcService : Contract.PasskeyAdminService.Passk
         var response = new Contract.ListPendingApprovalsResponse();
         foreach (var pending in _pendingApprovals.ListPending())
         {
-            response.Approvals.Add(new Contract.PendingApproval
+            var item = new Contract.PendingApproval
             {
                 ApprovalId = pending.Id,
-                Export = ConversationExportWire.ToApprovalDetails(pending.Filter, pending.DestinationPath),
                 CreatedAtUtc = Timestamp.FromDateTimeOffset(pending.CreatedAtUtc),
                 ExpiresAtUtc = Timestamp.FromDateTimeOffset(pending.ExpiresAtUtc),
-            });
+            };
+            if (pending.Import is { } import) item.Import = ConversationImportWire.ToApprovalDetails(import);
+            else item.Export = ConversationExportWire.ToApprovalDetails(pending.Filter, pending.DestinationPath);
+            response.Approvals.Add(item);
         }
 
         return Task.FromResult(response);

@@ -9,7 +9,7 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 
 /// <summary>
 /// Tests for <see cref="ExportDialog"/> (#165 phase 3, PR 3b): that it is built on <c>DialogShell</c> with an
-/// Export-only title, shows capture state and store counts, keeps Export disabled until there is a destination,
+/// Export / Import title, shows capture state and store counts, keeps Export disabled until there is a destination,
 /// earns a passkey approval bound to exactly the filter and destination it then sends, shows progress and the
 /// result path, shows a router failure inline, and runs <c>OnClose</c> when closed.
 /// </summary>
@@ -40,7 +40,7 @@ public sealed class ExportDialogTests
         cut.InvokeAsync(() => cut.Find("[data-testid='export-confirm']").Click());
 
     [Fact]
-    public void Is_built_on_the_dialog_shell_and_is_titled_Export_only()
+    public void Is_built_on_the_dialog_shell_and_is_titled_Export_slash_Import()
     {
         using var ctx = NewContext(out _, out _, out _);
 
@@ -48,9 +48,10 @@ public sealed class ExportDialogTests
 
         cut.Find("div.overlay-backdrop").Should().NotBeNull();
         cut.Find("div.overlay-panel").Should().NotBeNull();
-        cut.Find("div.overlay-panel span.uppercase").TextContent.Should().Be("Export");
+        cut.Find("div.overlay-panel span.uppercase").TextContent.Should().Be("Export / Import");
         cut.Find("button[aria-label='Close export dialog']").Should().NotBeNull();
-        cut.Markup.Should().NotContain("Import");
+        cut.Find("[data-testid='mode-export']").Should().NotBeNull();
+        cut.Find("[data-testid='mode-import']").Should().NotBeNull();
     }
 
     [Fact]

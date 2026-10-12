@@ -64,4 +64,91 @@ internal sealed class FakeConversationAdminClient : IConversationAdminClient
 
         yield return new ConversationExportEvent(Progress: null, Result: Result with { Path = destinationPath });
     }
+
+    // ---- Import (#165 phase 4) ----
+
+    /// <summary>Gets or sets the staged copy <see cref="StageImportAsync"/> returns.</summary>
+    public StagedImportInfo Staged { get; set; } = new(
+        StagedId: "staged-1", Sha256: new string('a', 64), SizeBytes: 4_096, ExpiresAtUtc: new DateTimeOffset(2026, 10, 11, 12, 0, 0, TimeSpan.Zero));
+
+    /// <summary>Gets or sets the import progress reports streamed before the result.</summary>
+    public List<ConversationImportProgressInfo> ImportProgress { get; set; } = [new(TurnsProcessed: 2, TurnsStored: 2)];
+
+    /// <summary>Gets or sets the result the import streams last.</summary>
+    public ConversationImportResultInfo ImportResult { get; set; } = new(
+        ImportId: "import-1", SessionsAdded: 2, SessionsSkipped: 1, TurnsAdded: 5, TurnsAlreadyPresent: 3, TurnsConflictKept: 0,
+        TurnsRejected: 0, TurnsToGrade: 5, BodyBytes: 8_192, TurnsDueForRetention: 0);
+
+    /// <summary>When set, the import waits for it after the progress reports and before the result.</summary>
+    public Task? HoldBeforeImportResult { get; set; }
+
+    /// <summary>Gets or sets the past imports <see cref="ListImportsAsync"/> returns.</summary>
+    public List<ConversationImportRowInfo> PastImports { get; set; } = [];
+
+    /// <summary>When set, <see cref="StageImportAsync"/> fails with it.</summary>
+    public GrpcAdminException? StageFailure { get; set; }
+
+    /// <summary>When set, <see cref="ImportAsync"/> fails with it as soon as it is enumerated.</summary>
+    public GrpcAdminException? ImportFailure { get; set; }
+
+    /// <summary>When set, <see cref="DeleteImportAsync"/> fails with it.</summary>
+    public GrpcAdminException? DeleteFailure { get; set; }
+
+    /// <summary>Gets the source paths passed to <see cref="StageImportAsync"/>, in order.</summary>
+    public List<string> StagedSources { get; } = [];
+
+    /// <summary>Gets the staged ids passed to <see cref="ImportAsync"/>, in order.</summary>
+    public List<string> ImportedStagedIds { get; } = [];
+
+    /// <summary>Gets the options passed to <see cref="ImportAsync"/>, in order.</summary>
+    public List<ConversationImportOptionsInfo> ImportOptions { get; } = [];
+
+    /// <summary>Gets the authorization tokens passed to <see cref="ImportAsync"/>, in order.</summary>
+    public List<string> ImportAuthorizations { get; } = [];
+
+    /// <summary>Gets the ids passed to <see cref="DeleteImportAsync"/>, in order.</summary>
+    public List<string> DeletedImports { get; } = [];
+
+    /// <inheritdoc/>
+    public Task<StagedImportInfo> StageImportAsync(string sourcePath, CancellationToken cancellationToken = default)
+    {
+        StagedSources.Add(sourcePath);
+        return StageFailure is null ? Task.FromResult(Staged) : Task.FromException<StagedImportInfo>(StageFailure);
+    }
+
+    /// <inheritdoc/>
+    public async IAsyncEnumerable<ConversationImportEvent> ImportAsync(
+        string stagedId,
+        ConversationImportOptionsInfo options,
+        string authorizationToken,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ImportedStagedIds.Add(stagedId);
+        ImportOptions.Add(options);
+        ImportAuthorizations.Add(authorizationToken);
+        if (ImportFailure is not null) throw ImportFailure;
+
+        foreach (var progress in ImportProgress)
+        {
+            yield return new ConversationImportEvent(Progress: progress, Result: null);
+        }
+
+        if (HoldBeforeImportResult is not null) await HoldBeforeImportResult.WaitAsync(cancellationToken);
+
+        yield return new ConversationImportEvent(Progress: null, Result: ImportResult);
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<ConversationImportRowInfo>> ListImportsAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<ConversationImportRowInfo>>([.. PastImports]);
+
+    /// <inheritdoc/>
+    public Task<ConversationImportDeleteInfo> DeleteImportAsync(string importId, CancellationToken cancellationToken = default)
+    {
+        DeletedImports.Add(importId);
+        if (DeleteFailure is not null) return Task.FromException<ConversationImportDeleteInfo>(DeleteFailure);
+
+        PastImports.RemoveAll(row => row.ImportId == importId);
+        return Task.FromResult(new ConversationImportDeleteInfo(SessionsDeleted: 1, TurnsRetired: 0));
+    }
 }

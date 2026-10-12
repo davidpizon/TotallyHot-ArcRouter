@@ -75,6 +75,44 @@ public sealed record SessionTurnRow(
     DateTimeOffset CreatedAtUtc,
     string Origin);
 
+/// <summary>
+/// What a conversation import records about a turn it stored, in the same transaction that commits the turn, so
+/// a re-run of the same import can tell the turn is already present even when obscuring changed its bodies or a
+/// conflict mode gave it a new local id.
+/// </summary>
+/// <param name="ImportId">The import that stored the turn.</param>
+/// <param name="SourceArchiveTurnId">The turn's id in the zip, which differs from the local id when a conflict mode minted a new one.</param>
+/// <param name="SourceDigest">
+/// A SHA-256 over the turn's id and its exchange-body hashes as the zip declared them (see
+/// <c>ConversationImporter.SourceDigest</c>), compared on a later import before the bodies are read.
+/// </param>
+/// <param name="CreatesSession">Whether this turn is the first of a session the import created, so deleting the import can remove the session.</param>
+public sealed record SessionTurnImport(
+    Guid ImportId, Guid SourceArchiveTurnId, byte[] SourceDigest, bool CreatesSession);
+
+/// <summary>One past import as the index records it.</summary>
+/// <param name="ImportId">The import's id.</param>
+/// <param name="ImportedAtUtc">When it started.</param>
+/// <param name="SourceSha256">Lowercase hex SHA-256 of the zip that was imported.</param>
+/// <param name="SessionsAdded">Sessions it created.</param>
+/// <param name="TurnsAdded">Turns it stored.</param>
+/// <param name="TurnsSkipped">Turns that were already present.</param>
+/// <param name="TurnsRejected">Turns that failed validation.</param>
+public sealed record SessionImportRow(
+    Guid ImportId,
+    DateTimeOffset ImportedAtUtc,
+    string SourceSha256,
+    int SessionsAdded,
+    int TurnsAdded,
+    int TurnsSkipped,
+    int TurnsRejected);
+
+/// <summary>A turn a past import stored, found through the id it had in the zip.</summary>
+/// <param name="ArchiveTurnId">The turn's local id.</param>
+/// <param name="ImportId">The import that stored it.</param>
+/// <param name="SourceDigest">The digest the zip declared for it.</param>
+public sealed record SessionImportedTurn(Guid ArchiveTurnId, Guid ImportId, byte[] SourceDigest);
+
 /// <summary>The values <see cref="SessionTurnRow.Origin"/> takes (#165 plan, "Import").</summary>
 public static class SessionTurnOrigin
 {
@@ -135,6 +173,36 @@ public sealed class SessionIndex
                                          obscured        INTEGER NULL,
                                          PRIMARY KEY (archive_turn_id, kind)
                                      );
+
+                                     CREATE TABLE IF NOT EXISTS session_imports (
+                                         import_id                  TEXT    NOT NULL PRIMARY KEY,
+                                         imported_at_utc            TEXT    NOT NULL,
+                                         source_sha256              TEXT    NOT NULL,
+                                         options_json               TEXT    NOT NULL,
+                                         sessions_added             INTEGER NOT NULL DEFAULT 0,
+                                         turns_added                INTEGER NOT NULL DEFAULT 0,
+                                         turns_skipped              INTEGER NOT NULL DEFAULT 0,
+                                         turns_rejected             INTEGER NOT NULL DEFAULT 0,
+                                         turns_removed_by_retention INTEGER NOT NULL DEFAULT 0
+                                     );
+
+                                     CREATE TABLE IF NOT EXISTS session_import_turns (
+                                         archive_turn_id        TEXT    NOT NULL PRIMARY KEY,
+                                         import_id              TEXT    NOT NULL,
+                                         source_archive_turn_id TEXT    NOT NULL,
+                                         source_digest          BLOB    NOT NULL
+                                     );
+
+                                     CREATE INDEX IF NOT EXISTS ix_session_import_turns_source
+                                         ON session_import_turns (source_archive_turn_id);
+
+                                     CREATE INDEX IF NOT EXISTS ix_session_import_turns_import
+                                         ON session_import_turns (import_id);
+
+                                     CREATE TABLE IF NOT EXISTS session_import_sessions (
+                                         archive_session_id TEXT NOT NULL PRIMARY KEY,
+                                         import_id          TEXT NOT NULL
+                                     );
                                      """;
 
     private const int ExchangeKindCount = 4;
@@ -175,6 +243,57 @@ public sealed class SessionIndex
         }
 
         MigrateSessionSha256Column(connection);
+        MigrateRetiredColumn(connection);
+    }
+
+    /// <summary>
+    /// Adds <c>session_turns.retired</c> to an index created before overwriting imports existed. A retired turn
+    /// stays in its file (the file is append-only) but leaves every read and the session checksum.
+    /// </summary>
+    /// <param name="connection">An open connection to the transcript database.</param>
+    private static void MigrateRetiredColumn(SqliteConnection connection)
+    {
+        using (var pragma = connection.CreateCommand())
+        {
+            pragma.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_turns') WHERE name = 'retired';";
+            if (Convert.ToInt64(pragma.ExecuteScalar(), CultureInfo.InvariantCulture) != 0) return;
+        }
+
+        using var alter = connection.CreateCommand();
+        alter.CommandText = "ALTER TABLE session_turns ADD COLUMN retired INTEGER NOT NULL DEFAULT 0;";
+        alter.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Retires a turn: it stays in its session file but leaves every read and the session checksum, which is
+    /// recomputed in the same transaction (the chain cannot drop a link, so it is folded again from the turns that
+    /// remain). An overwriting import calls this after it has stored the replacement.
+    /// </summary>
+    /// <param name="archiveTurnId">The turn to retire.</param>
+    /// <returns><see langword="true"/> when a live turn was retired; <see langword="false"/> when it is unknown or already retired.</returns>
+    public bool RetireTurn(Guid archiveTurnId)
+    {
+        using var connection = _database.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+
+        string? sessionId;
+        using (var update = connection.CreateCommand())
+        {
+            update.Transaction = transaction;
+            update.CommandText = """
+                                 UPDATE session_turns SET retired = 1
+                                 WHERE archive_turn_id = $turn AND retired = 0
+                                 RETURNING archive_session_id;
+                                 """;
+            update.Parameters.AddWithValue("$turn", archiveTurnId.ToString("D"));
+            sessionId = update.ExecuteScalar() as string;
+        }
+
+        if (sessionId is null) return false;
+
+        UpdateSessionSha256(connection, transaction, Guid.Parse(sessionId));
+        transaction.Commit();
+        return true;
     }
 
     /// <summary>
@@ -270,12 +389,17 @@ public sealed class SessionIndex
 
     /// <summary>Lists a session's committed turns in turn order.</summary>
     /// <param name="archiveSessionId">The session's archive id.</param>
+    /// <param name="includeRetired">
+    /// Whether to include turns an overwriting import retired. They stay in the file, so anything that walks the
+    /// file's frames in order needs them; anything that reads the conversation does not.
+    /// </param>
     /// <returns>The turns, oldest first.</returns>
-    public IReadOnlyList<SessionTurnRow> ListTurns(Guid archiveSessionId)
+    public IReadOnlyList<SessionTurnRow> ListTurns(Guid archiveSessionId, bool includeRetired = false)
     {
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = SelectTurnSql + " WHERE archive_session_id = $id ORDER BY turn_sequence;";
+        command.CommandText = SelectTurnSql + " WHERE archive_session_id = $id"
+                              + (includeRetired ? string.Empty : " AND retired = 0") + " ORDER BY turn_sequence;";
         command.Parameters.AddWithValue("$id", archiveSessionId.ToString("D"));
         using var reader = command.ExecuteReader();
         var rows = new List<SessionTurnRow>();
@@ -302,7 +426,8 @@ public sealed class SessionIndex
     /// </remarks>
     /// <param name="turn">The turn's row; its sequence must equal the session's current turn count.</param>
     /// <param name="bodies">The hashes of every body the turn wrote, including metadata and extracts.</param>
-    public void CommitTurn(SessionTurnRow turn, IReadOnlyList<SessionBodyHashRow> bodies)
+    /// <param name="import">What an import records about the turn, committed with it; <see langword="null"/> for a captured turn.</param>
+    public void CommitTurn(SessionTurnRow turn, IReadOnlyList<SessionBodyHashRow> bodies, SessionTurnImport? import = null)
     {
         ArgumentNullException.ThrowIfNull(turn);
         ArgumentNullException.ThrowIfNull(bodies);
@@ -359,7 +484,179 @@ public sealed class SessionIndex
         }
 
         InsertBodies(connection, transaction, bodies);
+
+        if (import is not null)
+        {
+            using var record = connection.CreateCommand();
+            record.Transaction = transaction;
+            record.CommandText = """
+                                 INSERT INTO session_import_turns (archive_turn_id, import_id, source_archive_turn_id, source_digest)
+                                 VALUES ($turn, $import, $source, $digest);
+                                 """;
+            record.Parameters.AddWithValue("$turn", turn.ArchiveTurnId.ToString("D"));
+            record.Parameters.AddWithValue("$import", import.ImportId.ToString("D"));
+            record.Parameters.AddWithValue("$source", import.SourceArchiveTurnId.ToString("D"));
+            record.Parameters.AddWithValue("$digest", import.SourceDigest);
+            record.ExecuteNonQuery();
+
+            if (import.CreatesSession)
+            {
+                using var created = connection.CreateCommand();
+                created.Transaction = transaction;
+                created.CommandText = """
+                                      INSERT OR IGNORE INTO session_import_sessions (archive_session_id, import_id)
+                                      VALUES ($session, $import);
+                                      """;
+                created.Parameters.AddWithValue("$session", turn.ArchiveSessionId.ToString("D"));
+                created.Parameters.AddWithValue("$import", import.ImportId.ToString("D"));
+                created.ExecuteNonQuery();
+            }
+        }
+
         transaction.Commit();
+    }
+
+    /// <summary>
+    /// Records that an import has started, with zero counts, so the turns it stores have a row to point at. The
+    /// counts are filled in by <see cref="CompleteImport"/>; a crash in between leaves the zeros.
+    /// </summary>
+    /// <param name="importId">The import's id.</param>
+    /// <param name="importedAtUtc">When the import started.</param>
+    /// <param name="sourceSha256Hex">Lowercase hex SHA-256 of the zip that was imported.</param>
+    /// <param name="optionsJson">The options the import ran with, as JSON.</param>
+    public void BeginImport(Guid importId, DateTimeOffset importedAtUtc, string sourceSha256Hex, string optionsJson)
+    {
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+                              INSERT INTO session_imports (import_id, imported_at_utc, source_sha256, options_json)
+                              VALUES ($id, $at, $sha, $options);
+                              """;
+        command.Parameters.AddWithValue("$id", importId.ToString("D"));
+        command.Parameters.AddWithValue("$at", Format(importedAtUtc));
+        command.Parameters.AddWithValue("$sha", sourceSha256Hex);
+        command.Parameters.AddWithValue("$options", optionsJson);
+        command.ExecuteNonQuery();
+    }
+
+    /// <summary>Writes an import's final counts.</summary>
+    /// <param name="importId">The import's id.</param>
+    /// <param name="sessionsAdded">Sessions the import created.</param>
+    /// <param name="turnsAdded">Turns the import stored.</param>
+    /// <param name="turnsSkipped">Turns already present.</param>
+    /// <param name="turnsRejected">Turns that failed validation.</param>
+    public void CompleteImport(Guid importId, int sessionsAdded, int turnsAdded, int turnsSkipped, int turnsRejected)
+    {
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+                              UPDATE session_imports
+                              SET sessions_added = $sessions, turns_added = $added,
+                                  turns_skipped = $skipped, turns_rejected = $rejected
+                              WHERE import_id = $id;
+                              """;
+        command.Parameters.AddWithValue("$id", importId.ToString("D"));
+        command.Parameters.AddWithValue("$sessions", sessionsAdded);
+        command.Parameters.AddWithValue("$added", turnsAdded);
+        command.Parameters.AddWithValue("$skipped", turnsSkipped);
+        command.Parameters.AddWithValue("$rejected", turnsRejected);
+        command.ExecuteNonQuery();
+    }
+
+    /// <summary>Lists past imports, newest first.</summary>
+    /// <returns>One row per import.</returns>
+    public IReadOnlyList<SessionImportRow> ListImports()
+    {
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+                              SELECT import_id, imported_at_utc, source_sha256, sessions_added, turns_added,
+                                     turns_skipped, turns_rejected
+                              FROM session_imports ORDER BY imported_at_utc DESC, import_id DESC;
+                              """;
+        using var reader = command.ExecuteReader();
+        var rows = new List<SessionImportRow>();
+        while (reader.Read())
+        {
+            rows.Add(new SessionImportRow(
+                Guid.Parse(reader.GetString(0)), Parse(reader.GetString(1)), reader.GetString(2),
+                reader.GetInt32(3), reader.GetInt32(4), reader.GetInt32(5), reader.GetInt32(6)));
+        }
+
+        return rows;
+    }
+
+    /// <summary>Lists the local ids of the turns an import stored that are still in the index.</summary>
+    /// <param name="importId">The import.</param>
+    /// <returns>The turns' local ids.</returns>
+    public IReadOnlyList<Guid> ListImportTurnIds(Guid importId)
+    {
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT archive_turn_id FROM session_import_turns WHERE import_id = $import;";
+        command.Parameters.AddWithValue("$import", importId.ToString("D"));
+        using var reader = command.ExecuteReader();
+        var ids = new List<Guid>();
+        while (reader.Read()) ids.Add(Guid.Parse(reader.GetString(0)));
+        return ids;
+    }
+
+    /// <summary>Lists the sessions an import created that still exist.</summary>
+    /// <param name="importId">The import.</param>
+    /// <returns>The sessions' archive ids.</returns>
+    public IReadOnlyList<Guid> ListImportSessionIds(Guid importId)
+    {
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT archive_session_id FROM session_import_sessions WHERE import_id = $import;";
+        command.Parameters.AddWithValue("$import", importId.ToString("D"));
+        using var reader = command.ExecuteReader();
+        var ids = new List<Guid>();
+        while (reader.Read()) ids.Add(Guid.Parse(reader.GetString(0)));
+        return ids;
+    }
+
+    /// <summary>Removes every record of an import: its row and the links to the turns and sessions it stored.</summary>
+    /// <param name="importId">The import.</param>
+    /// <returns><see langword="true"/> when the import was known.</returns>
+    public bool DeleteImportRecords(Guid importId)
+    {
+        using var connection = _database.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+                              DELETE FROM session_import_turns WHERE import_id = $import;
+                              DELETE FROM session_import_sessions WHERE import_id = $import;
+                              DELETE FROM session_imports WHERE import_id = $import;
+                              """;
+        command.Parameters.AddWithValue("$import", importId.ToString("D"));
+        var removed = command.ExecuteNonQuery();
+        transaction.Commit();
+        return removed > 0;
+    }
+
+    /// <summary>Finds the turns past imports stored for a zip turn id.</summary>
+    /// <param name="sourceArchiveTurnId">The turn's id in the zip.</param>
+    /// <returns>Each matching local turn with the digest its zip declared; empty when none was imported.</returns>
+    public IReadOnlyList<SessionImportedTurn> ListImportedBySource(Guid sourceArchiveTurnId)
+    {
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+                              SELECT archive_turn_id, import_id, source_digest
+                              FROM session_import_turns WHERE source_archive_turn_id = $source;
+                              """;
+        command.Parameters.AddWithValue("$source", sourceArchiveTurnId.ToString("D"));
+        using var reader = command.ExecuteReader();
+        var rows = new List<SessionImportedTurn>();
+        while (reader.Read())
+        {
+            rows.Add(new SessionImportedTurn(
+                Guid.Parse(reader.GetString(0)), Guid.Parse(reader.GetString(1)), (byte[])reader["source_digest"]));
+        }
+
+        return rows;
     }
 
     /// <summary>
@@ -572,7 +869,7 @@ public sealed class SessionIndex
                               SELECT b.archive_turn_id, b.kind, b.sha256, b.length, b.missing, b.obscured
                               FROM session_bodies b
                               JOIN session_turns t ON t.archive_turn_id = b.archive_turn_id
-                              WHERE t.archive_session_id = $id
+                              WHERE t.archive_session_id = $id AND t.retired = 0
                               ORDER BY t.turn_sequence, b.kind;
                               """;
         command.Parameters.AddWithValue("$id", archiveSessionId.ToString("D"));
@@ -607,7 +904,7 @@ public sealed class SessionIndex
         using (var turns = connection.CreateCommand())
         {
             turns.Transaction = transaction;
-            turns.CommandText = "SELECT archive_turn_id FROM session_turns WHERE archive_session_id = $id ORDER BY turn_sequence;";
+            turns.CommandText = "SELECT archive_turn_id FROM session_turns WHERE archive_session_id = $id AND retired = 0 ORDER BY turn_sequence;";
             turns.Parameters.AddWithValue("$id", archiveSessionId.ToString("D"));
             using var reader = turns.ExecuteReader();
             while (reader.Read()) turnIds.Add(Guid.Parse(reader.GetString(0)));
@@ -669,7 +966,20 @@ public sealed class SessionIndex
 
         if (fileName is null) return null;
 
-        // Before the turns, because the rows are found through them.
+        // Before the turns, because the rows are found through them. The import records go too, so a deleted
+        // session is not later mistaken for one that is still present.
+        using (var imported = connection.CreateCommand())
+        {
+            imported.Transaction = transaction;
+            imported.CommandText = """
+                                   DELETE FROM session_import_turns
+                                   WHERE archive_turn_id IN (SELECT archive_turn_id FROM session_turns WHERE archive_session_id = $id);
+                                   DELETE FROM session_import_sessions WHERE archive_session_id = $id;
+                                   """;
+            imported.Parameters.AddWithValue("$id", archiveSessionId.ToString("D"));
+            imported.ExecuteNonQuery();
+        }
+
         using (var bodies = connection.CreateCommand())
         {
             bodies.Transaction = transaction;

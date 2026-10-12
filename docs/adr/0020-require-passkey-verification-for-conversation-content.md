@@ -345,3 +345,62 @@ sequenceDiagram
 - Bad, because the operator needs a browser on the router machine to approve a CLI export. A headless server has nowhere to approve, which is a limit of the dashboard origin, not of this amendment.
 - Bad, because the dashboard has to be opened on the printed link; a request nobody opens lapses after five minutes.
 - The Consequences above that say the CLI cannot run a ceremony on Windows 10 1809, macOS and Linux no longer limit export: the CLI does not need one. They still describe the other gated CLI actions.
+
+## Amendment 2 (2026-10-11): the import is approved against a staged copy of the zip
+
+**Status:** accepted. Extends Amendment 1's browser hand-off to a second gated operation, `import`. It does not change the chosen option, the credential rules, the origin rules, enrollment, or the router's checks on an assertion.
+
+### Why
+
+[#165](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/165) phase 4 adds the reverse of the export: reading a conversation zip back into the history. An import adds conversation text, writes encrypted session files, and feeds the learning jobs, so it is gated the same way as the export (`GatedOperation.Import` already existed for this). What differs is what the approval is bound to. An export is bound to a filter and a destination, both fields the operator can read. An import reads a file that can be replaced between the moment the operator approves and the moment the router reads it, so binding the approval to a path would approve nothing in particular.
+
+David chose (2026-10-11, [phase 4 plan](../plans/issue-165-phase4-import.md), decision 1): the router copies the zip once, hashes the copy, and the approval is bound to that hash. The import reads only the copy.
+
+### Decision
+
+- **The approval is bound to the SHA-256 of a staged copy.** `StageImport(source_path)` copies the file into a private staging file and hashes the copy as it writes it. `GatedOperation.ImportParameters` is that digest, and `ContentGateHooks.RequireImport` consumes a one-operation authorization bound to it before the store is opened. The original file can change, be replaced or be deleted after staging without affecting what is approved or what is read.
+- **A client names the copy; it never supplies a digest.** The approval request (`CreateApprovalRequest`, import case) and the import call both carry a staged id. The router looks the copy up and uses the digest it computed itself. A client cannot get an approval for bytes the router did not stage, and cannot import a different copy with an approval for another.
+- **The staging area is bounded.** At most 4 copies exist at once, each is discarded 30 minutes after it is made, startup recovery deletes any that remain after a restart (they are `.tmp` files in the session folder, which recovery removes when no index row names them), and each copy is deleted when its import finishes, whether or not the import succeeded. A copy needs room for itself plus the same reserve an import uses (the larger of 1 GiB and 10% of the volume).
+- **What may be staged.** An absolute path to a regular file whose first bytes are a zip signature, outside the router's data directory. The check follows every symbolic link or junction, as the export destination check does, so a link into the data directory is refused. The archive itself is validated when it is read, not when it is staged.
+- **The browser hand-off carries an import.** `CreateApprovalRequest`, `ListPendingApprovals`, `BeginApproval`, `FinishApproval` and `WaitForApproval` gain an import case beside the export one. The dashboard shows the source path, the digest and size of the staged copy, and the import options. The router derives the ceremony's operation and digest from the stored request, as in Amendment 1, and mints the authorization when the caller collects it.
+- **The CLI reuses the hand-off on every platform.** `--import-conversations <path>` stages the zip, files the approval request, prints the dashboard link, waits, and imports with the collected authorization. It authenticates to loopback gRPC exactly as `--export-conversations` does (Amendment 1), reads no session file, and uses the same exit codes.
+- **Staging, listing and deleting imports are not gated.** Staging writes a copy of a file the caller could already read, in a folder only the router account can read, and the copy has no effect until an approved import reads it. Listing carries counts and digests, not text. Deleting an import only removes data, which is the position Clear and Sample Size already take in the plan; it is not a way to read content.
+- **Imported turns feed learning but never spend.** They get metadata-only transcript rows marked `imported`, so the embedding backfill and quality rescan treat them like any unscored turn. The spend, savings and ROI readers skip those rows, and the importer never writes the usage ledger, budgets or the benchmark tables. This is a data-handling rule, not a gating rule, and is recorded here because it is what makes an import safe to approve.
+
+```mermaid
+sequenceDiagram
+    participant CLI as CLI (--import-conversations)
+    participant R as Router (loopback gRPC)
+    participant D as Dashboard (browser)
+    CLI->>R: StageImport(source path), x-admin-token
+    R->>R: copy the zip, hash the copy
+    R-->>CLI: staged id, SHA-256, size
+    CLI->>R: CreateApprovalRequest(import, staged id, options)
+    R-->>CLI: approval id and dashboard URL
+    D->>R: ListPendingApprovals
+    R-->>D: source, digest and size of the staged copy, options
+    D->>R: BeginApproval(id), FinishApproval(id, assertion)
+    R->>R: verify the assertion bound to the staged digest
+    CLI->>R: WaitForApproval(id)
+    R-->>CLI: one-operation authorization, minted now
+    CLI->>R: ImportConversations(staged id, options, authorization)
+    R->>R: consume the authorization, read only the staged copy, delete it
+    R-->>CLI: progress, then the result
+```
+
+### Threat analysis
+
+- **The file changes after approval.** This is the case the staged copy exists for. The approved digest is of the copy, and the import reads the copy. A swapped original changes nothing.
+- **The staged copy is replaced.** It lives in the session folder, which only the router account can write. A process that can write there can already replace a session file, so it gains nothing here that it did not have.
+- **A client asks for approval of bytes it chose.** It can only name a copy the router holds, and the router holds only what it copied from a path the caller could read. A caller can therefore get the operator to approve importing a zip it can read, which is the operation being gated; the dashboard shows the source path and the digest.
+- **Flooding.** Staging is limited to 4 copies and approval requests to 16 pending, as in Amendment 1, so a caller with the management token can only occupy those slots for up to 30 and 5 minutes. Nothing is evicted, so a request the operator is reading is never replaced.
+- **A crafted archive.** The importer treats the zip as untrusted: it rejects entry names that climb out of the archive, checks the manifest and the hash of `turns.jsonl`, verifies each body against its declared hash and length before storing it, caps what a body may inflate to, checks free space first, and obscures secrets as it stores. These checks are in the [phase 4 plan](../plans/issue-165-phase4-import.md) and are independent of the passkey: the gate decides who may import, not what a zip may contain.
+- **Collecting someone else's authorization, the management token, and a malicious process driving the browser** are as in Amendment 1. The authorization is bound to one staged digest, so the most a collector can run is the import the operator approved.
+
+### Consequences
+
+- Good, because an import approval means "this exact file", not "whatever is at this path later".
+- Good, because the same hand-off, ceremony and exit codes serve the export and the import, and the CLI works on every platform with no new dependency.
+- Bad, because importing a large zip needs room for a second copy while it runs, on top of the bodies it stores.
+- Bad, because a staged copy that nobody imports occupies disk for up to 30 minutes (or until restart).
+- Bad, because deleting an import is not gated. Someone with the management token can remove imported history without a passkey. That is the same exposure as Clear, which the plan already accepts, and the removed data was added by an import that a passkey approved.

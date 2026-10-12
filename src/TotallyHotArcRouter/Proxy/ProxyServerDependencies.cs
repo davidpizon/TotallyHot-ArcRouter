@@ -244,6 +244,7 @@ public interface IAdminServiceModule
 /// <param name="CredentialStore">Enrolled credentials.</param>
 /// <param name="Options">Passkey gate configuration.</param>
 /// <param name="PendingApprovals">Approval requests filed by callers without a browser, waiting for the operator.</param>
+/// <param name="ImportStaging">The staged copies an import approval request names; the same instance the conversation service imports from.</param>
 public sealed record PasskeyGateDependencies(
     ContentGate ContentGate,
     EnrollmentCodeService EnrollmentCodes,
@@ -253,7 +254,8 @@ public sealed record PasskeyGateDependencies(
     PasskeyApprovalLog ApprovalLog,
     IPasskeyCredentialStore CredentialStore,
     PasskeyOptions Options,
-    PendingApprovalTable PendingApprovals);
+    PendingApprovalTable PendingApprovals,
+    Sessions.Import.ImportStagingArea? ImportStaging = null);
 
 /// <summary>
 /// Backs <see cref="ProviderAdminGrpcService"/>/<see cref="UsageAdminGrpcService"/>, the Governance UI's
@@ -640,11 +642,19 @@ public sealed record CostReconciliationAdminDependencies(
 /// the one this service consumes.
 /// </param>
 /// <param name="Database">Names where the session folder lives, so the summary can report zeros without creating it.</param>
+/// <param name="Importer">The shared importer, whose single-flight rule only holds across calls that share it. Null leaves the import RPCs unavailable.</param>
+/// <param name="ImportStaging">The shared staging area. It must be the instance the passkey service resolves an import approval request from.</param>
+/// <param name="ImportCatalog">Lists and deletes past imports.</param>
+/// <param name="Routing">Supplies the Sample Size the import result's retention report uses.</param>
 public sealed record ConversationAdminDependencies(
     Lazy<Sessions.SessionStore> Store,
     Sessions.Export.ConversationExportWriter Writer,
     ContentGate Gate,
-    TranscriptDatabase Database) : IAdminServiceModule
+    TranscriptDatabase Database,
+    Sessions.Import.ConversationImporter? Importer = null,
+    Sessions.Import.ImportStagingArea? ImportStaging = null,
+    Sessions.Import.ConversationImportCatalog? ImportCatalog = null,
+    Microsoft.Extensions.Options.IOptionsMonitor<Models.RoutingOptions>? Routing = null) : IAdminServiceModule
 {
     /// <inheritdoc/>
     void IAdminServiceModule.Register(IServiceCollection services)
@@ -653,6 +663,10 @@ public sealed record ConversationAdminDependencies(
         services.AddSingleton(Writer);
         services.AddSingleton(Gate);
         services.AddSingleton(Database);
+        if (Importer is not null) services.AddSingleton(Importer);
+        if (ImportStaging is not null) services.AddSingleton(ImportStaging);
+        if (ImportCatalog is not null) services.AddSingleton(ImportCatalog);
+        if (Routing is not null) services.AddSingleton(Routing);
     }
 
     /// <inheritdoc/>

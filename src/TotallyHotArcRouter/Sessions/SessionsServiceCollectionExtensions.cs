@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Sessions.Export;
+using TotallyHot.ArcRouter.Sessions.Import;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Transcripts;
 
@@ -51,6 +52,18 @@ internal static class SessionsServiceCollectionExtensions
         // One shared writer: its single-flight rule (one export at a time) only holds across callers that
         // share the instance.
         services.AddSingleton(sp => new ConversationExportWriter(sp.GetRequiredService<ILogger<ConversationExportWriter>>()));
+
+        // Import (#165 phase 4). One shared importer for the same single-flight reason, one shared staging area
+        // so the copy an approval request names is the copy the import reads, and a sink that gives each imported
+        // turn a metadata-only transcript row so the learning jobs see it.
+        services.AddSingleton<ImportStagingArea>();
+        services.AddSingleton<IImportedTurnSink>(sp => new TranscriptImportSink(sp.GetRequiredService<ITranscriptStore>()));
+        services.AddSingleton(sp => new ConversationImporter(
+            sp.GetRequiredService<IImportedTurnSink>(), sp.GetRequiredService<ILogger<ConversationImporter>>()));
+        services.AddSingleton(sp => new ConversationImportCatalog(
+            sp.GetRequiredService<Lazy<SessionStore>>(),
+            sp.GetRequiredService<SessionMaintenance>(),
+            sp.GetRequiredService<TranscriptDatabase>()));
         return services;
     }
 

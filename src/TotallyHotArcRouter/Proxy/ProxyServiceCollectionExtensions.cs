@@ -22,6 +22,7 @@ using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Router.TextGeneration;
 using TotallyHot.ArcRouter.Sessions;
 using TotallyHot.ArcRouter.Sessions.Export;
+using TotallyHot.ArcRouter.Sessions.Import;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Transcripts;
 using TotallyHot.ArcRouter.Update;
@@ -408,7 +409,8 @@ internal static class ProxyServiceCollectionExtensions
                         ApprovalLog: sp.GetRequiredService<PasskeyApprovalLog>(),
                         CredentialStore: sp.GetRequiredService<IPasskeyCredentialStore>(),
                         Options: sp.GetRequiredService<PasskeyOptions>(),
-                        PendingApprovals: sp.GetRequiredService<PendingApprovalTable>()),
+                        PendingApprovals: sp.GetRequiredService<PendingApprovalTable>(),
+                        ImportStaging: sp.GetRequiredService<ImportStagingArea>()),
                     // Routes the inner Kestrel host's own logs (routing, endpoint dispatch, bind
                     // failures) through the same Serilog pipeline (console + file) the rest of the
                     // application uses - see ProxyServerDependencies.SerilogLogger's remarks. Read once
@@ -532,7 +534,11 @@ internal static class ProxyServiceCollectionExtensions
                         Store: sp.GetRequiredService<Lazy<SessionStore>>(),
                         Writer: sp.GetRequiredService<ConversationExportWriter>(),
                         Gate: sp.GetRequiredService<ContentGate>(),
-                        Database: sp.GetRequiredService<TranscriptDatabase>())
+                        Database: sp.GetRequiredService<TranscriptDatabase>(),
+                        Importer: sp.GetRequiredService<ConversationImporter>(),
+                        ImportStaging: sp.GetRequiredService<ImportStagingArea>(),
+                        ImportCatalog: sp.GetRequiredService<ConversationImportCatalog>(),
+                        Routing: sp.GetRequiredService<IOptionsMonitor<RoutingOptions>>())
                 }));
 
         return services;

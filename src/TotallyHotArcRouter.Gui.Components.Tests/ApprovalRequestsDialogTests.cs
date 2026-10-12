@@ -36,6 +36,31 @@ public sealed class ApprovalRequestsDialogTests
         cut.InvokeAsync(() => cut.Find(selector).Click());
 
     [Fact]
+    public void Lists_an_import_request_with_its_source_the_staged_digest_and_how_it_will_run()
+    {
+        var import = new PendingApprovalInfo(
+            ApprovalId: "i1",
+            Filter: new ConversationExportFilterInfo(),
+            DestinationPath: string.Empty,
+            CreatedAtUtc: new DateTimeOffset(2026, 10, 10, 12, 0, 0, TimeSpan.Zero),
+            ExpiresAtUtc: new DateTimeOffset(2026, 10, 10, 12, 5, 30, TimeSpan.Zero),
+            Import: new PendingImportInfo(
+                "s1", @"C:\in\history.zip", 4_096, new string('f', 64),
+                new ConversationImportOptionsInfo(ImportTime: true, ConversationImportConflictChoice.KeepBoth, KeepLocalCopy: false)));
+        using var ctx = NewContext(out _, out _, import);
+
+        var cut = ctx.Render<ApprovalRequestsDialog>(p => p.Add(c => c.OnClose, () => { }));
+
+        cut.Find("[data-testid='approval-i1']").TextContent.Should().Contain("Import conversations");
+        cut.Find("[data-testid='approval-source']").TextContent.Should().Be(@"C:\in\history.zip");
+        cut.Find("[data-testid='approval-digest']").TextContent.Should().Contain(new string('f', 64)).And.Contain("4,096 bytes");
+        cut.Find("[data-testid='approval-import-options']").TextContent.Should()
+            .Contain("timestamps: now").And.Contain("kept beside the local turn");
+        cut.FindAll("[data-testid='approval-destination']").Should().BeEmpty();
+        cut.FindAll("[data-testid='approval-filter']").Should().BeEmpty();
+    }
+
+    [Fact]
     public void Is_built_on_the_dialog_shell()
     {
         using var ctx = NewContext(out _, out _);

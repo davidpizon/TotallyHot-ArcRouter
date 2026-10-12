@@ -258,6 +258,30 @@ public sealed class SqliteTaxonomyComparisonStoreTests : IDisposable
         Assert.DoesNotContain(expected: dimensionless, collection: pending);
     }
 
+    [Fact]
+    public async Task LoadPendingComparisons_ExcludesImportedRows()
+    {
+        // An imported turn was not served by this router, so a comparison against its (absent) counterfactual
+        // would put it into the savings and ROI totals (#165 phase 4). It must never be queued.
+        var database = CreateDatabase();
+        var transcriptStore = new SqliteTranscriptStore(database: database,
+            options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
+        var comparisonStore = new SqliteTaxonomyComparisonStore(
+            database: database, options: Options.Create(new TranscriptOptions { Enabled = true }));
+        var token = TestContext.Current.CancellationToken;
+
+        var imported = await SeedScoredLinkedTranscriptAsync(
+            store: transcriptStore, correlationId: "imp-1:0", dimension: "code_generation", token: token,
+            origin: TotallyHot.ArcRouter.Sessions.SessionTurnOrigin.Imported);
+        var captured = await SeedScoredLinkedTranscriptAsync(
+            store: transcriptStore, correlationId: "corr-2", dimension: "code_generation", token: token);
+
+        var pending = await comparisonStore.LoadPendingComparisonsAsync(10, cancellationToken: token);
+
+        Assert.Equal(expected: [captured], actual: pending);
+        Assert.DoesNotContain(expected: imported, collection: pending);
+    }
+
     /// <summary>Creates the store over a freshly-migrated database at <see cref="_dbPath"/>.</summary>
     private SqliteTaxonomyComparisonStore CreateStore()
     {
@@ -275,7 +299,8 @@ public sealed class SqliteTaxonomyComparisonStoreTests : IDisposable
 
     /// <summary>Inserts one scored transcript with a memory-entry link, returning its row id.</summary>
     private static async Task<long> SeedScoredLinkedTranscriptAsync(
-        SqliteTranscriptStore store, string correlationId, string? dimension, CancellationToken token)
+        SqliteTranscriptStore store, string correlationId, string? dimension, CancellationToken token,
+        string origin = TotallyHot.ArcRouter.Sessions.SessionTurnOrigin.Captured)
     {
         var id = await store.InsertAsync(
             record: new TranscriptRecord(
@@ -297,7 +322,8 @@ public sealed class SqliteTaxonomyComparisonStoreTests : IDisposable
                 10,
                 5,
                 null,
-                DimBestModel: "model-b"),
+                DimBestModel: "model-b",
+                Origin: origin),
             cancellationToken: token);
         await store.LinkMemoryEntryAsync(transcriptId: id!.Value, 1, cancellationToken: token);
         await store.UpdateOutcomeAsync(correlationId: correlationId, 0.8, cancellationToken: token);

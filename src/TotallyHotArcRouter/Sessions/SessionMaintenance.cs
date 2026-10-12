@@ -105,6 +105,33 @@ public sealed class SessionMaintenance(
     }
 
     /// <summary>
+    /// Deletes the given sessions, and with them their transcript rows and learned embeddings. Used when an
+    /// import is deleted. Does nothing, and opens no store, when no session folder exists.
+    /// </summary>
+    /// <param name="archiveSessionIds">The sessions to delete; unknown ids are ignored.</param>
+    /// <returns>What was deleted; zero sessions and a final result when nothing was ever captured.</returns>
+    public SessionDeletionResult DeleteSessions(IReadOnlyCollection<Guid> archiveSessionIds)
+    {
+        ArgumentNullException.ThrowIfNull(archiveSessionIds);
+        return Directory.Exists(_folder) && archiveSessionIds.Count > 0
+            ? Open().DeleteSessions(archiveSessionIds)
+            : NothingToDelete;
+    }
+
+    /// <summary>
+    /// Deletes the transcript rows of turns that left the history without their session (retired turns of a
+    /// deleted import), and the learned embeddings those rows pointed at.
+    /// </summary>
+    /// <param name="archiveTurnIds">The turns that were retired.</param>
+    public void DeleteTurnRows(IReadOnlyCollection<Guid> archiveTurnIds)
+    {
+        ArgumentNullException.ThrowIfNull(archiveTurnIds);
+        if (transcripts is null || archiveTurnIds.Count == 0 || !File.Exists(_databasePath)) return;
+
+        DeleteMemoryEntries(transcripts.DeleteByArchiveTurns(archiveTurnIds));
+    }
+
+    /// <summary>
     /// Opens the store and remembers to drop transcript rows and embeddings when a session is deleted.
     /// The callback is installed once; a later delete on the same store still sees it.
     /// </summary>

@@ -1,0 +1,316 @@
+@* The Import half of the Sessions tab's Export / Import dialog (#165 phase 4, docs/plans/issue-165-phase4-import.md
+   PR 4b). Rendered inside ExportDialog's DialogShell, so it adds no chrome of its own. Importing adds conversation
+   text to the history, so the router requires a one-operation passkey approval (ADR-0020) bound to the SHA-256 of a
+   private copy it makes of the zip: the panel asks the router to stage the zip, earns the approval for the digest
+   the router returns, and hands it to the import RPC, which reads only that copy. The router, not this panel,
+   computes the digest, so what the passkey approves is what is imported. Past imports are listed with a delete. *@
+@implements IDisposable
+@inject ConversationExportStore ImportStore
+@inject PasskeyAdminStore PasskeyStore
+<div class="space-y-3" data-testid="import-panel">
+    @if (ImportStore.ImportResult is { } result)
+    {
+        <div class="space-y-1 text-xs" data-testid="import-result">
+            <p class="text-emerald-400 font-medium">Import finished</p>
+            <p class="text-slate-400" data-testid="import-result-counts">
+                @result.TurnsAdded.ToString("N0", CultureInfo.InvariantCulture) turns added in
+                @result.SessionsAdded.ToString("N0", CultureInfo.InvariantCulture) new conversations;
+                @result.TurnsAlreadyPresent.ToString("N0", CultureInfo.InvariantCulture) already present,
+                @result.TurnsConflictKept.ToString("N0", CultureInfo.InvariantCulture) kept the local copy,
+                @result.SessionsSkipped.ToString("N0", CultureInfo.InvariantCulture) conversations matched exactly.
+            </p>
+            @if (result.TurnsToGrade > 0)
+            {
+                <p class="text-slate-400" data-testid="import-result-grading">
+                    @result.TurnsToGrade.ToString("N0", CultureInfo.InvariantCulture) imported turns have no score and will be
+                    graded like any other unscored turn.
+                </p>
+            }
+            @if (result.TurnsRejected > 0)
+            {
+                <p class="text-amber-400" data-testid="import-result-rejected">
+                    @result.TurnsRejected.ToString("N0", CultureInfo.InvariantCulture) turns failed validation and were left out.
+                </p>
+            }
+            @if (result.TurnsDueForRetention > 0)
+            {
+                <p class="text-amber-400" data-testid="import-result-retention">
+                    The next retention pass will delete @result.TurnsDueForRetention.ToString("N0", CultureInfo.InvariantCulture) turns
+                    (Sample Size). Importing with "now" timestamps keeps an import by making it the newest history.
+                </p>
+            }
+        </div>
+
+        <div class="flex gap-2">
+            <button @onclick="NewImport" class="flex-1 btn btn-ghost" data-testid="import-another">
+                Import another
+            </button>
+            <button @onclick="OnClose" class="flex-1 btn btn-primary" data-testid="import-done">
+                Done
+            </button>
+        </div>
+    }
+    else
+    {
+        <p class="text-xs text-slate-400 leading-5">
+            Adds the conversations in a zip to the history. The router copies the zip first and you approve that exact
+            copy with a passkey. Turns already present are skipped, secrets are obscured as they are stored, and
+            imported turns never count toward spend or savings.
+        </p>
+
+        @if (PasskeyStore.GateStatus is { Enrolled: false })
+        {
+            <p class="text-xs text-amber-400 leading-5" data-testid="import-enrollment-hint">
+                No passkey is enrolled yet. Run <span class="font-mono text-slate-200">@PasskeyStore.EnrollmentCommandHint</span>
+                from an elevated shell, then add a passkey in Settings.
+            </p>
+        }
+
+        <div class="space-y-1">
+            <label for="import-source" class="text-xs text-slate-400 font-medium uppercase tracking-widest">
+                Zip path (on the router machine)
+            </label>
+            <input id="import-source" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="C:\exports\conversations.zip" value="@_source" disabled="@_busy"
+                   @oninput="e => _source = (string?)e.Value ?? string.Empty"
+                   data-testid="import-source" class="w-full px-3 py-2 text-sm font-mono ds-input"/>
+            <p class="text-xs text-slate-600">An absolute path to a zip written by an export, outside the router's data folder.</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-1">
+                <label for="import-timestamps" class="text-xs text-slate-400 font-medium uppercase tracking-widest">Timestamps</label>
+                <select id="import-timestamps" disabled="@_busy"
+                        @onchange="e => _importTime = (string?)e.Value == ImportTimeValue"
+                        data-testid="import-timestamps" class="w-full px-3 py-2 text-sm ds-input">
+                    <option value="@OriginalValue" selected="@(!_importTime)">Keep the original times</option>
+                    <option value="@ImportTimeValue" selected="@_importTime">Use now, keep the order</option>
+                </select>
+            </div>
+            <div class="space-y-1">
+                <label for="import-conflict" class="text-xs text-slate-400 font-medium uppercase tracking-widest">If a turn differs</label>
+                <select id="import-conflict" disabled="@(_busy || _keepLocal)"
+                        @onchange="e => _conflict = ParseConflict((string?)e.Value)"
+                        data-testid="import-conflict" class="w-full px-3 py-2 text-sm ds-input">
+                    <option value="@ConversationImportConflictChoice.Overwrite" selected="@(_conflict == ConversationImportConflictChoice.Overwrite)">Replace the local turn</option>
+                    <option value="@ConversationImportConflictChoice.KeepBoth" selected="@(_conflict == ConversationImportConflictChoice.KeepBoth)">Keep both</option>
+                </select>
+            </div>
+        </div>
+
+        <label class="flex items-center gap-2 text-xs text-slate-300">
+            <input type="checkbox" checked="@_keepLocal" disabled="@_busy"
+                   @onchange="e => _keepLocal = (bool)(e.Value ?? true)"
+                   data-testid="import-keep-local"/>
+            Keep my local copy when a turn differs
+        </label>
+
+        @if (_errorMessage is not null)
+        {
+            <p class="text-xs text-red-400" role="alert" data-testid="import-error">@_errorMessage</p>
+        }
+
+        @if (_busy)
+        {
+            <p class="text-xs text-slate-400" role="status" data-testid="import-progress">@_status</p>
+        }
+
+        <div class="flex gap-2">
+            <button @onclick="OnClose" class="flex-1 btn btn-ghost" data-testid="import-cancel">
+                Cancel
+            </button>
+            <button @onclick="ImportAsync"
+                    disabled="@(!CanImport)"
+                    class="flex-1 btn btn-primary"
+                    data-testid="import-confirm">
+                Import
+            </button>
+        </div>
+    }
+
+    <div class="space-y-2 pt-1 border-t border-slate-700" data-testid="import-history">
+        <p class="text-xs text-slate-400 font-medium uppercase tracking-widest">Past imports</p>
+        @if (ImportStore.Imports.Count == 0)
+        {
+            <p class="text-xs text-slate-500" data-testid="import-history-empty">No imports yet.</p>
+        }
+
+        @foreach (var past in ImportStore.Imports)
+        {
+            <div class="flex items-center gap-2 text-xs" data-testid="import-row-@past.ImportId">
+                <div class="flex-1 space-y-1">
+                    <p class="text-slate-200" data-testid="import-row-summary">
+                        @past.ImportedAtUtc.UtcDateTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) UTC:
+                        @past.TurnsAdded.ToString("N0", CultureInfo.InvariantCulture) turns in
+                        @past.SessionsAdded.ToString("N0", CultureInfo.InvariantCulture) new conversations
+                    </p>
+                    <p class="text-slate-500 font-mono" title="@past.SourceSha256" data-testid="import-row-digest">SHA-256 @Shorten(past.SourceSha256)</p>
+                </div>
+                @if (_confirmDeleteId == past.ImportId)
+                {
+                    <button @onclick="() => DeleteAsync(past.ImportId)" disabled="@_busy"
+                            class="btn btn-ghost" data-testid="import-row-delete-confirm">
+                        Confirm delete
+                    </button>
+                }
+                else
+                {
+                    <button @onclick="() => _confirmDeleteId = past.ImportId" disabled="@_busy"
+                            class="btn btn-ghost" data-testid="import-row-delete">
+                        Delete
+                    </button>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+
+    private const string OriginalValue = "original";
+    private const string ImportTimeValue = "import-time";
+
+    /// <summary>Invoked when the whole dialog should close - Cancel or Done. A running import is left to finish on the router.</summary>
+    [Parameter]
+    [EditorRequired]
+    public EventCallback OnClose { get; set; }
+
+    private string _source = string.Empty;
+    private bool _importTime;
+    private bool _keepLocal = true;
+    private ConversationImportConflictChoice _conflict = ConversationImportConflictChoice.Overwrite;
+    private bool _busy;
+    private string _status = string.Empty;
+    private string? _errorMessage;
+    private string? _confirmDeleteId;
+    private CancellationTokenSource? _cancellation;
+
+    /// <summary>
+    /// Whether Import is available: a source is entered, nothing is running, and the router has not said no passkey
+    /// is enrolled (an unknown gate state still allows the attempt, and the router's own refusal then explains).
+    /// </summary>
+    private bool CanImport =>
+        !_busy
+        && !string.IsNullOrWhiteSpace(_source)
+        && PasskeyStore.GateStatus is not { Enrolled: false };
+
+    /// <inheritdoc/>
+    protected override async Task OnInitializedAsync()
+    {
+        ImportStore.Changed += HandleStoreChanged;
+        ImportStore.ResetImport();
+
+        // Best-effort, like the dialog's own loads: a failure leaves the list empty and the router explains if it matters.
+        await ImportStore.LoadImportsAsync();
+        if (PasskeyStore.GateStatus is null) await PasskeyStore.RefreshAsync();
+    }
+
+    /// <summary>
+    /// Runs the import: stages the zip, earns the one-operation passkey approval bound to the digest of the staged
+    /// copy, and hands the approval to the import RPC. A dismissed browser prompt, a refusal, or a router failure
+    /// is shown inline and leaves the panel open so the operator can correct it and retry (the staged copy is
+    /// discarded by the router, and a retry stages again).
+    /// </summary>
+    private async Task ImportAsync()
+    {
+        _errorMessage = null;
+        _busy = true;
+        var cancellation = new CancellationTokenSource();
+        _cancellation = cancellation;
+        var cancellationToken = cancellation.Token;
+        try
+        {
+            // With the local copy kept the conflict choice is not consulted, so say so rather than send a stale choice.
+            var options = new ConversationImportOptionsInfo(
+                _importTime, _keepLocal ? ConversationImportConflictChoice.Skip : _conflict, _keepLocal);
+
+            _status = "Staging a copy of the zip…";
+            var staged = await ImportStore.StageImportAsync(_source.Trim(), cancellationToken);
+
+            _status = "Waiting for passkey…";
+            var authorization = await PasskeyStore.AuthorizeOperationAsync(
+                operation: PasskeyOperations.Import,
+                parameters: PasskeyOperations.ImportParameters(staged.Sha256),
+                cancellationToken: cancellationToken);
+
+            _status = "Importing…";
+            await ImportStore.ImportAsync(staged.StagedId, options, authorization, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // The panel was disposed mid-import; the router keeps what it stored and a re-run fills in the rest.
+        }
+        catch (WebAuthnCeremonyException ex)
+        {
+            _errorMessage = ex.Message;
+        }
+        catch (GrpcAdminException ex)
+        {
+            _errorMessage = ex.IsUnavailable ? "Could not reach the router. Is the proxy running?" : ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+            _cancellation = null;
+            cancellation.Dispose();
+        }
+
+        if (!cancellationToken.IsCancellationRequested) await ImportStore.LoadImportsAsync();
+    }
+
+    /// <summary>Deletes one past import after the operator has confirmed it.</summary>
+    /// <param name="importId">The import to delete.</param>
+    private async Task DeleteAsync(string importId)
+    {
+        _errorMessage = null;
+        _confirmDeleteId = null;
+        _busy = true;
+        try
+        {
+            await ImportStore.DeleteImportAsync(importId);
+        }
+        catch (GrpcAdminException ex)
+        {
+            _errorMessage = ex.IsUnavailable ? "Could not reach the router. Is the proxy running?" : ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>Returns to the form after a finished import, keeping the chosen options.</summary>
+    private void NewImport()
+    {
+        _source = string.Empty;
+        _errorMessage = null;
+        ImportStore.ResetImport();
+    }
+
+    /// <summary>Shortens a digest to its first sixteen characters for the list; the full value is the element's title.</summary>
+    /// <param name="sha256">The full digest.</param>
+    /// <returns>The first sixteen characters and an ellipsis, or the digest itself when it is already short.</returns>
+    private static string Shorten(string sha256) => sha256.Length > 16 ? sha256[..16] + "…" : sha256;
+
+    /// <summary>Reads the conflict choice from a select's value.</summary>
+    /// <param name="value">The selected option's value.</param>
+    /// <returns>The choice; anything unrecognised is overwrite, the first option.</returns>
+    private static ConversationImportConflictChoice ParseConflict(string? value) =>
+        Enum.TryParse<ConversationImportConflictChoice>(value, out var choice) && choice != ConversationImportConflictChoice.Skip
+            ? choice
+            : ConversationImportConflictChoice.Overwrite;
+
+    /// <summary>Re-renders when the store changes.</summary>
+    private void HandleStoreChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        ImportStore.Changed -= HandleStoreChanged;
+        _cancellation?.Cancel();
+    }
+
+}

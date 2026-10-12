@@ -7,8 +7,9 @@
 @inject PasskeyAdminStore PasskeyStore
 <DialogShell Title="Approvals" CloseAriaLabel="Close approvals dialog" OnClose="OnClose" EnableEscapeToClose="true">
     <p class="text-xs text-slate-400 leading-5">
-        Exports requested from the command line wait here for your passkey. Check the destination before you approve:
-        an approval covers only that filter and destination, and nothing is written until you approve.
+        Exports and imports requested from the command line wait here for your passkey. Check the details before you
+        approve: an export approval covers only that filter and destination, an import approval covers only that zip,
+        and nothing is written or imported until you approve.
     </p>
 
     @if (PasskeyStore.GateStatus is { Enrolled: false })
@@ -42,15 +43,36 @@
         var isFocus = pending.ApprovalId == FocusApprovalId;
         <div class="rounded border @(isFocus ? "border-sky-500" : "border-slate-700") p-3 space-y-2 text-xs"
              data-testid="approval-@pending.ApprovalId">
-            <p class="text-slate-200 font-medium">Export conversations</p>
-            <div class="space-y-1">
-                <p class="text-slate-400">Write the zip to (on the router machine):</p>
-                <p class="font-mono text-slate-200 break-all" data-testid="approval-destination">@pending.DestinationPath</p>
-            </div>
-            <div class="space-y-1">
-                <p class="text-slate-400">Which turns:</p>
-                <p class="font-mono text-slate-200 break-all" data-testid="approval-filter">@DescribeFilter(pending.Filter)</p>
-            </div>
+            @if (pending.Import is { } import)
+            {
+                <p class="text-slate-200 font-medium">Import conversations</p>
+                <div class="space-y-1">
+                    <p class="text-slate-400">Import the zip from (on the router machine):</p>
+                    <p class="font-mono text-slate-200 break-all" data-testid="approval-source">@import.SourcePath</p>
+                </div>
+                <div class="space-y-1">
+                    <p class="text-slate-400">The router's copy of it (this is what your passkey approves):</p>
+                    <p class="font-mono text-slate-200 break-all" data-testid="approval-digest">
+                        @import.Sha256 (@import.SizeBytes.ToString("N0", CultureInfo.InvariantCulture) bytes)
+                    </p>
+                </div>
+                <div class="space-y-1">
+                    <p class="text-slate-400">How:</p>
+                    <p class="font-mono text-slate-200 break-all" data-testid="approval-import-options">@DescribeImport(import.Options)</p>
+                </div>
+            }
+            else
+            {
+                <p class="text-slate-200 font-medium">Export conversations</p>
+                <div class="space-y-1">
+                    <p class="text-slate-400">Write the zip to (on the router machine):</p>
+                    <p class="font-mono text-slate-200 break-all" data-testid="approval-destination">@pending.DestinationPath</p>
+                </div>
+                <div class="space-y-1">
+                    <p class="text-slate-400">Which turns:</p>
+                    <p class="font-mono text-slate-200 break-all" data-testid="approval-filter">@DescribeFilter(pending.Filter)</p>
+                </div>
+            }
             <p class="text-slate-500" data-testid="approval-expires">
                 Expires @pending.ExpiresAtUtc.UtcDateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture) UTC
             </p>
@@ -183,6 +205,23 @@
         if (!string.IsNullOrWhiteSpace(filter.Provider)) parts.Add($"provider {filter.Provider}");
         if (!string.IsNullOrWhiteSpace(filter.Model)) parts.Add($"model {filter.Model}");
         return parts.Count == 0 ? "every captured turn" : string.Join(", ", parts);
+    }
+
+    /// <summary>Describes how an import will run in the words the operator would use.</summary>
+    /// <param name="options">The request's options.</param>
+    /// <returns>A one-line description.</returns>
+    private static string DescribeImport(ConversationImportOptionsInfo options)
+    {
+        var timestamps = options.ImportTime ? "timestamps: now, keeping the order" : "timestamps: original";
+        var conflict = options.KeepLocalCopy
+            ? "a turn that differs keeps the local copy"
+            : options.OnConflict switch
+            {
+                ConversationImportConflictChoice.Overwrite => "a turn that differs replaces the local turn",
+                ConversationImportConflictChoice.KeepBoth => "a turn that differs is kept beside the local turn",
+                _ => "a turn that differs keeps the local copy",
+            };
+        return $"{timestamps}; {conflict}";
     }
 
     /// <summary>Re-renders when the passkey store changes.</summary>

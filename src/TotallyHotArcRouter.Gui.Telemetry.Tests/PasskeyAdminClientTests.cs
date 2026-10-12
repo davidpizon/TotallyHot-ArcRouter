@@ -408,6 +408,47 @@ public class PasskeyAdminClientTests
     }
 
     [Fact]
+    public async Task ListPendingApprovalsAsync_maps_an_import_request_with_its_digest_and_options()
+    {
+        var stub = new StubClient
+        {
+            PendingList = new Contract.ListPendingApprovalsResponse
+            {
+                Approvals =
+                {
+                    new Contract.PendingApproval
+                    {
+                        ApprovalId = "a2",
+                        Import = new Contract.ImportApprovalDetails
+                        {
+                            StagedId = "s1",
+                            SourcePath = "/in/history.zip",
+                            SizeBytes = 2048,
+                            Sha256 = new string('d', 64),
+                            Options = new Contract.ImportOptions
+                            {
+                                Timestamps = Contract.ImportTimestampMode.ImportTime,
+                                OnConflict = Contract.ImportConflictMode.KeepBoth,
+                                ReplaceLocalOnConflict = true
+                            }
+                        },
+                        CreatedAtUtc = Timestamp.FromDateTimeOffset(Created),
+                        ExpiresAtUtc = Timestamp.FromDateTimeOffset(Created.AddMinutes(5))
+                    }
+                }
+            }
+        };
+
+        var pending = await new PasskeyAdminClient(stub).ListPendingApprovalsAsync(TestContext.Current.CancellationToken);
+
+        var import = pending.Should().ContainSingle().Subject;
+        import.DestinationPath.Should().BeEmpty();
+        import.Import.Should().Be(new PendingImportInfo(
+            "s1", "/in/history.zip", 2048, new string('d', 64),
+            new ConversationImportOptionsInfo(true, ConversationImportConflictChoice.KeepBoth, false)));
+    }
+
+    [Fact]
     public async Task BeginApprovalAsync_sends_only_the_request_id_and_returns_the_options_json()
     {
         var stub = new StubClient { Options = new Contract.WebAuthnOptionsResponse { OptionsJson = "{\"c\":1}" } };

@@ -19,11 +19,13 @@ public sealed record SessionBodyInput(SessionBodyKind Kind, byte[]? Body, Sessio
 /// <param name="CreatedAtUtc">When the turn was captured, or its original time when imported.</param>
 /// <param name="Bodies">The turn's bodies, in the order their frames are written.</param>
 /// <param name="Origin"><see cref="SessionTurnOrigin.Captured"/> by default.</param>
+/// <param name="Import">What a conversation import records about the turn, committed with it; <see langword="null"/> for a captured turn.</param>
 public sealed record SessionTurnInput(
     Guid ArchiveTurnId,
     DateTimeOffset CreatedAtUtc,
     IReadOnlyList<SessionBodyInput> Bodies,
-    string Origin = SessionTurnOrigin.Captured);
+    string Origin = SessionTurnOrigin.Captured,
+    SessionTurnImport? Import = null);
 
 /// <summary>What <see cref="SessionStore.RecoverOnStartup"/> found and fixed.</summary>
 /// <param name="TruncatedFiles">Session files that held frames beyond their committed extent, now cut back.</param>
@@ -402,7 +404,7 @@ public sealed class SessionStore : ISessionExtractReader
 
                     var hashes = new List<SessionBodyHashRow>();
                     var startOffset = SessionFile.FirstFrameOffset;
-                    foreach (var turn in _index.ListTurns(archiveSessionId))
+                    foreach (var turn in _index.ListTurns(archiveSessionId, includeRetired: true))
                     {
                         foreach (var frame in file.ReadTurn(startOffset, turn.FirstFrameOrdinal, turn.FrameCount))
                         {
@@ -450,6 +452,79 @@ public sealed class SessionStore : ISessionExtractReader
 
     /// <summary>Gets the absolute path of the folder that holds the session files.</summary>
     public string Folder => _folder;
+
+    /// <summary>Looks up one committed turn by its archive id, in whichever session holds it.</summary>
+    /// <param name="archiveTurnId">The turn's archive id.</param>
+    /// <returns>The turn's index row, or <see langword="null"/> when no session holds it.</returns>
+    public SessionTurnRow? TryGetTurn(Guid archiveTurnId) => _index.TryGetTurn(archiveTurnId);
+
+    /// <summary>
+    /// Retires a turn an overwriting import has replaced: it stays in its file but leaves every read and the
+    /// session checksum (see <see cref="SessionIndex.RetireTurn"/>). Taken under the session's gate so no append
+    /// interleaves with the checksum recomputation.
+    /// </summary>
+    /// <param name="archiveTurnId">The turn to retire.</param>
+    /// <returns><see langword="true"/> when a live turn was retired.</returns>
+    public bool RetireTurn(Guid archiveTurnId)
+    {
+        var turn = _index.TryGetTurn(archiveTurnId);
+        if (turn is null) return false;
+
+        _rotationLock.EnterReadLock();
+        try
+        {
+            lock (_sessionGates.GetOrAdd(turn.ArchiveSessionId, static _ => new object()))
+            {
+                return _index.RetireTurn(archiveTurnId);
+            }
+        }
+        finally
+        {
+            _rotationLock.ExitReadLock();
+        }
+    }
+
+    /// <summary>Records that a conversation import has started (see <see cref="SessionIndex.BeginImport"/>).</summary>
+    /// <param name="importId">The import's id.</param>
+    /// <param name="importedAtUtc">When it started.</param>
+    /// <param name="sourceSha256Hex">Lowercase hex SHA-256 of the zip.</param>
+    /// <param name="optionsJson">The options it ran with, as JSON.</param>
+    public void BeginImport(Guid importId, DateTimeOffset importedAtUtc, string sourceSha256Hex, string optionsJson) =>
+        _index.BeginImport(importId, importedAtUtc, sourceSha256Hex, optionsJson);
+
+    /// <summary>Writes an import's final counts (see <see cref="SessionIndex.CompleteImport"/>).</summary>
+    /// <param name="importId">The import's id.</param>
+    /// <param name="sessionsAdded">Sessions the import created.</param>
+    /// <param name="turnsAdded">Turns the import stored.</param>
+    /// <param name="turnsSkipped">Turns already present.</param>
+    /// <param name="turnsRejected">Turns that failed validation.</param>
+    public void CompleteImport(Guid importId, int sessionsAdded, int turnsAdded, int turnsSkipped, int turnsRejected) =>
+        _index.CompleteImport(importId, sessionsAdded, turnsAdded, turnsSkipped, turnsRejected);
+
+    /// <summary>Lists past imports, newest first.</summary>
+    /// <returns>One row per import.</returns>
+    public IReadOnlyList<SessionImportRow> ListImports() => _index.ListImports();
+
+    /// <summary>Lists the local ids of the turns an import stored that are still in the index.</summary>
+    /// <param name="importId">The import.</param>
+    /// <returns>The turns' local ids.</returns>
+    public IReadOnlyList<Guid> ListImportTurnIds(Guid importId) => _index.ListImportTurnIds(importId);
+
+    /// <summary>Lists the sessions an import created that still exist.</summary>
+    /// <param name="importId">The import.</param>
+    /// <returns>The sessions' archive ids.</returns>
+    public IReadOnlyList<Guid> ListImportSessionIds(Guid importId) => _index.ListImportSessionIds(importId);
+
+    /// <summary>Removes every record of an import (see <see cref="SessionIndex.DeleteImportRecords"/>).</summary>
+    /// <param name="importId">The import.</param>
+    /// <returns><see langword="true"/> when the import was known.</returns>
+    public bool DeleteImportRecords(Guid importId) => _index.DeleteImportRecords(importId);
+
+    /// <summary>Finds the turns past imports stored for a zip turn id.</summary>
+    /// <param name="sourceArchiveTurnId">The turn's id in the zip.</param>
+    /// <returns>Each matching local turn with the digest its zip declared.</returns>
+    public IReadOnlyList<SessionImportedTurn> ListImportedBySource(Guid sourceArchiveTurnId) =>
+        _index.ListImportedBySource(sourceArchiveTurnId);
 
     /// <summary>Hashes one frame's stored plaintext for a backfill.</summary>
     /// <param name="frame">The frame, whose body is read to the end.</param>
@@ -911,7 +986,7 @@ public sealed class SessionStore : ISessionExtractReader
                 turn.Bodies.Count, file.Length, turn.CreatedAtUtc, turn.Origin);
             try
             {
-                _index.CommitTurn(turnRow, hashes);
+                _index.CommitTurn(turnRow, hashes, turn.Import);
             }
             catch
             {
