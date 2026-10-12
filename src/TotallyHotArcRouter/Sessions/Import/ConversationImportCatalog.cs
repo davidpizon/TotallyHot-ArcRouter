@@ -19,9 +19,10 @@ public sealed class ConversationImportCatalog(
     Lazy<SessionStore> store,
     SessionMaintenance maintenance,
     Transcripts.TranscriptDatabase database,
+    // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local
+    // The one use, in Delete, is a refusal guard, but it reads live state (IsRunning) on every call, so it is not a constructor-time check.
     ConversationImporter? importer = null)
 {
-    private readonly ConversationImporter? _importer = importer;
     private readonly string _folder = SessionStore.FolderBeside(database.DatabasePath);
 
     /// <summary>Lists past imports, newest first. Opens no store, and creates no folder, on a router that never captured.</summary>
@@ -35,7 +36,7 @@ public sealed class ConversationImportCatalog(
     /// <exception cref="ConversationImportException">With <see cref="ConversationImportFailure.InProgress"/> while an import is running.</exception>
     public ConversationImportDeleteResult? Delete(Guid importId)
     {
-        if (_importer?.IsRunning == true)
+        if (importer?.IsRunning == true)
         {
             throw new ConversationImportException(
                 ConversationImportFailure.InProgress, "An import is running. Delete the import after it finishes.");
