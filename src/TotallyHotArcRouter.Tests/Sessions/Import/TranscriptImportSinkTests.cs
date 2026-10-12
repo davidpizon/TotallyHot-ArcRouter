@@ -58,6 +58,9 @@ public sealed class TranscriptImportSinkTests : IDisposable
             new ImportedTurn(session, turn, "client-a", 3, DateTimeOffset.UtcNow, metadata.RootElement.Clone(), "hello there", "hi"),
             TestContext.Current.CancellationToken);
 
+        var record = await store.GetTranscriptAsync(1, TestContext.Current.CancellationToken);
+        Assert.Equal(SessionTurnOrigin.Imported, record!.Origin);
+
         using var connection = database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """

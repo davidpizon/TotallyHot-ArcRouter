@@ -338,8 +338,17 @@ public sealed class ConversationAdminGrpcService : Contract.ConversationAdminSer
             throw new RpcException(new Status(StatusCode.InvalidArgument, "'import_id' is not a valid import id."));
         }
 
-        var removed = catalog.Delete(importId)
-                      ?? throw new RpcException(new Status(StatusCode.NotFound, "No import has that id."));
+        ConversationImportDeleteResult? removed;
+        try
+        {
+            removed = catalog.Delete(importId);
+        }
+        catch (ConversationImportException ex)
+        {
+            throw new RpcException(new Status(ToStatusCode(ex.Reason), ex.Message));
+        }
+
+        if (removed is null) throw new RpcException(new Status(StatusCode.NotFound, "No import has that id."));
         _logger.LogInformation(
             "Conversation import deleted: {Sessions} sessions removed, {Turns} turns retired.",
             removed.SessionsDeleted, removed.TurnsRetired);

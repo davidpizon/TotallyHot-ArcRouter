@@ -501,6 +501,11 @@ public sealed class SessionStore : ISessionExtractReader
     public void CompleteImport(Guid importId, int sessionsAdded, int turnsAdded, int turnsSkipped, int turnsRejected) =>
         _index.CompleteImport(importId, sessionsAdded, turnsAdded, turnsSkipped, turnsRejected);
 
+    /// <summary>Counts each session's live turns, which is what retention measures (see <see cref="SessionIndex.LiveTurnStats"/>).</summary>
+    /// <returns>The live turn count of each session that has one.</returns>
+    internal IReadOnlyDictionary<Guid, int> LiveTurnCounts() =>
+        _index.LiveTurnStats().ToDictionary(pair => pair.Key, pair => pair.Value.Count);
+
     /// <summary>Lists past imports, newest first.</summary>
     /// <returns>One row per import.</returns>
     public IReadOnlyList<SessionImportRow> ListImports() => _index.ListImports();
@@ -745,18 +750,24 @@ public sealed class SessionStore : ISessionExtractReader
     {
         if (maxTurns <= 0) return [];
 
+        // Live turns only: a retired turn is no longer history, but it still counts in the row's turn count.
+        var live = _index.LiveTurnStats();
+        int LiveCount(SessionFileRow row) => live.TryGetValue(row.ArchiveSessionId, out var stats) ? stats.Count : 0;
+        DateTimeOffset LastLive(SessionFileRow row) =>
+            live.TryGetValue(row.ArchiveSessionId, out var stats) ? stats.Last : row.LastTurnAtUtc ?? row.CreatedAtUtc;
+
         var sessions = _index.ListSessions()
-            .OrderBy(row => row.LastTurnAtUtc ?? row.CreatedAtUtc)
+            .OrderBy(LastLive)
             .ThenBy(row => row.CreatedAtUtc)
             .ToList();
-        var total = sessions.Sum(row => (long)row.TurnCount);
+        var total = sessions.Sum(row => (long)LiveCount(row));
         var expired = new List<SessionFileRow>();
 
         // Stops one short of the end so the newest session survives.
         for (var i = 0; i < sessions.Count - 1 && total > maxTurns; i++)
         {
             expired.Add(sessions[i]);
-            total -= sessions[i].TurnCount;
+            total -= LiveCount(sessions[i]);
         }
 
         return expired;

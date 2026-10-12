@@ -173,6 +173,17 @@ public sealed class ImportStagingArea
         var dataDirectory = Path.GetDirectoryName(sessionFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         var resolved = Path.Combine(
             ConversationExportWriter.ResolveLinks(Path.GetDirectoryName(full) ?? full), Path.GetFileName(full));
+
+        // The file itself can be a link too; what it finally points at is what would be opened.
+        try
+        {
+            if (new FileInfo(full).ResolveLinkTarget(returnFinalTarget: true) is { } target) resolved = target.FullName;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw Invalid("The import source could not be examined.");
+        }
+
         if (ConversationExportWriter.IsUnder(full, sessionFolder)
             || (dataDirectory is not null && ConversationExportWriter.IsUnder(full, dataDirectory))
             || ConversationExportWriter.IsUnder(resolved, ConversationExportWriter.ResolveLinks(sessionFolder))

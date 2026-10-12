@@ -261,6 +261,66 @@ public sealed class ConversationImportServiceTests : IDisposable
         Assert.Equal(StatusCode.NotFound, ex.StatusCode);
     }
 
+    /// <summary>Deleting an import is refused while an import is running, so it cannot orphan turns the import is still adding.</summary>
+    [Fact]
+    public async Task DeleteImport_WhileAnImportRuns_IsAFailedPrecondition()
+    {
+        var gate = new TaskCompletionSource();
+        var entered = new TaskCompletionSource();
+        var importer = new ConversationImporter(
+            new HoldingSink(gate.Task, entered), volumeSpace: _ => (long.MaxValue / 2, long.MaxValue / 2));
+        var database = Database();
+        var staging = NewStaging();
+        var service = new ConversationAdminGrpcService(
+            new Lazy<SessionStore>(() => _target.Store),
+            new ConversationExportWriter(),
+            _gate.Gate,
+            database,
+            importer: importer,
+            staging: staging,
+            imports: new ConversationImportCatalog(
+                new Lazy<SessionStore>(() => _target.Store),
+                new SessionMaintenance(new Lazy<SessionStore>(() => _target.Store), database),
+                database,
+                importer));
+        _source.Store.AppendTurn(SessionArchiveIds.NewArchiveSessionId(), "client-a", Turn(SessionArchiveIds.NewArchiveTurnId(), Epoch));
+        var zip = Path.Combine(_work, Guid.NewGuid().ToString("N") + ".zip");
+        await new ConversationExportWriter().WriteAsync(_source.Store, new ConversationExportFilter(), zip, null, Ct);
+        var staged = staging.Stage(_target.Store, zip, Ct);
+        var token = _gate.OneOperations.Issue(GatedOperation.Import, GatedOperation.ImportParameters(staged.Sha256Hex));
+        var running = service.ImportConversations(ImportRequest(staged.Id, token), new FakeWriter(), Context());
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(4), Ct);
+
+        var ex = await Assert.ThrowsAsync<RpcException>(() => service.DeleteConversationImport(
+            new Contract.DeleteConversationImportRequest { ImportId = Guid.NewGuid().ToString("D") }, Context()));
+
+        Assert.Equal(StatusCode.FailedPrecondition, ex.StatusCode);
+        gate.SetResult();
+        await running;
+    }
+
+    /// <summary>A source that is itself a link into the data directory is refused, as a link in its folder chain is.</summary>
+    [Fact]
+    public void Stage_ASourceThatIsALinkIntoTheDataDirectory_IsRefused()
+    {
+        var inside = Path.Combine(_target.Root, "inside.zip");
+        File.Copy(WriteZip("target.zip"), inside);
+        var link = Path.Combine(_work, "link.zip");
+        try
+        {
+            File.CreateSymbolicLink(link, inside);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+        {
+            // Creating a symbolic link needs a privilege this account may not hold; there is nothing to test then.
+            return;
+        }
+
+        var refused = Assert.Throws<ConversationImportException>(() => NewStaging().Stage(_target.Store, link, Ct));
+
+        Assert.Equal(ConversationImportFailure.InvalidSource, refused.Reason);
+    }
+
     /// <summary>The wire mapping of the import options round-trips and defaults to keeping the local copy.</summary>
     [Fact]
     public void ImportOptions_RoundTripThroughTheWire_AndDefaultToKeepingTheLocalCopy()
@@ -435,6 +495,15 @@ public sealed class ConversationImportServiceTests : IDisposable
         {
             Written.Add(message);
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class HoldingSink(Task gate, TaskCompletionSource entered) : IImportedTurnSink
+    {
+        public Task TurnStoredAsync(ImportedTurn turn, CancellationToken cancellationToken)
+        {
+            entered.TrySetResult();
+            return gate;
         }
     }
 

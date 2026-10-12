@@ -63,7 +63,8 @@ internal static class SessionsServiceCollectionExtensions
         services.AddSingleton(sp => new ConversationImportCatalog(
             sp.GetRequiredService<Lazy<SessionStore>>(),
             sp.GetRequiredService<SessionMaintenance>(),
-            sp.GetRequiredService<TranscriptDatabase>()));
+            sp.GetRequiredService<TranscriptDatabase>(),
+            sp.GetRequiredService<ConversationImporter>()));
         return services;
     }
 

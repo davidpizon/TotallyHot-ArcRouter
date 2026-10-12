@@ -14,8 +14,12 @@ public sealed record ConversationImportDeleteResult(int SessionsDeleted, int Tur
 /// <param name="store">The lazily opened session store.</param>
 /// <param name="maintenance">Deletes sessions and the rows and embeddings that belong to them.</param>
 /// <param name="database">Names where the session folder lives, so a listing does not create it.</param>
+/// <param name="importer">The shared importer; a delete is refused while it runs, because the running import is still adding links to its own record.</param>
 public sealed class ConversationImportCatalog(
-    Lazy<SessionStore> store, SessionMaintenance maintenance, Transcripts.TranscriptDatabase database)
+    Lazy<SessionStore> store,
+    SessionMaintenance maintenance,
+    Transcripts.TranscriptDatabase database,
+    ConversationImporter? importer = null)
 {
     private readonly string _folder = SessionStore.FolderBeside(database.DatabasePath);
 
@@ -27,8 +31,15 @@ public sealed class ConversationImportCatalog(
     /// <summary>Deletes one import's contribution to the history and forgets the import.</summary>
     /// <param name="importId">The import to delete.</param>
     /// <returns>What was removed, or <see langword="null"/> when no such import exists.</returns>
+    /// <exception cref="ConversationImportException">With <see cref="ConversationImportFailure.InProgress"/> while an import is running.</exception>
     public ConversationImportDeleteResult? Delete(Guid importId)
     {
+        if (importer?.IsRunning == true)
+        {
+            throw new ConversationImportException(
+                ConversationImportFailure.InProgress, "An import is running. Delete the import after it finishes.");
+        }
+
         if (!Directory.Exists(_folder)) return null;
 
         var sessions = store.Value;

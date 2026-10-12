@@ -394,6 +394,50 @@ public sealed class ConversationImporterTests : IDisposable
         Assert.DoesNotContain(live, corpus.Sessions);
     }
 
+    /// <summary>
+    /// An overwrite stores the replacement and retires the old turn in a second step. A run that stopped between the two
+    /// leaves both live; running the import again finishes the retirement instead of calling the turn already present.
+    /// </summary>
+    [Fact]
+    public async Task Conflict_Overwrite_ARerunAfterAnInterruptedRetirement_FinishesIt()
+    {
+        var corpus = Seed();
+        var clash = SeedConflictInTarget(corpus.Turns[3]);
+        var zip = await ExportAsync();
+        var options = new ConversationImportOptions(OnConflict: ImportConflictMode.Overwrite, KeepLocalCopy: false);
+        var importer = new ConversationImporter();
+        await importer.ImportAsync(_target.Store, zip, options, null, CancellationToken.None);
+
+        // The state a crash between the replacement and the retirement leaves: the old turn live again.
+        _target.Execute($"UPDATE session_turns SET retired = 0 WHERE archive_turn_id = '{clash.TurnId:D}'");
+        Assert.Equal(2, _target.Store.ListTurns(clash.Session).Count);
+
+        var again = await importer.ImportAsync(_target.Store, zip, options, null, CancellationToken.None);
+
+        Assert.Equal(0, again.TurnsAdded);
+        var live = Assert.Single(_target.Store.ListTurns(clash.Session));
+        Assert.NotEqual(clash.TurnId, live.ArchiveTurnId);
+    }
+
+    /// <summary>Retention measures live turns, so a retired turn does not make a session look larger or newer than it is.</summary>
+    [Fact]
+    public async Task Retention_CountsLiveTurnsOnly_AfterAnOverwrite()
+    {
+        var corpus = Seed();
+        var clash = SeedConflictInTarget(corpus.Turns[3]);
+        var zip = await ExportAsync();
+        await new ConversationImporter().ImportAsync(
+            _target.Store, zip, new ConversationImportOptions(OnConflict: ImportConflictMode.Overwrite, KeepLocalCopy: false),
+            null, CancellationToken.None);
+
+        var counts = _target.Store.LiveTurnCounts();
+
+        // The session holds the retired original and its replacement, but only the replacement is history.
+        Assert.Equal(2, _target.Store.TryGetSession(clash.Session)!.TurnCount);
+        Assert.Equal(1, counts[clash.Session]);
+        Assert.Equal(corpus.Turns.Count, counts.Values.Sum());
+    }
+
     /// <summary>The sink hears about each stored turn once, with the regenerated text.</summary>
     [Fact]
     public async Task Import_TellsTheSinkAboutEachStoredTurn()

@@ -567,6 +567,26 @@ public sealed class SessionIndex
         command.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// Counts each session's live turns (those not retired) and finds its newest live turn's time. Retiring a turn leaves
+    /// <c>session_files.turn_count</c> alone, because that is also the next physical sequence, so anything that decides by
+    /// how much history a session holds must read these instead.
+    /// </summary>
+    /// <returns>The live turn count and newest live turn time of every session that has a live turn.</returns>
+    public IReadOnlyDictionary<Guid, (int Count, DateTimeOffset Last)> LiveTurnStats()
+    {
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+                              SELECT archive_session_id, COUNT(*), MAX(created_at_utc)
+                              FROM session_turns WHERE retired = 0 GROUP BY archive_session_id;
+                              """;
+        using var reader = command.ExecuteReader();
+        var stats = new Dictionary<Guid, (int, DateTimeOffset)>();
+        while (reader.Read()) stats[Guid.Parse(reader.GetString(0))] = (reader.GetInt32(1), Parse(reader.GetString(2)));
+        return stats;
+    }
+
     /// <summary>Lists past imports, newest first.</summary>
     /// <returns>One row per import.</returns>
     public IReadOnlyList<SessionImportRow> ListImports()

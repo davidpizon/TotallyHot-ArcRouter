@@ -264,7 +264,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
                                   language, is_utility, prompt_text, response_text, score, cost, is_exploratory, propensity,
                                   input_tokens, output_tokens, memory_entry_id, dim_best_model, untrained_baseline_model,
                                   untrained_baseline_predicted_score, is_judge_scored,
-                                  archive_session_id, archive_turn_id
+                                  archive_session_id, archive_turn_id, origin
                               FROM request_transcripts
                               WHERE id = $id;
                               """;
@@ -582,7 +582,8 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
                 : null,
             ArchiveTurnId: reader.FieldCount > 23 && !reader.IsDBNull(23) && Guid.TryParse(reader.GetString(23), out var turnId)
                 ? turnId
-                : null);
+                : null,
+            Origin: reader.FieldCount > 24 && !reader.IsDBNull(24) ? reader.GetString(24) : Sessions.SessionTurnOrigin.Captured);
     }
 
     /// <inheritdoc/>

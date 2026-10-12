@@ -65,6 +65,9 @@ public sealed class ConversationImporter
     private readonly Func<string, (long FreeBytes, long TotalBytes)> _volumeSpace;
     private readonly TimeProvider _time;
     private readonly IImportedTurnSink? _sink;
+
+    /// <summary>Gets a value indicating whether an import is running, so a delete of an import can wait for it.</summary>
+    public bool IsRunning => Volatile.Read(ref _running) != 0;
     private readonly ResponseTextExtractor _responseTextExtractor = new();
     private int _running;
 
@@ -121,7 +124,8 @@ public sealed class ConversationImporter
                     .ConfigureAwait(false);
                 if (sampleSize is not { } limit) return result;
 
-                var due = store.SelectExpiredSessions(limit).Sum(session => session.TurnCount);
+                var live = store.LiveTurnCounts();
+                var due = store.SelectExpiredSessions(limit).Sum(session => live.GetValueOrDefault(session.ArchiveSessionId));
                 return result with { TurnsDueForRetention = due };
             },
             cancellationToken);
@@ -513,6 +517,10 @@ public sealed class ConversationImporter
             if (disposition == Disposition.AlreadyPresent)
             {
                 alreadyPresent++;
+
+                // An overwrite stores the replacement and then retires the old turn in a second transaction. A run that
+                // stopped between the two finds the replacement already present, so the retirement is finished here.
+                if (mode == ImportConflictMode.Overwrite) FinishPendingRetirement(store, line);
             }
             else if (disposition == Disposition.Conflict && mode == ImportConflictMode.Skip)
             {
@@ -565,6 +573,20 @@ public sealed class ConversationImporter
             rejected,
             TurnsToGrade: stored,
             bodyBytes);
+    }
+
+    /// <summary>
+    /// Retires the local turn an earlier overwrite replaced, when that run stopped before retiring it. The replacement
+    /// is recognised by the import record that names this zip turn as its source under a different local id; the turn
+    /// still under the zip's own id is then the one that was to be replaced.
+    /// </summary>
+    /// <param name="store">The store being imported into.</param>
+    /// <param name="line">The zip's turn.</param>
+    private static void FinishPendingRetirement(SessionStore store, TurnLine line)
+    {
+        var replaced = store.ListImportedBySource(line.ArchiveTurnId)
+            .Any(row => row.ArchiveTurnId != line.ArchiveTurnId && row.SourceDigest.AsSpan().SequenceEqual(line.Digest));
+        if (replaced) store.RetireTurn(line.ArchiveTurnId);
     }
 
     /// <summary>
