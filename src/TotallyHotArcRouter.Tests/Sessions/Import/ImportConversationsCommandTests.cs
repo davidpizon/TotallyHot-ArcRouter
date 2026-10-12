@@ -59,10 +59,6 @@ public sealed class ImportConversationsCommandTests
 
         public RpcException? StageFailure { get; set; }
 
-        public RpcException? CreateFailure { get; set; }
-
-        public RpcException? WaitFailure { get; set; }
-
         public RpcException? ImportFailure { get; set; }
 
         public Exception? UnexpectedFailure { get; set; }
@@ -102,7 +98,6 @@ public sealed class ImportConversationsCommandTests
             Calls.Add("create");
             StagedIdSeenByCreate = stagedId;
             OptionsSeenByCreate = options;
-            if (CreateFailure is not null) throw CreateFailure;
             if (UnexpectedFailure is not null) throw UnexpectedFailure;
 
             return Task.FromResult(new ExportApprovalTicket(
@@ -114,7 +109,6 @@ public sealed class ImportConversationsCommandTests
             Calls.Add("wait");
             approvalId.Should().Be(ApprovalId);
             StdoutWhenWaiting = Stdout?.ToString();
-            if (WaitFailure is not null) throw WaitFailure;
             if (HangOnWait) await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
 
             return Approval;

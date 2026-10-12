@@ -86,7 +86,7 @@ public sealed class ConversationImporterTests : IDisposable
 
         // The extracts the zip does not carry are regenerated from the stored bodies.
         var first = corpus.Turns[0];
-        var extracts = _target.Store.TryReadExtracts(first.Session, first.Turn);
+        var extracts = _target.Store.TryReadExtracts(first.Session, first.TurnId);
         Assert.Equal("hi there", extracts?.NewestUserMessage);
         Assert.Equal("hello", extracts?.ResponseText);
     }
@@ -127,14 +127,14 @@ public sealed class ConversationImporterTests : IDisposable
         var zip = await ExportAsync();
         var tampered = Path.Combine(_work, "tampered.zip");
         var victim = corpus.Turns[0];
-        ReplaceBody(zip, tampered, BodyPathOf(zip, victim.Turn, "request"), "{\"tampered\":true}"u8.ToArray(), fixHashes: false);
+        ReplaceBody(zip, tampered, BodyPathOf(zip, victim.TurnId, "request"), "{\"tampered\":true}"u8.ToArray(), fixHashes: false);
 
         var result = await new ConversationImporter().ImportAsync(
             _target.Store, tampered, new ConversationImportOptions(), null, CancellationToken.None);
 
         Assert.Equal(1, result.TurnsRejected);
         Assert.Equal(corpus.Turns.Count - 1, result.TurnsAdded);
-        Assert.Null(_target.Store.TryGetTurn(victim.Turn));
+        Assert.Null(_target.Store.TryGetTurn(victim.TurnId));
     }
 
     /// <summary>An entry name that climbs out of the archive fails the whole import before anything is stored.</summary>
@@ -260,15 +260,15 @@ public sealed class ConversationImporterTests : IDisposable
         var victim = corpus.Turns[0];
         var planted = Path.Combine(_work, "planted.zip");
         var dirty = Encoding.UTF8.GetBytes($$"""{"messages":[{"role":"user","content":"key {{PlantedSecret}} done"}]}""");
-        ReplaceBody(zip, planted, BodyPathOf(zip, victim.Turn, "request"), dirty, fixHashes: true);
+        ReplaceBody(zip, planted, BodyPathOf(zip, victim.TurnId, "request"), dirty, fixHashes: true);
         var importer = new ConversationImporter();
 
         var first = await importer.ImportAsync(_target.Store, planted, new ConversationImportOptions(), null, CancellationToken.None);
 
         Assert.Equal(0, first.TurnsRejected);
         var stored = _target.Store.TryReadBodies(
-            victim.Session, new HashSet<SessionBodyKind> { SessionBodyKind.ClientRequest }, [victim.Turn]);
-        Assert.DoesNotContain(PlantedSecret, Encoding.UTF8.GetString(stored[(victim.Turn, SessionBodyKind.ClientRequest)]), StringComparison.Ordinal);
+            victim.Session, new HashSet<SessionBodyKind> { SessionBodyKind.ClientRequest }, [victim.TurnId]);
+        Assert.DoesNotContain(PlantedSecret, Encoding.UTF8.GetString(stored[(victim.TurnId, SessionBodyKind.ClientRequest)]), StringComparison.Ordinal);
         Assert.DoesNotContain(PlantedSecret, File.ReadAllText(_target.FileOf(victim.Session), Encoding.Latin1), StringComparison.Ordinal);
 
         var second = await importer.ImportAsync(_target.Store, planted, new ConversationImportOptions(), null, CancellationToken.None);
@@ -310,8 +310,8 @@ public sealed class ConversationImporterTests : IDisposable
 
         Assert.Equal(1, result.TurnsConflictKept);
         var kept = _target.Store.TryReadBodies(
-            clash.Session, new HashSet<SessionBodyKind> { SessionBodyKind.ClientResponse }, [clash.Turn]);
-        Assert.Equal("{\"local\":true}"u8.ToArray(), kept[(clash.Turn, SessionBodyKind.ClientResponse)]);
+            clash.Session, new HashSet<SessionBodyKind> { SessionBodyKind.ClientResponse }, [clash.TurnId]);
+        Assert.Equal("{\"local\":true}"u8.ToArray(), kept[(clash.TurnId, SessionBodyKind.ClientResponse)]);
     }
 
     /// <summary><c>keep-both</c> stores the zip's version beside the local one, and a second import does not add a third.</summary>
@@ -333,7 +333,7 @@ public sealed class ConversationImporterTests : IDisposable
         Assert.Equal(0, second.TurnsAdded);
         Assert.Equal(liveAfterFirst, _target.Store.ListTurns(clash.Session).Count);
         Assert.Equal(1, _target.Scalar(
-            $"SELECT COUNT(*) FROM session_import_turns WHERE source_archive_turn_id = '{clash.Turn:D}'"));
+            $"SELECT COUNT(*) FROM session_import_turns WHERE source_archive_turn_id = '{clash.TurnId:D}'"));
     }
 
     /// <summary><c>overwrite</c> replaces the local turn: the replacement is live, the old one leaves every read, and the checksum follows.</summary>
@@ -350,7 +350,7 @@ public sealed class ConversationImporterTests : IDisposable
         await importer.ImportAsync(_target.Store, zip, options, null, CancellationToken.None);
 
         var live = _target.Store.ListTurns(clash.Session);
-        Assert.DoesNotContain(live, t => t.ArchiveTurnId == clash.Turn);
+        Assert.DoesNotContain(live, t => t.ArchiveTurnId == clash.TurnId);
         Assert.Single(live);
         var replacement = live[0].ArchiveTurnId;
         var bodies = _target.Store.TryReadBodies(
@@ -456,9 +456,9 @@ public sealed class ConversationImporterTests : IDisposable
     /// <summary>Seeds the source with two sessions, one translated turn and one whose response was never captured.</summary>
     private Corpus Seed()
     {
-        var turns = new List<(Guid Session, Guid Turn)>();
+        var turns = new List<(Guid Session, Guid TurnId)>();
         var sessions = new List<Guid>();
-        Guid Add(Guid session, string client, int hour, byte[]? response, bool translated = false)
+        void Add(Guid session, string client, int hour, byte[]? response, bool translated = false)
         {
             if (!sessions.Contains(session)) sessions.Add(session);
             var turn = SessionArchiveIds.NewArchiveTurnId();
@@ -475,7 +475,6 @@ public sealed class ConversationImporterTests : IDisposable
 
             _source.Store.AppendTurn(session, client, input);
             turns.Add((session, turn));
-            return turn;
         }
 
         var one = SessionArchiveIds.NewArchiveSessionId();
@@ -484,7 +483,7 @@ public sealed class ConversationImporterTests : IDisposable
         Add(one, "client-a", 1, Response, translated: true);
         Add(one, "client-a", 2, null);
         Add(two, "client-a", 3, Response);
-        return new Corpus(sessions, turns.Select(t => new TurnRef(t.Session, t.Turn)).ToList());
+        return new Corpus(sessions, turns.Select(t => new TurnRef(t.Session, t.TurnId)).ToList());
     }
 
     /// <summary>Gives the target the same turn id as the source's first turn but a different response.</summary>
@@ -493,7 +492,7 @@ public sealed class ConversationImporterTests : IDisposable
         _target.Store.AppendTurn(
             turn.Session,
             "client-a",
-            Turn(turn.Turn, Epoch, Request, "{\"local\":true}"u8.ToArray()));
+            Turn(turn.TurnId, Epoch, Request, "{\"local\":true}"u8.ToArray()));
         return turn;
     }
 
@@ -606,7 +605,7 @@ public sealed class ConversationImporterTests : IDisposable
         }
     }
 
-    private sealed record TurnRef(Guid Session, Guid Turn);
+    private sealed record TurnRef(Guid Session, Guid TurnId);
 
     private sealed record Corpus(IReadOnlyList<Guid> Sessions, IReadOnlyList<TurnRef> Turns);
 

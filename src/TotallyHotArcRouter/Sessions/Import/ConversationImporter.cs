@@ -1053,7 +1053,7 @@ public sealed class ConversationImporter
     /// <returns><see langword="true"/> when the property is a GUID string.</returns>
     private static bool TryGuid(JsonElement element, string name, out Guid value)
     {
-        value = default;
+        value = Guid.Empty;
         return element.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.String
                && Guid.TryParse(property.GetString(), out value);
     }
