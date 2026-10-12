@@ -71,8 +71,8 @@ internal sealed class FakeConversationAdminClient : IConversationAdminClient
     public StagedImportInfo Staged { get; set; } = new(
         StagedId: "staged-1", Sha256: new string('a', 64), SizeBytes: 4_096, ExpiresAtUtc: new DateTimeOffset(2026, 10, 11, 12, 0, 0, TimeSpan.Zero));
 
-    /// <summary>Gets or sets the import progress reports streamed before the result.</summary>
-    public List<ConversationImportProgressInfo> ImportProgress { get; set; } = [new(TurnsProcessed: 2, TurnsStored: 2)];
+    /// <summary>Gets the import progress reports streamed before the result.</summary>
+    private List<ConversationImportProgressInfo> ImportProgress { get; } = [new(TurnsProcessed: 2, TurnsStored: 2)];
 
     /// <summary>Gets or sets the result the import streams last.</summary>
     public ConversationImportResultInfo ImportResult { get; set; } = new(

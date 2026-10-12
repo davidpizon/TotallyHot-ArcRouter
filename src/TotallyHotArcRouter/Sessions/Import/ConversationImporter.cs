@@ -136,7 +136,7 @@ public sealed class ConversationImporter
     /// <param name="archiveTurnId">The turn's id in the zip.</param>
     /// <param name="exchangeHashes">The zip's declared hash for each exchange kind that has a stored body.</param>
     /// <returns>The 32-byte digest.</returns>
-    internal static byte[] SourceDigest(Guid archiveTurnId, IReadOnlyDictionary<SessionBodyKind, byte[]> exchangeHashes)
+    private static byte[] SourceDigest(Guid archiveTurnId, IReadOnlyDictionary<SessionBodyKind, byte[]> exchangeHashes)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         Span<byte> id = stackalloc byte[16];
@@ -177,7 +177,7 @@ public sealed class ConversationImporter
                 throw new ConversationImportException(ConversationImportFailure.ArchiveNotFound, "The archive does not exist.");
             }
 
-            using var file = new FileStream(zipPath, FileMode.Open, FileAccess.Read, FileShare.Read, CopyBufferBytes);
+            await using var file = new FileStream(zipPath, FileMode.Open, FileAccess.Read, FileShare.Read, CopyBufferBytes);
             ZipArchive zip;
             try
             {
@@ -188,7 +188,7 @@ public sealed class ConversationImporter
                 throw new ConversationImportException(ConversationImportFailure.InvalidArchive, "The file is not a readable zip.");
             }
 
-            using (zip)
+            await using (zip)
             {
                 var entries = IndexEntries(zip);
                 var manifest = ReadManifest(entries, out var turnsEntry);

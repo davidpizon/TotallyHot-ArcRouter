@@ -55,7 +55,7 @@ public sealed class ImportStagingArea
     private const int IdBytes = 16;
 
     private readonly ConcurrentDictionary<string, StagedImport> _staged = new(StringComparer.Ordinal);
-    private readonly object _admission = new();
+    private readonly Lock _admission = new();
     private readonly Func<string, (long FreeBytes, long TotalBytes)> _volumeSpace;
     private readonly TimeProvider _time;
 

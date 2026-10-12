@@ -55,15 +55,15 @@ public sealed class ImportConversationsCommandTests
 
         public string? StdoutWhenWaiting { get; private set; }
 
-        public ExportApprovalResult Approval { get; set; } = new(PendingApprovalOutcome.Approved, Token);
+        public ExportApprovalResult Approval { get; init; } = new(PendingApprovalOutcome.Approved, Token);
 
-        public RpcException? StageFailure { get; set; }
+        public RpcException? StageFailure { get; init; }
 
-        public RpcException? ImportFailure { get; set; }
+        public RpcException? ImportFailure { get; init; }
 
-        public Exception? UnexpectedFailure { get; set; }
+        public Exception? UnexpectedFailure { get; init; }
 
-        public bool HangOnWait { get; set; }
+        public bool HangOnWait { get; init; }
 
         public string? StagedPathSeen { get; private set; }
 
@@ -77,7 +77,7 @@ public sealed class ImportConversationsCommandTests
 
         public ConversationImportOptions? OptionsSeenByImport { get; private set; }
 
-        public List<ImportCommandEvent> Events { get; set; } =
+        public List<ImportCommandEvent> Events { get; init; } =
         [
             new(new ConversationImportProgress(1, 1), null),
             new(new ConversationImportProgress(2, 2), null),

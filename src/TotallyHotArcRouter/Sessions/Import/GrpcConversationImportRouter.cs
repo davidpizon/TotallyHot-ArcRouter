@@ -31,7 +31,7 @@ internal sealed class GrpcConversationImportRouter : IConversationImportRouter, 
     /// <param name="callInvoker">The invoker for the router's loopback endpoint.</param>
     /// <param name="adminToken">The management token to present on every call.</param>
     /// <param name="channel">The channel to dispose with this instance, or <see langword="null"/> when the caller owns it.</param>
-    internal GrpcConversationImportRouter(CallInvoker callInvoker, string adminToken, GrpcChannel? channel = null)
+    private GrpcConversationImportRouter(CallInvoker callInvoker, string adminToken, GrpcChannel? channel = null)
     {
         ArgumentNullException.ThrowIfNull(callInvoker);
         ArgumentException.ThrowIfNullOrWhiteSpace(adminToken);
