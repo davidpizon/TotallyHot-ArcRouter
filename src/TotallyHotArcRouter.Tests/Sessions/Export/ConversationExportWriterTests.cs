@@ -220,18 +220,14 @@ public sealed class ConversationExportWriterTests : IDisposable
     {
         Seed();
         var path = OutputPath();
-        var cts = new CancellationTokenSource();
-        try
-        {
-            var progress = new SyncProgress(_ => cts.Cancel());
+        using var cts = new CancellationTokenSource();
+        // Bind the members up front so no lambda closes over the disposable source itself.
+        Action cancel = cts.Cancel;
+        var token = cts.Token;
+        var progress = new SyncProgress(_ => cancel());
 
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(
-                () => _writer.WriteAsync(Store, new ConversationExportFilter(), path, progress, cts.Token));
-        }
-        finally
-        {
-            cts.Dispose();
-        }
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => _writer.WriteAsync(Store, new ConversationExportFilter(), path, progress, token));
 
         Assert.Empty(Directory.EnumerateFileSystemEntries(_outputDirectory));
         Assert.Empty(Directory.EnumerateFiles(_fixture.Folder, "*.tmp"));
