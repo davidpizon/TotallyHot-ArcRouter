@@ -61,14 +61,14 @@ public sealed class TranscriptImportSinkTests : IDisposable
         var record = await store.GetTranscriptAsync(1, TestContext.Current.CancellationToken);
         Assert.Equal(SessionTurnOrigin.Imported, record!.Origin);
 
-        using var connection = database.OpenConnection();
-        using var command = connection.CreateCommand();
+        await using var connection = database.OpenConnection();
+        await using var command = connection.CreateCommand();
         command.CommandText = """
                               SELECT origin, score, correlation_id, archive_session_id, archive_turn_id, prompt_text, response_text,
                                      prompt_text_length, response_text_length, routed_model, is_exploratory, input_tokens
                               FROM request_transcripts;
                               """;
-        using var reader = command.ExecuteReader();
+        await using var reader = command.ExecuteReader();
         Assert.True(reader.Read());
         Assert.Equal(SessionTurnOrigin.Imported, reader.GetString(0));
         Assert.True(reader.IsDBNull(1));

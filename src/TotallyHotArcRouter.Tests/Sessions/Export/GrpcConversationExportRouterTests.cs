@@ -32,7 +32,7 @@ public sealed class GrpcConversationExportRouterTests
 
         public Contract.ExportConversationsRequest? Exported { get; private set; }
 
-        public Contract.ApprovalOutcome Outcome { get; set; } = Contract.ApprovalOutcome.Approved;
+        public Contract.ApprovalOutcome Outcome { get; init; } = Contract.ApprovalOutcome.Approved;
 
         public override AsyncUnaryCall<TResponse> AsyncUnaryCall<TRequest, TResponse>(
             Method<TRequest, TResponse> method, string? host, CallOptions options, TRequest request)

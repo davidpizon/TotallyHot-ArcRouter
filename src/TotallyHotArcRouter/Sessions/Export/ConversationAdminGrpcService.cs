@@ -143,6 +143,9 @@ public sealed class ConversationAdminGrpcService : Contract.ConversationAdminSer
 
             await foreach (var update in progress.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
+                // ReSharper disable once MethodSupportsCancellation
+                // IServerStreamWriter<T>.WriteAsync(T, CancellationToken) throws NotSupportedException on the ASP.NET Core
+                // gRPC server writer, so the token-less overload is the only one that works here.
                 await responseStream.WriteAsync(new Contract.ExportConversationsEvent
                 {
                     Progress = new Contract.ExportProgress
@@ -161,6 +164,9 @@ public sealed class ConversationAdminGrpcService : Contract.ConversationAdminSer
             throw new RpcException(new Status(ToStatusCode(ex.Reason), ex.Message));
         }
 
+        // ReSharper disable once MethodSupportsCancellation
+        // IServerStreamWriter<T>.WriteAsync(T, CancellationToken) throws NotSupportedException on the ASP.NET Core
+        // gRPC server writer, so the token-less overload is the only one that works here.
         await responseStream.WriteAsync(new Contract.ExportConversationsEvent
         {
             Result = new Contract.ExportResult

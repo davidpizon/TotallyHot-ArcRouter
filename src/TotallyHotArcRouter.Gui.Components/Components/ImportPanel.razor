@@ -255,7 +255,7 @@
             cancellation.Dispose();
         }
 
-        if (!cancellationToken.IsCancellationRequested) await ImportStore.LoadImportsAsync();
+        if (!cancellationToken.IsCancellationRequested) await ImportStore.LoadImportsAsync(cancellationToken);
     }
 
     /// <summary>Deletes one past import after the operator has confirmed it.</summary>
