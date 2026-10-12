@@ -227,9 +227,10 @@ public sealed class ConversationAdminGrpcService : Contract.ConversationAdminSer
         });
 
         ConversationImportResult result;
+        Task<ConversationImportResult>? import = null;
         try
         {
-            var import = importer.ImportAsync(
+            import = importer.ImportAsync(
                 _store.Value,
                 staged.StagedPath,
                 ConversationImportWire.ToOptions(request.Options),
@@ -267,6 +268,20 @@ public sealed class ConversationAdminGrpcService : Contract.ConversationAdminSer
         }
         finally
         {
+            // A cancelled call stops waiting before the import has noticed; the copy is deleted only once the import
+            // has let go of it (an open file cannot be deleted on Windows and would be left until restart).
+            if (import is not null)
+            {
+                try
+                {
+                    await import.ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is ConversationImportException or OperationCanceledException or IOException)
+                {
+                    // Already reported, or cancelled; only the wait matters here.
+                }
+            }
+
             // The copy has served its purpose whatever happened; the next attempt stages the zip again.
             staging.Discard(staged.Id);
         }

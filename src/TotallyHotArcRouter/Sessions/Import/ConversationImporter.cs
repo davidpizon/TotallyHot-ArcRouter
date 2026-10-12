@@ -81,7 +81,7 @@ public sealed class ConversationImporter
     {
         _sink = sink;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<ConversationImporter>.Instance;
-        _volumeSpace = volumeSpace ?? DriveSpace;
+        _volumeSpace = volumeSpace ?? ConversationExportWriter.DriveSpace;
         _time = timeProvider ?? TimeProvider.System;
     }
 
@@ -549,14 +549,15 @@ public sealed class ConversationImporter
             progress?.Report(new ConversationImportProgress(processed, stored));
         }
 
-        store.CompleteImport(importId, added.Count(id => plan.NewSessions.Contains(id)), stored, alreadyPresent, rejected);
+        var sessionsAdded = added.Count(id => plan.NewSessions.Contains(id));
+        store.CompleteImport(importId, sessionsAdded, stored, alreadyPresent, rejected);
         _logger.LogInformation(
             "Imported {Turns} turns into {Sessions} new conversations; {AlreadyPresent} already present, {Rejected} rejected.",
-            stored, added.Count(id => plan.NewSessions.Contains(id)), alreadyPresent, rejected);
+            stored, sessionsAdded, alreadyPresent, rejected);
 
         return new ConversationImportResult(
             importId,
-            added.Count(id => plan.NewSessions.Contains(id)),
+            sessionsAdded,
             skippedSessions.Count,
             stored,
             alreadyPresent,
@@ -913,6 +914,19 @@ public sealed class ConversationImporter
         }
     }
 
+    /// <summary>Reports whether a line holds anything but spaces, tabs and carriage returns.</summary>
+    /// <param name="line">The line's bytes.</param>
+    /// <returns><see langword="true"/> when the line is not blank.</returns>
+    private static bool HasContent(ReadOnlySpan<byte> line)
+    {
+        foreach (var b in line)
+        {
+            if (b is not ((byte)' ' or (byte)'\r' or (byte)'\t')) return true;
+        }
+
+        return false;
+    }
+
     /// <summary>Splits a stream into non-blank lines, refusing a line longer than <see cref="MaxLineBytes"/>.</summary>
     /// <param name="stream">The stream.</param>
     /// <param name="ct">Cancels the read.</param>
@@ -935,7 +949,7 @@ public sealed class ConversationImporter
                 start = i + 1;
                 var line = current.ToArray();
                 current.SetLength(0);
-                if (line.Length > 0 && line.Any(b => b is not ((byte)' ' or (byte)'\r' or (byte)'\t'))) yield return line;
+                if (HasContent(line)) yield return line;
             }
 
             current.Write(buffer, start, read - start);
@@ -945,7 +959,7 @@ public sealed class ConversationImporter
         if (current.Length > 0)
         {
             var last = current.ToArray();
-            if (last.Any(b => b is not ((byte)' ' or (byte)'\r' or (byte)'\t'))) yield return last;
+            if (HasContent(last)) yield return last;
         }
     }
 
@@ -1126,25 +1140,6 @@ public sealed class ConversationImporter
     /// <returns>The exception to throw.</returns>
     private static ConversationImportException Invalid(string message) =>
         new(ConversationImportFailure.InvalidArchive, message);
-
-    /// <summary>Reads free and total bytes of the volume holding a path.</summary>
-    /// <param name="path">A path on the volume.</param>
-    /// <returns>The sizes; an unreadable drive counts as having plenty of room.</returns>
-    private static (long FreeBytes, long TotalBytes) DriveSpace(string path)
-    {
-        try
-        {
-            var root = Path.GetPathRoot(Path.GetFullPath(path));
-            if (string.IsNullOrEmpty(root)) return (long.MaxValue, long.MaxValue);
-
-            var drive = new DriveInfo(root);
-            return (drive.AvailableFreeSpace, drive.TotalSize);
-        }
-        catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)
-        {
-            return (long.MaxValue, long.MaxValue);
-        }
-    }
 
     /// <summary>What a zip turn is to the local history.</summary>
     private enum Disposition

@@ -943,7 +943,9 @@ public sealed class SessionStore : ISessionExtractReader
                     // The wrapped key commits before any frame is written, so a frame can never exist whose key
                     // was lost. A crash after this leaves an empty session that recovery keeps.
                     _index.InsertSession(row);
-                    _pendingSessionIds.TryRemove(clientSessionId, out _);
+                    // An imported session has a client id from another machine; it must not consume the pending id of
+                    // a live session that uses the same one.
+                    if (turn.Import is null) _pendingSessionIds.TryRemove(clientSessionId, out _);
                 }
             }
             else

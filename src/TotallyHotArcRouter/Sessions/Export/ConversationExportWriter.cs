@@ -996,7 +996,7 @@ public sealed class ConversationExportWriter
     /// <summary>Reads free and total bytes of the volume holding a path.</summary>
     /// <param name="path">A path on the volume.</param>
     /// <returns>The sizes; an unreadable drive (a UNC share, for one) counts as having plenty of room.</returns>
-    private static (long FreeBytes, long TotalBytes) DriveSpace(string path)
+    internal static (long FreeBytes, long TotalBytes) DriveSpace(string path)
     {
         try
         {

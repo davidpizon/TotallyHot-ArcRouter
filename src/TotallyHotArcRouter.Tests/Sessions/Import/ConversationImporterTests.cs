@@ -377,6 +377,23 @@ public sealed class ConversationImporterTests : IDisposable
         Assert.Equal(3, result.TurnsDueForRetention);
     }
 
+    /// <summary>
+    /// A session an import created carries a client id from another machine. Live traffic that uses the same id
+    /// must start its own session, not be appended to the imported one.
+    /// </summary>
+    [Fact]
+    public async Task LiveTrafficWithAnImportedSessionsClientId_StartsItsOwnSession()
+    {
+        var corpus = Seed();
+        var zip = await ExportAsync();
+        await new ConversationImporter().ImportAsync(
+            _target.Store, zip, new ConversationImportOptions(), null, CancellationToken.None);
+
+        var live = _target.Store.ResolveArchiveSessionId("client-a");
+
+        Assert.DoesNotContain(live, corpus.Sessions);
+    }
+
     /// <summary>The sink hears about each stored turn once, with the regenerated text.</summary>
     [Fact]
     public async Task Import_TellsTheSinkAboutEachStoredTurn()
@@ -399,9 +416,12 @@ public sealed class ConversationImporterTests : IDisposable
         Seed();
         var zip = await ExportAsync();
         var gate = new TaskCompletionSource();
-        var importer = new ConversationImporter(new BlockingSink(gate.Task));
+        var entered = new TaskCompletionSource();
+        var importer = new ConversationImporter(new BlockingSink(gate.Task, entered));
         var running = importer.ImportAsync(_target.Store, zip, new ConversationImportOptions(), null, CancellationToken.None);
-        await Task.Delay(300);
+
+        // The sink is called from inside the first import, so once it has been reached that import is certainly running.
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(4), TestContext.Current.CancellationToken);
 
         var ex = await Assert.ThrowsAsync<ConversationImportException>(() => importer.ImportAsync(
             _target.Store, zip, new ConversationImportOptions(), null, CancellationToken.None));
@@ -625,8 +645,12 @@ public sealed class ConversationImporterTests : IDisposable
         }
     }
 
-    private sealed class BlockingSink(Task gate) : IImportedTurnSink
+    private sealed class BlockingSink(Task gate, TaskCompletionSource entered) : IImportedTurnSink
     {
-        public Task TurnStoredAsync(ImportedTurn turn, CancellationToken cancellationToken) => gate;
+        public Task TurnStoredAsync(ImportedTurn turn, CancellationToken cancellationToken)
+        {
+            entered.TrySetResult();
+            return gate;
+        }
     }
 }

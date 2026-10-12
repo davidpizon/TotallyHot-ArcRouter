@@ -357,7 +357,9 @@ public sealed class SessionIndex
 
     /// <summary>
     /// Finds the newest session recorded for a client session id. The client id can repeat across machines,
-    /// so this is only a local lookup for capture; import matches on the archive id.
+    /// so this is only a local lookup for capture; import matches on the archive id. A session an import created
+    /// is never returned: its client id came from another machine, and live traffic that happens to use the same id
+    /// must start its own session rather than be appended to imported history.
     /// </summary>
     /// <param name="clientSessionId">The client's session id.</param>
     /// <returns>The newest matching row, or <see langword="null"/> when none exists.</returns>
@@ -368,7 +370,9 @@ public sealed class SessionIndex
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = SelectSessionSql +
-                              " WHERE client_session_id = $client ORDER BY created_at_utc DESC, archive_session_id DESC LIMIT 1;";
+                              " WHERE client_session_id = $client"
+                              + " AND archive_session_id NOT IN (SELECT archive_session_id FROM session_import_sessions)"
+                              + " ORDER BY created_at_utc DESC, archive_session_id DESC LIMIT 1;";
         command.Parameters.AddWithValue("$client", clientSessionId);
         using var reader = command.ExecuteReader();
         return reader.Read() ? ReadSession(reader) : null;

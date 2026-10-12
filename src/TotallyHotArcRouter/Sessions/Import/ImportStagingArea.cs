@@ -65,7 +65,7 @@ public sealed class ImportStagingArea
     public ImportStagingArea(
         Func<string, (long FreeBytes, long TotalBytes)>? volumeSpace = null, TimeProvider? timeProvider = null)
     {
-        _volumeSpace = volumeSpace ?? DriveSpace;
+        _volumeSpace = volumeSpace ?? ConversationExportWriter.DriveSpace;
         _time = timeProvider ?? TimeProvider.System;
     }
 
@@ -259,23 +259,4 @@ public sealed class ImportStagingArea
     /// <returns>The exception to throw.</returns>
     private static ConversationImportException Invalid(string message) =>
         new(ConversationImportFailure.InvalidSource, message);
-
-    /// <summary>Reads free and total bytes of the volume holding a path.</summary>
-    /// <param name="path">A path on the volume.</param>
-    /// <returns>The sizes; an unreadable drive counts as having plenty of room.</returns>
-    private static (long FreeBytes, long TotalBytes) DriveSpace(string path)
-    {
-        try
-        {
-            var root = Path.GetPathRoot(Path.GetFullPath(path));
-            if (string.IsNullOrEmpty(root)) return (long.MaxValue, long.MaxValue);
-
-            var drive = new DriveInfo(root);
-            return (drive.AvailableFreeSpace, drive.TotalSize);
-        }
-        catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException)
-        {
-            return (long.MaxValue, long.MaxValue);
-        }
-    }
 }
