@@ -275,7 +275,7 @@
 
         // The summary the dialog opened with is stale once an export has run (a turn may have landed meanwhile).
         // Skipped when the dialog was closed mid-export, because nothing is left to show it.
-        if (!cancellationToken.IsCancellationRequested) await ExportStore.LoadSummaryAsync();
+        if (!cancellationToken.IsCancellationRequested) await ExportStore.LoadSummaryAsync(cancellationToken);
     }
 
     /// <summary>Returns to the form after a finished export, keeping the entered filter and destination.</summary>
@@ -354,6 +354,8 @@
     /// <summary>Closes the dialog, cancelling a running export first so the router discards its partial file.</summary>
     private async Task CloseAsync()
     {
+        // ReSharper disable once MethodHasAsyncOverload
+        // CancelAsync would yield before OnClose runs; Close must invoke OnClose synchronously with the click.
         _exportCancellation?.Cancel();
         await OnClose.InvokeAsync();
     }

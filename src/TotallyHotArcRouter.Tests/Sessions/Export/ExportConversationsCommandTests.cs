@@ -51,17 +51,17 @@ public sealed class ExportConversationsCommandTests
 
         public string? StdoutWhenWaiting { get; private set; }
 
-        public ExportApprovalResult Approval { get; set; } = new(PendingApprovalOutcome.Approved, Token);
+        public ExportApprovalResult Approval { get; init; } = new(PendingApprovalOutcome.Approved, Token);
 
-        public RpcException? CreateFailure { get; set; }
+        public RpcException? CreateFailure { get; init; }
 
-        public RpcException? WaitFailure { get; set; }
+        public RpcException? WaitFailure { get; init; }
 
-        public RpcException? ExportFailure { get; set; }
+        public RpcException? ExportFailure { get; init; }
 
-        public Exception? UnexpectedFailure { get; set; }
+        public Exception? UnexpectedFailure { get; init; }
 
-        public bool HangOnWait { get; set; }
+        public bool HangOnWait { get; init; }
 
         public string? TokenSeenByExport { get; private set; }
 
@@ -69,7 +69,7 @@ public sealed class ExportConversationsCommandTests
 
         public ExportConversationsOptions? OptionsSeenByExport { get; private set; }
 
-        public List<ExportCommandEvent> Events { get; set; } =
+        public List<ExportCommandEvent> Events { get; init; } =
         [
             new(new ConversationExportProgress(1, 100), null),
             new(new ConversationExportProgress(2, 250), null),

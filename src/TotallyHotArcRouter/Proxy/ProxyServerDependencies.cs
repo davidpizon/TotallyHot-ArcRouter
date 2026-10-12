@@ -654,7 +654,7 @@ public sealed record ConversationAdminDependencies(
     Sessions.Import.ConversationImporter? Importer = null,
     Sessions.Import.ImportStagingArea? ImportStaging = null,
     Sessions.Import.ConversationImportCatalog? ImportCatalog = null,
-    Microsoft.Extensions.Options.IOptionsMonitor<RoutingOptions>? Routing = null) : IAdminServiceModule
+    IOptionsMonitor<RoutingOptions>? Routing = null) : IAdminServiceModule
 {
     /// <inheritdoc/>
     void IAdminServiceModule.Register(IServiceCollection services)

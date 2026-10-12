@@ -21,6 +21,7 @@ public sealed class ConversationImportCatalog(
     Transcripts.TranscriptDatabase database,
     ConversationImporter? importer = null)
 {
+    private readonly ConversationImporter? _importer = importer;
     private readonly string _folder = SessionStore.FolderBeside(database.DatabasePath);
 
     /// <summary>Lists past imports, newest first. Opens no store, and creates no folder, on a router that never captured.</summary>
@@ -34,7 +35,7 @@ public sealed class ConversationImportCatalog(
     /// <exception cref="ConversationImportException">With <see cref="ConversationImportFailure.InProgress"/> while an import is running.</exception>
     public ConversationImportDeleteResult? Delete(Guid importId)
     {
-        if (importer?.IsRunning == true)
+        if (_importer?.IsRunning == true)
         {
             throw new ConversationImportException(
                 ConversationImportFailure.InProgress, "An import is running. Delete the import after it finishes.");

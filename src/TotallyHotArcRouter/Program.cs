@@ -655,7 +655,7 @@ public static class Program
         Func<string, Serilog.Extensions.Logging.SerilogLoggerFactory, CancellationToken, Task<int>> run,
         string command)
     {
-        using var cancellation = new CancellationTokenSource();
+        var cancellation = new CancellationTokenSource();
         ConsoleCancelEventHandler onCancel = (_, eventArgs) =>
         {
             // Let the command report the cancellation and exit instead of the runtime killing the process mid-write.
@@ -688,6 +688,7 @@ public static class Program
         finally
         {
             Console.CancelKeyPress -= onCancel;
+            cancellation.Dispose();
             DataDirectoryBootstrap.RestoreServiceOwnership(Log.Logger);
         }
     }

@@ -46,7 +46,7 @@ public static class SessionRecordCodec
     /// </summary>
     /// <param name="obscured">The obscured plaintext.</param>
     /// <returns>The Brotli stream.</returns>
-    internal static byte[] Compress(byte[] obscured) => BrotliCompress(obscured);
+    private static byte[] Compress(byte[] obscured) => BrotliCompress(obscured);
 
     /// <summary>
     /// Reverses the compression of <see cref="ObscureAndCompress"/>. Does not reverse secret obscuring.
@@ -63,7 +63,7 @@ public static class SessionRecordCodec
     /// </summary>
     /// <param name="input">Raw body bytes.</param>
     /// <returns>The body with matched secrets replaced and all other bytes unchanged.</returns>
-    internal static byte[] ObscureBytes(ReadOnlySpan<byte> input)
+    private static byte[] ObscureBytes(ReadOnlySpan<byte> input)
     {
         if (Utf8.IsValid(input))
         {

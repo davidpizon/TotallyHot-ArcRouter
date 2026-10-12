@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -102,6 +103,8 @@ public sealed class SessionStore : ISessionExtractReader
     private const string FolderName = "sessions";
 
     private static readonly HashSet<SessionBodyKind> ExtractsKind = [SessionBodyKind.Extracts];
+    private static readonly FrozenDictionary<(Guid ArchiveTurnId, SessionBodyKind Kind), byte[]> NoBodies =
+        FrozenDictionary<(Guid ArchiveTurnId, SessionBodyKind Kind), byte[]>.Empty;
 
     private readonly SessionIndex _index;
     private readonly ISessionMasterKeyStore _masterKeys;
@@ -262,8 +265,7 @@ public sealed class SessionStore : ISessionExtractReader
     {
         ArgumentNullException.ThrowIfNull(kinds);
         ArgumentNullException.ThrowIfNull(archiveTurnIds);
-        var results = new Dictionary<(Guid ArchiveTurnId, SessionBodyKind Kind), byte[]>();
-        if (archiveTurnIds.Count == 0) return results;
+        if (archiveTurnIds.Count == 0) return NoBodies;
 
         _rotationLock.EnterReadLock();
         try
@@ -271,7 +273,7 @@ public sealed class SessionStore : ISessionExtractReader
             lock (_sessionGates.GetOrAdd(archiveSessionId, static _ => new object()))
             {
                 var row = _index.TryGetSession(archiveSessionId);
-                if (row is null) return results;
+                if (row is null) return NoBodies;
 
                 var sessionKey = UnwrapSessionKey(row.WrappedKey);
                 try
@@ -279,7 +281,7 @@ public sealed class SessionStore : ISessionExtractReader
                     using var file = SessionFile.Open(PathOf(row), sessionKey, archiveSessionId);
                     if ((long)file.FrameCount < row.CommittedFrames || file.Length < row.CommittedLength)
                     {
-                        return results;
+                        return NoBodies;
                     }
 
                     return file.TryReadBodies(kinds, archiveTurnIds.ToHashSet(), row.CommittedFrames);
@@ -287,7 +289,7 @@ public sealed class SessionStore : ISessionExtractReader
                 catch (Exception ex) when (ex is InvalidDataException or CryptographicException or IOException)
                 {
                     _logger.LogWarning(ex, "Could not read bodies for session {ArchiveSessionId}.", archiveSessionId);
-                    return results;
+                    return NoBodies;
                 }
                 finally
                 {
