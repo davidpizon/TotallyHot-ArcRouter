@@ -181,8 +181,18 @@ public sealed class TranscriptDatabase
         MigrateIsJudgeScoredColumn(connection);
         MigrateArchiveIdColumns(connection);
         MigrateTextLengthColumns(connection);
+        MigrateOriginColumn(connection);
         ScrubConversationText(connection);
     }
+
+    /// <summary>
+    /// Adds the <c>origin</c> column that tells a captured row from one a conversation import created (#165
+    /// phase 4). Existing rows were all captured, so the default is <c>captured</c>. Spend, savings and ROI
+    /// readers filter on it so an import can never change those totals.
+    /// </summary>
+    /// <param name="connection">An open connection to the transcript database.</param>
+    private static void MigrateOriginColumn(SqliteConnection connection) =>
+        AddColumnIfMissing(connection, "origin", "TEXT NOT NULL DEFAULT 'captured'");
 
     /// <summary>
     /// Adds the <c>session_id</c> column to <c>request_transcripts</c> if it is missing, plus its index,

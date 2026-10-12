@@ -23,6 +23,9 @@ public static class PasskeyOperations
     /// <summary>Authorizes one <c>ConversationAdminService.ExportConversations</c> call (#165).</summary>
     public const string Export = "export";
 
+    /// <summary>Authorizes one <c>ConversationAdminService.ImportConversations</c> call (#165 phase 4).</summary>
+    public const string Import = "import";
+
     /// <summary>
     /// The parameter string bound to the operations above. Neither takes parameters, so the router binds
     /// them with an empty string and the GUI must send exactly that.
@@ -78,6 +81,20 @@ public static class PasskeyOperations
         WriteField(buffer, NormalizeText(filter.Model));
         WriteField(buffer, destinationPath);
         return Convert.ToHexStringLower(SHA256.HashData(buffer.ToArray()));
+    }
+
+    /// <summary>
+    /// Builds the parameters string the router binds an <see cref="Import"/> approval to: the staged copy's SHA-256 as
+    /// 64 lowercase hex digits, exactly as <c>StageImport</c> returned it. A copy of the router's
+    /// <c>GatedOperation.ImportParameters</c>, which returns its argument unchanged; the router computes the digest
+    /// itself from the copy it staged, so a client cannot choose a digest other than that of a copy the router holds.
+    /// </summary>
+    /// <param name="stagedSha256Hex">The digest from <see cref="StagedImportInfo.Sha256"/>.</param>
+    /// <returns>The parameters string for <see cref="Import"/>.</returns>
+    public static string ImportParameters(string stagedSha256Hex)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(stagedSha256Hex);
+        return stagedSha256Hex;
     }
 
     /// <summary>Formats an optional time bound for <see cref="ExportParameters"/>: UTC, seven fractional digits, or empty.</summary>

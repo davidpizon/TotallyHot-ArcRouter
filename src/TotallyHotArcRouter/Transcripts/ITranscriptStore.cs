@@ -247,6 +247,16 @@ public interface ITranscriptStore
     IReadOnlyList<long> DeleteByArchiveSessions(IReadOnlyCollection<Guid> archiveSessionIds) => [];
 
     /// <summary>
+    /// Deletes transcript rows whose <c>archive_turn_id</c> is one of <paramref name="archiveTurnIds"/> and returns
+    /// the <c>memory_entry_id</c> values those rows pointed at. Used when a turn leaves the history without its
+    /// session (an import that is deleted after it filled turns into an older session), so its learned embedding
+    /// does not outlive it (#165 phase 4).
+    /// </summary>
+    /// <param name="archiveTurnIds">The turns that were just retired.</param>
+    /// <returns>Memory entry ids that belonged to the deleted rows. Empty when this store keeps no such link.</returns>
+    IReadOnlyList<long> DeleteByArchiveTurns(IReadOnlyCollection<Guid> archiveTurnIds) => [];
+
+    /// <summary>
     /// Deletes every <c>request_transcripts</c> row with a null <c>archive_session_id</c> (legacy rows and
     /// metadata-only inserts that never bound a session file) and returns the <c>memory_entry_id</c> values
     /// those rows pointed at, together with how many rows were removed (#165 phase 2 follow-up).

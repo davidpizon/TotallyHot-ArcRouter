@@ -15,6 +15,7 @@ using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Router.TextGeneration;
 using TotallyHot.ArcRouter.Sessions.Export;
+using TotallyHot.ArcRouter.Sessions.Import;
 using TotallyHot.ArcRouter.Storage;
 using TotallyHot.ArcRouter.Telemetry;
 
@@ -84,6 +85,17 @@ public static class Program
             if (exportConversations)
             {
                 Environment.ExitCode = await RunExportConversationsAsync(args);
+                return;
+            }
+
+            // #165 phase 4: the reverse. It stages the zip with the RUNNING router, hands the approval of that
+            // staged copy off to the dashboard, and imports it; same dispatch rules as the export above.
+            var importConversations = args.Any(arg =>
+                string.Equals(a: arg, b: ImportConversationsCommand.FlagName, comparisonType: StringComparison.OrdinalIgnoreCase)
+                || arg.StartsWith(value: ImportConversationsCommand.FlagName + "=", comparisonType: StringComparison.OrdinalIgnoreCase));
+            if (importConversations)
+            {
+                Environment.ExitCode = await RunImportConversationsAsync(args);
                 return;
             }
 
@@ -578,6 +590,71 @@ public static class Program
             return ExportConversationsCommand.ExitUsage;
         }
 
+        return await RunConversationCommandAsync(
+            exitNotElevated: ExportConversationsCommand.ExitNotElevated,
+            exitFailed: ExportConversationsCommand.ExitFailed,
+            run: async (token, logFactory, cancellationToken) =>
+            {
+                using var router = GrpcConversationExportRouter.Connect(GrpcConversationExportRouter.ResolveAddress(), token);
+                return await ExportConversationsCommand.RunAsync(
+                    options: options!,
+                    router: router,
+                    stdout: Console.Out,
+                    stderr: Console.Error,
+                    logger: logFactory.CreateLogger("ExportConversations"),
+                    cancellationToken: cancellationToken);
+            },
+            command: "export");
+    }
+
+    /// <summary>
+    /// Runs the router's <c>--import-conversations</c> flag (#165 phase 4, ADR-0020): the same authentication and
+    /// browser hand-off as the export, for an import. See <see cref="ImportConversationsCommand"/> for the flow and
+    /// the exit codes. Ctrl+C cancels the wait or the import.
+    /// </summary>
+    /// <param name="args">The process arguments, including the flag, the zip's path and the options.</param>
+    /// <returns>The process exit code.</returns>
+    private static async Task<int> RunImportConversationsAsync(string[] args)
+    {
+        if (!ImportConversationsCommand.TryParse(args, out var options, out var error))
+        {
+            await Console.Error.WriteLineAsync(error);
+            return ImportConversationsCommand.ExitUsage;
+        }
+
+        return await RunConversationCommandAsync(
+            exitNotElevated: ImportConversationsCommand.ExitNotElevated,
+            exitFailed: ImportConversationsCommand.ExitFailed,
+            run: async (token, logFactory, cancellationToken) =>
+            {
+                using var router = GrpcConversationImportRouter.Connect(GrpcConversationExportRouter.ResolveAddress(), token);
+                return await ImportConversationsCommand.RunAsync(
+                    options: options!,
+                    router: router,
+                    stdout: Console.Out,
+                    stderr: Console.Error,
+                    logger: logFactory.CreateLogger("ImportConversations"),
+                    cancellationToken: cancellationToken);
+            },
+            command: "import");
+    }
+
+    /// <summary>
+    /// The scaffolding the conversation export and import commands share: Ctrl+C cancellation, the management token
+    /// from the elevated secret-store path (and the exit code when this account cannot read it), a log factory, and
+    /// the restoration of the data directory's ownership. The command itself is <paramref name="run"/>.
+    /// </summary>
+    /// <param name="exitNotElevated">The exit code when this account cannot open the service's data directory.</param>
+    /// <param name="exitFailed">The exit code when the command fails with an I/O or cryptographic error.</param>
+    /// <param name="run">Runs the command with the token, a log factory and a token cancelled by Ctrl+C.</param>
+    /// <param name="command">The command's name (<c>export</c> or <c>import</c>), logged when it fails with an I/O or cryptographic error.</param>
+    /// <returns>The process exit code.</returns>
+    private static async Task<int> RunConversationCommandAsync(
+        int exitNotElevated,
+        int exitFailed,
+        Func<string, Serilog.Extensions.Logging.SerilogLoggerFactory, CancellationToken, Task<int>> run,
+        string command)
+    {
         using var cancellation = new CancellationTokenSource();
         ConsoleCancelEventHandler onCancel = (_, eventArgs) =>
         {
@@ -597,23 +674,16 @@ public static class Program
             catch (InvalidOperationException ex)
             {
                 await Console.Error.WriteLineAsync(ex.Message);
-                return ExportConversationsCommand.ExitNotElevated;
+                return exitNotElevated;
             }
 
-            using var router = GrpcConversationExportRouter.Connect(GrpcConversationExportRouter.ResolveAddress(), token);
             using var logFactory = new Serilog.Extensions.Logging.SerilogLoggerFactory(Log.Logger);
-            return await ExportConversationsCommand.RunAsync(
-                options: options!,
-                router: router,
-                stdout: Console.Out,
-                stderr: Console.Error,
-                logger: logFactory.CreateLogger("ExportConversations"),
-                cancellationToken: cancellation.Token);
+            return await run(token, logFactory, cancellation.Token);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException)
         {
-            Log.Error(exception: ex, messageTemplate: "Could not run the conversation export.");
-            return ExportConversationsCommand.ExitFailed;
+            Log.Error(exception: ex, messageTemplate: "Could not run the conversation {Command} command.", command);
+            return exitFailed;
         }
         finally
         {

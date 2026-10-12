@@ -258,6 +258,23 @@ public sealed class PasskeyAdminClient
     /// <summary>Converts a wire <see cref="Contract.PendingApproval"/> into a <see cref="PendingApprovalInfo"/>.</summary>
     private static PendingApprovalInfo ToInfo(Contract.PendingApproval pending)
     {
+        if (pending.OperationCase == Contract.PendingApproval.OperationOneofCase.Import)
+        {
+            var import = pending.Import;
+            return new PendingApprovalInfo(
+                ApprovalId: pending.ApprovalId,
+                Filter: new ConversationExportFilterInfo(),
+                DestinationPath: string.Empty,
+                CreatedAtUtc: pending.CreatedAtUtc.ToDateTimeOffset(),
+                ExpiresAtUtc: pending.ExpiresAtUtc.ToDateTimeOffset(),
+                Import: new PendingImportInfo(
+                    import.StagedId,
+                    import.SourcePath,
+                    import.SizeBytes,
+                    import.Sha256,
+                    ConversationAdminClient.FromWire(import.Options)));
+        }
+
         var export = pending.Export ?? new Contract.ExportApprovalDetails();
         return new PendingApprovalInfo(
             ApprovalId: pending.ApprovalId,

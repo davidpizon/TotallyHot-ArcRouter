@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using Grpc.Core;
 using TotallyHot.ArcRouter.Sessions.Export;
+using TotallyHot.ArcRouter.Sessions.Import;
 
 namespace TotallyHot.ArcRouter.Proxy.Auth.Passkey;
 
@@ -30,6 +31,7 @@ public enum PendingApprovalOutcome
 /// <param name="DestinationPath">The export's destination, exactly as the caller sent it.</param>
 /// <param name="CreatedAtUtc">When the request was filed.</param>
 /// <param name="ExpiresAtUtc">When the request lapses if nobody decides it.</param>
+/// <param name="Import">What an import request shows the operator, or <see langword="null"/> for an export. For an import, <paramref name="Filter"/> and <paramref name="DestinationPath"/> are empty.</param>
 public sealed record PendingApprovalRequest(
     string Id,
     string Operation,
@@ -37,7 +39,17 @@ public sealed record PendingApprovalRequest(
     ConversationExportFilter Filter,
     string DestinationPath,
     DateTimeOffset CreatedAtUtc,
-    DateTimeOffset ExpiresAtUtc);
+    DateTimeOffset ExpiresAtUtc,
+    ImportApprovalInfo? Import = null);
+
+/// <summary>What the dashboard shows the operator for an import request: the staged zip and how it will be imported.</summary>
+/// <param name="StagedId">The staged copy the import will read.</param>
+/// <param name="SourcePath">Where the zip came from on the router machine.</param>
+/// <param name="SizeBytes">The staged copy's size.</param>
+/// <param name="Sha256Hex">The staged copy's SHA-256, which the passkey approval is bound to.</param>
+/// <param name="Options">How the import will run.</param>
+public sealed record ImportApprovalInfo(
+    string StagedId, string SourcePath, long SizeBytes, string Sha256Hex, ConversationImportOptions Options);
 
 /// <summary>The final decision on a request, handed to the one caller that collects it.</summary>
 /// <param name="Request">The request that was decided.</param>
@@ -110,7 +122,49 @@ public sealed class PendingApprovalTable
         ArgumentNullException.ThrowIfNull(destinationPath);
 
         var parameters = GatedOperation.ExportParameters(filter, destinationPath);
+        return Admit((id, now) => new PendingApprovalRequest(
+            Id: id,
+            Operation: GatedOperation.Export,
+            Parameters: parameters,
+            Filter: filter,
+            DestinationPath: destinationPath,
+            CreatedAtUtc: now,
+            ExpiresAtUtc: now + RequestTtl));
+    }
 
+    /// <summary>
+    /// Files a request to import the staged copy of a zip, bound to the digest
+    /// <see cref="GatedOperation.ImportParameters"/> gives for the copy's SHA-256. The digest is the one the router
+    /// computed while it staged the copy, so the operator approves exactly the bytes that will be read.
+    /// </summary>
+    /// <param name="staged">The staged copy, as <see cref="ImportStagingArea.Stage"/> returned it.</param>
+    /// <param name="options">How the import will run, shown to the operator but not part of the digest.</param>
+    /// <returns>The pending request.</returns>
+    /// <exception cref="RpcException">With <see cref="StatusCode.ResourceExhausted"/> when <see cref="MaxPending"/> requests are already open.</exception>
+    public PendingApprovalRequest CreateImport(StagedImport staged, ConversationImportOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(staged);
+        ArgumentNullException.ThrowIfNull(options);
+
+        var parameters = GatedOperation.ImportParameters(staged.Sha256Hex);
+        var info = new ImportApprovalInfo(staged.Id, staged.SourcePath, staged.SizeBytes, staged.Sha256Hex, options);
+        return Admit((id, now) => new PendingApprovalRequest(
+            Id: id,
+            Operation: GatedOperation.Import,
+            Parameters: parameters,
+            Filter: new ConversationExportFilter(),
+            DestinationPath: string.Empty,
+            CreatedAtUtc: now,
+            ExpiresAtUtc: now + RequestTtl,
+            Import: info));
+    }
+
+    /// <summary>Adds a request under the admission lock, refusing it when the table is full.</summary>
+    /// <param name="build">Builds the request from its new id and the current time.</param>
+    /// <returns>The pending request.</returns>
+    /// <exception cref="RpcException">With <see cref="StatusCode.ResourceExhausted"/> when <see cref="MaxPending"/> requests are already open.</exception>
+    private PendingApprovalRequest Admit(Func<string, DateTimeOffset, PendingApprovalRequest> build)
+    {
         // The sweep, the capacity check and the insertion happen under one lock, so concurrent callers cannot all
         // see room below the limit and each add an entry; the bound on memory holds.
         lock (_admission)
@@ -123,15 +177,7 @@ public sealed class PendingApprovalTable
                     "Too many approval requests are waiting. Decide or let the open ones lapse, then try again."));
             }
 
-            var now = _time.GetUtcNow();
-            var request = new PendingApprovalRequest(
-                Id: Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(IdBytes)),
-                Operation: GatedOperation.Export,
-                Parameters: parameters,
-                Filter: filter,
-                DestinationPath: destinationPath,
-                CreatedAtUtc: now,
-                ExpiresAtUtc: now + RequestTtl);
+            var request = build(Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(IdBytes)), _time.GetUtcNow());
 
             // A 128-bit random id cannot collide in practice; TryAdd keeps that from being an assumption.
             if (!_entries.TryAdd(request.Id, new Entry(request)))

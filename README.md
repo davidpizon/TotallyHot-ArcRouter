@@ -207,6 +207,50 @@ the dashboard's Settings).
 | `6` | The router could not be reached. Is it running on this machine? |
 | `7` | The router refused the request or the export: no passkey enrolled, too many requests waiting, a destination that already exists or lies in the data directory, another export running, or too little disk space. Nothing was written. |
 
+## Importing conversations
+
+`TotallyHotArcRouter --import-conversations <path>` reads a zip written by an export back into the
+history, the same import the dashboard's Sessions tab offers (**Export / Import**, Import side). It
+works like the export: run it from an elevated shell on the router machine, it talks to the
+**running** router over loopback gRPC, and it needs a passkey approval in the dashboard.
+
+```text
+TotallyHotArcRouter --import-conversations <path> [--timestamps original|import-time]
+                    [--on-conflict skip|overwrite|keep-both]
+```
+
+| Option | Meaning |
+|---|---|
+| `<path>` | The zip to import. Required; an absolute or relative path to a zip outside the router's data directory. |
+| `--timestamps` | `original` (default) keeps each turn's own time. `import-time` gives a conversation that is new to the history the moment of import, keeping the order and spacing, so retention does not delete it as old. |
+| `--on-conflict` | What to do with a turn that is already in the history with different content. `skip` (default) keeps your local copy. `overwrite` replaces it with the zip's version. `keep-both` stores the zip's version beside it. |
+
+The router first copies the zip into a private staging file and hashes the copy. The command prints
+that hash and a dashboard link; the **Approvals** dialog shows the source path, the hash and size,
+and the options. Your passkey approves *that exact copy*, and the import reads only the copy, so
+changing the original afterwards has no effect. Nothing is imported until you approve, and a request
+nobody decides lapses after five minutes.
+
+Importing is safe to repeat. A conversation already in the history, with the same content, is
+skipped without reading it; a turn that is already there is skipped; secrets are obscured as turns
+are stored. Imported turns appear in the Sessions tab and feed learning like any other turn (they
+arrive without a score, so the quality rescan grades them), but they never count toward spend,
+savings or ROI. The result says how many turns the next retention pass would delete. The dialog also
+lists past imports and can delete one, which removes the conversations it added.
+
+The exit codes are the same as for the export, with "imported" for "written":
+
+| Exit code | Meaning |
+|---|---|
+| `0` | The import ran to the end. Turns that failed validation are reported on stderr but still exit `0`. |
+| `1` | Something unexpected failed, or the command was interrupted (Ctrl+C). |
+| `2` | The arguments were invalid. Nothing was sent. |
+| `3` | This account cannot open the router service's data directory. Run from an elevated shell. |
+| `4` | You denied the import in the dashboard. Nothing was imported. |
+| `5` | Nobody approved before the request lapsed, or the staged copy lapsed (thirty minutes). Nothing was imported. |
+| `6` | The router could not be reached. Is it running on this machine? |
+| `7` | The router refused the source or the import: no passkey enrolled, not a zip, a zip from a newer version of the router, too many staged copies, another import running, or too little disk space. |
+
 ## Project Layout
 
 ```text

@@ -703,10 +703,28 @@ message ExportApprovalDetails {
   string destination_path = 7;
 }
 
+// What an import approval request asks to do: import the staged copy of a zip. The approval is bound to the
+// SHA-256 of that staged copy (GatedOperation.ImportParameters), so the approved bytes are the ones imported.
+// The router reads the staged copy's digest itself; a client names it by staged_id and cannot supply its own.
+message ImportApprovalDetails {
+  // The staged copy to import, from StageImport. Required when filing a request; echoed back when listing.
+  string staged_id = 1;
+  // Where the zip came from on the router machine, as the operator should see it. Set by the router when listing.
+  string source_path = 2;
+  // The staged copy's size in bytes. Set by the router when listing.
+  int64 size_bytes = 3;
+  // The staged copy's SHA-256 as 64 lowercase hex digits. Set by the router when listing.
+  string sha256 = 4;
+  // How the import will run. The options are shown to the operator but are not part of the digest the passkey
+  // approves: they cannot make an import read anything other than the approved zip.
+  ImportOptions options = 5;
+}
+
 message CreateApprovalRequestRequest {
-  // The operation to approve. Only export exists today; a later gated operation adds a case.
+  // The operation to approve.
   oneof operation {
     ExportApprovalDetails export = 1;
+    ImportApprovalDetails import = 2;
   }
 }
 
@@ -746,6 +764,7 @@ message PendingApproval {
   string approval_id = 1;
   oneof operation {
     ExportApprovalDetails export = 2;
+    ImportApprovalDetails import = 5;
   }
   google.protobuf.Timestamp created_at_utc = 3;
   google.protobuf.Timestamp expires_at_utc = 4;
@@ -1412,6 +1431,135 @@ service ConversationAdminService {
   // mismatched authorization), FAILED_PRECONDITION (no passkey enrolled, an export already running, or too
   // little free disk space) and INVALID_ARGUMENT (a destination that breaks the path rules, or a bad timestamp).
   rpc ExportConversations (ExportConversationsRequest) returns (stream ExportConversationsEvent);
+
+  // Import (#165 phase 4, docs/plans/issue-165-phase4-import.md PR 4b). Copies a zip from source_path on the
+  // router machine into a private staging file, hashes the copy, and returns the digest an import approval is
+  // bound to. Import reads only the staged copy, so the file cannot change between the operator's approval and the
+  // read. Not gated (it writes nothing the import would not), but bounded: a handful of staged copies at once
+  // (RESOURCE_EXHAUSTED beyond that), each discarded after thirty minutes, and the source must be a zip outside
+  // the router's data directory (INVALID_ARGUMENT otherwise).
+  rpc StageImport (StageImportRequest) returns (StageImportResponse);
+
+  // Imports the staged copy, streaming zero or more ImportProgress events and then exactly one ImportResult as the
+  // final message. The router consumes authorization_token (a one-operation passkey authorization bound to the
+  // SHA-256 of the staged copy, which the router computed itself) before it opens the store, and discards the
+  // staged copy afterwards whether or not the import succeeded. UNAUTHENTICATED (missing, spent or mismatched
+  // authorization), FAILED_PRECONDITION (no passkey enrolled, an import running, too little free disk space),
+  // INVALID_ARGUMENT (not a usable archive, or an unsupported schema version) and NOT_FOUND (no such staged copy).
+  rpc ImportConversations (ImportConversationsRequest) returns (stream ImportConversationsEvent);
+
+  // Lists past imports, newest first, for the dialog's imports list. Not gated: it carries counts, no text.
+  rpc ListConversationImports (ListConversationImportsRequest) returns (ListConversationImportsResponse);
+
+  // Removes one import: the sessions it created leave with their learned embeddings, and the turns it added to
+  // sessions that existed before are retired. Not gated, like Clear: it only removes data.
+  rpc DeleteConversationImport (DeleteConversationImportRequest) returns (DeleteConversationImportResponse);
+}
+
+// When imported turns are timestamped (#165 plan, section 2).
+enum ImportTimestampMode {
+  // Keep each turn's original time.
+  IMPORT_TIMESTAMP_MODE_ORIGINAL = 0;
+  // Shift every turn of a session new to the history by one offset so the newest lands at the import time.
+  IMPORT_TIMESTAMP_MODE_IMPORT_TIME = 1;
+}
+
+// What to do with a turn present on both sides with different contents, when the local copy is not kept.
+enum ImportConflictMode {
+  IMPORT_CONFLICT_MODE_SKIP = 0;
+  IMPORT_CONFLICT_MODE_OVERWRITE = 1;
+  IMPORT_CONFLICT_MODE_KEEP_BOTH = 2;
+}
+
+message ImportOptions {
+  ImportTimestampMode timestamps = 1;
+  ImportConflictMode on_conflict = 2;
+  // False (the default) keeps the local copy of a conflicting turn, whatever on_conflict says; true lets
+  // on_conflict decide. Phrased so the zero value is the safe default.
+  bool replace_local_on_conflict = 3;
+}
+
+message StageImportRequest {
+  // Absolute path of the zip on the router machine.
+  string source_path = 1;
+}
+
+message StageImportResponse {
+  // Names the staged copy in ImportConversations and in an import approval request.
+  string staged_id = 1;
+  // SHA-256 of the staged copy as 64 lowercase hex digits: what a passkey approval for the import is bound to.
+  string sha256 = 2;
+  int64 size_bytes = 3;
+  // When the router discards the staged copy if it has not been imported.
+  google.protobuf.Timestamp expires_at_utc = 4;
+}
+
+message ImportConversationsRequest {
+  string staged_id = 1;
+  ImportOptions options = 2;
+  // One-operation passkey authorization token (ADR-0020) bound to the import operation and the staged copy's
+  // digest. Optional on the wire; the router refuses the call without a valid one.
+  optional string authorization_token = 3;
+}
+
+// How far the import has got. Sent after each turn; a slow client may see fewer events than turns.
+message ImportProgress {
+  int32 turns_processed = 1;
+  int32 turns_stored = 2;
+}
+
+// The finished import.
+message ImportResult {
+  string import_id = 1;
+  int32 sessions_added = 2;
+  // Sessions skipped whole because their checksum matched, without reading any body.
+  int32 sessions_skipped = 3;
+  int32 turns_added = 4;
+  int32 turns_already_present = 5;
+  int32 turns_conflict_kept = 6;
+  // Turns that failed validation and were left out.
+  int32 turns_rejected = 7;
+  // Stored turns that arrived without a score, which the quality rescan will grade.
+  int32 turns_to_grade = 8;
+  int64 body_bytes = 9;
+  // Turns the next retention pass would delete.
+  int32 turns_due_for_retention = 10;
+}
+
+// One message on the ImportConversations stream: zero or more progress events, then one result.
+message ImportConversationsEvent {
+  oneof event {
+    ImportProgress progress = 1;
+    ImportResult result = 2;
+  }
+}
+
+message ListConversationImportsRequest {}
+
+message ConversationImportInfo {
+  string import_id = 1;
+  google.protobuf.Timestamp imported_at_utc = 2;
+  // SHA-256 of the zip that was imported.
+  string source_sha256 = 3;
+  int32 sessions_added = 4;
+  int32 turns_added = 5;
+  int32 turns_skipped = 6;
+  int32 turns_rejected = 7;
+}
+
+message ListConversationImportsResponse {
+  repeated ConversationImportInfo imports = 1;
+}
+
+message DeleteConversationImportRequest {
+  string import_id = 1;
+}
+
+message DeleteConversationImportResponse {
+  // Sessions the import created that were deleted whole.
+  int32 sessions_deleted = 1;
+  // Turns retired instead, because they sit in a session that holds other turns too.
+  int32 turns_retired = 2;
 }
 
 message GetConversationExportSummaryRequest {}

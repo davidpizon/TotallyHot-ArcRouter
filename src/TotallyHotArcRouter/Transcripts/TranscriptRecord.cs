@@ -78,6 +78,11 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// (#165 phase 2). The database does not store the text itself.
 /// </param>
 /// <param name="ArchiveTurnId">The turn inside that session file, or <see langword="null"/> when there is none.</param>
+/// <param name="Origin">
+/// <see cref="Sessions.SessionTurnOrigin.Captured"/> for a turn the router served, or
+/// <see cref="Sessions.SessionTurnOrigin.Imported"/> for one a conversation import created (#165 phase 4). An
+/// imported row feeds learning but never spend, savings or ROI totals, because the router did not serve it.
+/// </param>
 public sealed record TranscriptRecord(
     long Id,
     string CorrelationId,
@@ -102,7 +107,8 @@ public sealed record TranscriptRecord(
     double? UntrainedBaselinePredictedScore = null,
     bool IsJudgeScored = false,
     Guid? ArchiveSessionId = null,
-    Guid? ArchiveTurnId = null)
+    Guid? ArchiveTurnId = null,
+    string Origin = Sessions.SessionTurnOrigin.Captured)
 {
     /// <summary>
     /// How long after a row is inserted a missing session-file extract is still treated as in flight. The row is

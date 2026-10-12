@@ -43,6 +43,7 @@ public sealed class SqliteTaxonomyComparisonStore : ITaxonomyComparisonStore
                               FROM request_transcripts t
                               LEFT JOIN taxonomy_comparisons c ON c.transcript_id = t.id
                               WHERE t.score IS NOT NULL AND t.memory_entry_id IS NOT NULL AND t.dimension IS NOT NULL
+                                AND t.origin <> 'imported'
                                 AND c.transcript_id IS NULL
                               ORDER BY t.id ASC
                               LIMIT $limit;

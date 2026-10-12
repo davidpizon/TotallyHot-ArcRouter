@@ -58,12 +58,14 @@ public sealed record PasskeyApprovalInfo(string Operation, string CredentialName
 /// <param name="DestinationPath">Where on the router machine the zip would be written.</param>
 /// <param name="CreatedAtUtc">When the request was filed.</param>
 /// <param name="ExpiresAtUtc">When the request lapses if nobody decides it.</param>
+/// <param name="Import">What an import request shows the operator, or <see langword="null"/> for an export (whose <paramref name="Filter"/> and <paramref name="DestinationPath"/> are then empty).</param>
 public sealed record PendingApprovalInfo(
     string ApprovalId,
     ConversationExportFilterInfo Filter,
     string DestinationPath,
     DateTimeOffset CreatedAtUtc,
-    DateTimeOffset ExpiresAtUtc);
+    DateTimeOffset ExpiresAtUtc,
+    PendingImportInfo? Import = null);
 
 /// <summary>
 /// Every <c>PasskeyAdminService</c> RPC the dashboard needs for ADR-0020's content gate: gate status,

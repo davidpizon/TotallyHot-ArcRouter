@@ -1,14 +1,14 @@
-@* Sessions tab's Export dialog (#165 phase 3, docs/plans/issue-165-phase3-export.md PR 3b). Writes the captured
-   conversations that match a filter to one zip on the router machine. Exporting copies conversation text out of
-   the encrypted store, so the router requires a one-operation passkey approval (ADR-0020) bound to exactly this
-   filter and destination: the dialog earns it with PasskeyAdminStore.AuthorizeOperationAsync, then hands it to
-   the export RPC, which refuses a different export. Export only - Import arrives in phase 4, and there is no
-   disabled stand-in for it. Follows the DialogShell contract (docs/gui/DESIGN.md 4.1). *@
+@* Sessions tab's Export / Import dialog (#165 phases 3 and 4). The Export half writes the captured conversations
+   that match a filter to one zip on the router machine. Exporting copies conversation text out of the encrypted
+   store, so the router requires a one-operation passkey approval (ADR-0020) bound to exactly this filter and
+   destination: the dialog earns it with PasskeyAdminStore.AuthorizeOperationAsync, then hands it to the export
+   RPC, which refuses a different export. The Import half is ImportPanel, rendered in the same shell. Follows the
+   DialogShell contract (docs/gui/DESIGN.md 4.1). *@
 @implements IDisposable
 @inject ConversationExportStore ExportStore
 @inject PasskeyAdminStore PasskeyStore
 @inject RouterSettingsAdminStore RouterSettingsStore
-<DialogShell Title="Export" CloseAriaLabel="Close export dialog" OnClose="CloseAsync" EnableEscapeToClose="true">
+<DialogShell Title="Export / Import" CloseAriaLabel="Close export dialog" OnClose="CloseAsync" EnableEscapeToClose="true">
     @{
         var capture = RouterSettingsStore.Settings?.TranscriptCaptureEnabled;
         var summary = ExportStore.Summary;
@@ -41,7 +41,24 @@
         }
     </div>
 
-    @if (ExportStore.Result is { } result)
+    <div class="flex gap-2" role="tablist" aria-label="Export or import">
+        <button role="tab" aria-selected="@(!_importing)" disabled="@(_busy || ExportStore.IsImporting)"
+                @onclick="() => _importing = false"
+                class="flex-1 btn @(_importing ? "btn-ghost" : "btn-primary")" data-testid="mode-export">
+            Export
+        </button>
+        <button role="tab" aria-selected="@_importing" disabled="@(_busy || ExportStore.IsImporting)"
+                @onclick="() => _importing = true"
+                class="flex-1 btn @(_importing ? "btn-primary" : "btn-ghost")" data-testid="mode-import">
+            Import
+        </button>
+    </div>
+
+    @if (_importing)
+    {
+        <ImportPanel OnClose="CloseAsync"/>
+    }
+    else if (ExportStore.Result is { } result)
     {
         <div class="space-y-1 text-xs" data-testid="export-result">
             <p class="text-emerald-400 font-medium">Export written</p>
@@ -185,6 +202,7 @@
     private string _model = string.Empty;
     private string _destination = string.Empty;
     private bool _busy;
+    private bool _importing;
     private string? _errorMessage;
     private CancellationTokenSource? _exportCancellation;
 

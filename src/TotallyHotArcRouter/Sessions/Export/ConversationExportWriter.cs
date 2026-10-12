@@ -201,7 +201,7 @@ public sealed class ConversationExportWriter
     /// </summary>
     /// <param name="directory">A normalized absolute directory path.</param>
     /// <returns>The path with each link in it replaced by its final target.</returns>
-    private static string ResolveLinks(string directory)
+    internal static string ResolveLinks(string directory)
     {
         var root = Path.GetPathRoot(directory);
         if (string.IsNullOrEmpty(root)) return directory;
@@ -233,7 +233,7 @@ public sealed class ConversationExportWriter
     /// <param name="path">A normalized absolute path.</param>
     /// <param name="folder">A normalized absolute folder path.</param>
     /// <returns><see langword="true"/> when the path is at or below the folder.</returns>
-    private static bool IsUnder(string path, string folder)
+    internal static bool IsUnder(string path, string folder)
     {
         var comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
             ? StringComparison.OrdinalIgnoreCase
@@ -996,7 +996,7 @@ public sealed class ConversationExportWriter
     /// <summary>Reads free and total bytes of the volume holding a path.</summary>
     /// <param name="path">A path on the volume.</param>
     /// <returns>The sizes; an unreadable drive (a UNC share, for one) counts as having plenty of room.</returns>
-    private static (long FreeBytes, long TotalBytes) DriveSpace(string path)
+    internal static (long FreeBytes, long TotalBytes) DriveSpace(string path)
     {
         try
         {
