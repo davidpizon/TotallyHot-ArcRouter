@@ -232,4 +232,55 @@ public sealed class SessionMessagesPaneTests
 
         cut.FindAll(".row-enter-append").Should().HaveCount(2); // request + response for turn 2
     }
+
+    [Fact]
+    public void Live_arrival_keeps_an_explicit_selection_while_pinned_to_the_bottom()
+    {
+        var state = new SessionsViewState();
+        using var ctx = NewContext(state);
+        var cut = ctx.Render<SessionMessagesPane>(p => p
+            .Add(c => c.Conversation, MakeConversation(2)));
+        cut.FindAll(".ls-msg-select")[0].Click();
+
+        cut.Render(p => p.Add(c => c.Conversation, MakeConversation(3)));
+
+        state.MessageSelection.Should().NotBeNull();
+        state.MessageSelection!.TurnNumber.Should().Be(1);
+        state.MessageSelection.Side.Should().Be(MessageSide.Request);
+    }
+
+    [Fact]
+    public void Search_status_reports_matches_against_all_loaded_messages()
+    {
+        var state = new SessionsViewState { InSessionSearchOpen = true, InSessionFilter = "Client" };
+        using var ctx = NewContext(state);
+        var cut = ctx.Render<SessionMessagesPane>(p => p
+            .Add(c => c.Conversation, MakeConversation(2)));
+
+        // Only the two request rows are labelled "Client"; all four rows are loaded.
+        cut.Find("[role='status']").TextContent.Should().Contain("2 matches in 4 loaded messages");
+    }
+
+    [Fact]
+    public void Remount_keeps_a_saved_selection_that_belongs_to_the_same_session()
+    {
+        var state = new SessionsViewState { MessageSelection = new MessageSelection("s1", 1, MessageSide.Request) };
+        using var ctx = NewContext(state);
+
+        ctx.Render<SessionMessagesPane>(p => p.Add(c => c.Conversation, MakeConversation(2)));
+
+        state.MessageSelection.Should().NotBeNull();
+        state.MessageSelection!.Side.Should().Be(MessageSide.Request);
+    }
+
+    [Fact]
+    public void Remount_drops_a_saved_selection_from_another_session()
+    {
+        var state = new SessionsViewState { MessageSelection = new MessageSelection("other", 1, MessageSide.Request) };
+        using var ctx = NewContext(state);
+
+        ctx.Render<SessionMessagesPane>(p => p.Add(c => c.Conversation, MakeConversation(2)));
+
+        state.MessageSelection.Should().BeNull();
+    }
 }

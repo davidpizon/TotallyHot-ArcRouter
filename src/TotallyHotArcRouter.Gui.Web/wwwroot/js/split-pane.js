@@ -77,7 +77,12 @@ window.splitPane = {
       return { min: min, max: max, W: W };
     }
 
-    function applyPct(pct) {
+    // `persist` is true only for operator-driven changes (drag, keyboard). Init and container resizes
+    // re-clamp to the current window without saving, so a transiently narrow window cannot permanently
+    // overwrite the width the operator chose.
+    let desiredPct = readStoredPct();
+
+    function applyPct(pct, persist) {
       const b = bounds();
       const clamped = Math.min(b.max, Math.max(b.min, pct));
       panel.style.width = clamped + "%";
@@ -85,7 +90,10 @@ window.splitPane = {
       divider.setAttribute("aria-valuenow", String(Math.round(clamped)));
       divider.setAttribute("aria-valuemin", String(Math.round(b.min)));
       divider.setAttribute("aria-valuemax", String(Math.round(b.max)));
-      writeStoredPct(clamped);
+      if (persist) {
+        desiredPct = clamped;
+        writeStoredPct(clamped);
+      }
       return clamped;
     }
 
@@ -100,7 +108,7 @@ window.splitPane = {
       return ((clientX - rect.left) / rect.width) * 100;
     }
 
-    applyPct(readStoredPct());
+    applyPct(desiredPct, false);
 
     let dragging = false;
 
@@ -115,7 +123,7 @@ window.splitPane = {
       if (!dragging) {
         return;
       }
-      applyPct(pctFromClientX(e.clientX));
+      applyPct(pctFromClientX(e.clientX), true);
     }
 
     function endDrag() {
@@ -129,16 +137,16 @@ window.splitPane = {
       const step = 2;
       if (e.key === "ArrowLeft") {
         e.preventDefault();
-        applyPct(edge === "left" ? current - step : current + step);
+        applyPct(edge === "left" ? current - step : current + step, true);
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        applyPct(edge === "left" ? current + step : current - step);
+        applyPct(edge === "left" ? current + step : current - step, true);
       } else if (e.key === "Home") {
         e.preventDefault();
-        applyPct(b.min);
+        applyPct(b.min, true);
       } else if (e.key === "End") {
         e.preventDefault();
-        applyPct(b.max);
+        applyPct(b.max, true);
       }
     }
 
@@ -151,8 +159,9 @@ window.splitPane = {
     let resizeObserver = null;
     if (typeof ResizeObserver !== "undefined") {
       resizeObserver = new ResizeObserver(function () {
-        const current = parseFloat(panel.style.width) || defaultPct;
-        applyPct(current);
+        // Re-clamp the operator's stored width (not the possibly already-clamped one on screen) so the
+        // panel springs back to it when the window grows again.
+        applyPct(desiredPct, false);
       });
       resizeObserver.observe(container);
     }

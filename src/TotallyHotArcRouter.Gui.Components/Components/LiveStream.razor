@@ -1,5 +1,6 @@
 @using Microsoft.JSInterop
 @* Sessions tab: always-on three-pane layout (session rail · messages · details). #176 Phase 1. *@
+@implements IDisposable
 @implements IAsyncDisposable
 @inject IJSRuntime Js
 @inject SessionsViewState ViewState
@@ -98,6 +99,14 @@
     public EventCallback<string> OnSelect { get; set; }
 
     /// <summary>
+    /// Invoked with the id of the session shown by implicit selection (no explicit or still-present
+    /// <see cref="SelectedId"/>) whenever that session changes, so the host can load its persisted text.
+    /// Unlike <see cref="OnSelect"/> it does not change Dashboard's shared selection.
+    /// </summary>
+    [Parameter]
+    public EventCallback<string> OnImplicitSessionShown { get; set; }
+
+    /// <summary>
     /// Whether the router has transcript capture enabled. Shown in the rail footer; Phase 2 also gates
     /// persisted detail sections on this.
     /// </summary>
@@ -160,25 +169,76 @@
     private ElementReference _leftDivider;
     private ElementReference _rightDivider;
 
-    /// <summary>Conversations sorted most recently active first for the rail.</summary>
-    private IReadOnlyList<Conversation> OrderedConversations =>
-        Conversations.OrderByDescending(NewestTurnUtc).ToList();
+    private IReadOnlyList<Conversation> _orderedConversations = [];
+    private Conversation? _activeConversation;
+
+    /// <summary>
+    /// Conversations sorted most recently active first for the rail. Sorted once per parameter change in
+    /// <see cref="OnParametersSet"/> because the markup, the implicit-selection check and the active-session
+    /// lookup all read it during one render.
+    /// </summary>
+    private IReadOnlyList<Conversation> OrderedConversations => _orderedConversations;
 
     /// <summary>
     /// The conversation shown in the middle and right panes: explicit <see cref="SelectedId"/> when still
     /// present, otherwise the most recently active session (implicit; does not call <see cref="OnSelect"/>).
     /// </summary>
-    private Conversation? ActiveConversation
+    private Conversation? ActiveConversation => _activeConversation;
+
+    /// <inheritdoc/>
+    protected override void OnParametersSet()
     {
-        get
+        _orderedConversations = [.. Conversations.OrderByDescending(NewestTurnUtc)];
+        _activeConversation = string.IsNullOrEmpty(SelectedId)
+            ? null
+            : Conversations.FirstOrDefault(c => c.Id == SelectedId);
+        _activeConversation ??= _orderedConversations.FirstOrDefault();
+    }
+
+    private string? _lastImplicitShownId;
+    private Timer? _statusTimer;
+
+    /// <inheritdoc/>
+    protected override void OnInitialized()
+    {
+        // Rail dots and the Session tab status are functions of the clock (the 5-minute idle threshold), but
+        // Blazor only re-renders on data changes. Without telemetry a "live and active" session would stay
+        // green forever, so re-render periodically.
+        _statusTimer = new Timer(_ => RefreshStatus(), null, StatusRefreshInterval, StatusRefreshInterval);
+    }
+
+    private void RefreshStatus()
+    {
+        try
         {
-            if (!string.IsNullOrEmpty(SelectedId))
-            {
-                var selected = Conversations.FirstOrDefault(c => c.Id == SelectedId);
-                if (selected is not null) return selected;
-            }
-            return OrderedConversations.FirstOrDefault();
+            _ = InvokeAsync(StateHasChanged);
         }
+        catch (ObjectDisposedException)
+        {
+            // Tick raced with disposal.
+        }
+    }
+
+    private static readonly TimeSpan StatusRefreshInterval = TimeSpan.FromSeconds(30);
+
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        _statusTimer?.Dispose();
+        _statusTimer = null;
+    }
+
+    /// <inheritdoc/>
+    protected override async Task OnParametersSetAsync()
+    {
+        // The rail falls back to the newest session without calling OnSelect, so a persisted-only session
+        // shown that way would otherwise never have its stored text loaded and read as "No request captured".
+        var implicitId = !string.IsNullOrEmpty(SelectedId) && ActiveConversation?.Id == SelectedId
+            ? null
+            : ActiveConversation?.Id;
+        if (implicitId is null || implicitId == _lastImplicitShownId) return;
+        _lastImplicitShownId = implicitId;
+        await OnImplicitSessionShown.InvokeAsync(implicitId);
     }
 
     /// <inheritdoc/>
@@ -202,6 +262,7 @@
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
+        Dispose();
         try
         {
             await Js.InvokeVoidAsync("splitPane.dispose", _leftDivider);

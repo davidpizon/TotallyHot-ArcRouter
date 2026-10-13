@@ -33,7 +33,7 @@ window.chatScroll = (function () {
   }
 
   function reportAtBottom(list, state) {
-    if (state.disposed || !state.dotNetRef) {
+    if (state.disposed || !state.dotNetRef || teardownIfDetached(list, state)) {
       return;
     }
     const next = isAtBottom(list);
@@ -44,8 +44,19 @@ window.chatScroll = (function () {
     state.dotNetRef.invokeMethodAsync("OnAtBottomChanged", next);
   }
 
+  // A list removed from the DOM (the pane's @key swaps it on a session change) must stop reporting: its
+  // observers can still fire once on removal, and the shared .NET reference would apply that empty
+  // measurement to the new session's rows.
+  function teardownIfDetached(list, state) {
+    if (list.isConnected) {
+      return false;
+    }
+    dispose(list);
+    return true;
+  }
+
   function measureOverflow(list, state) {
-    if (state.disposed || !state.dotNetRef) {
+    if (state.disposed || !state.dotNetRef || teardownIfDetached(list, state)) {
       return;
     }
     const bodies = list.querySelectorAll("[data-msg-key]");
@@ -67,6 +78,31 @@ window.chatScroll = (function () {
     }
     state.overflowingKeys = key;
     state.dotNetRef.invokeMethodAsync("OnOverflowKeysChanged", overflowing);
+  }
+
+  function dispose(list) {
+    if (!list) {
+      return;
+    }
+    const state = getState(list);
+    if (!state) {
+      return;
+    }
+    state.disposed = true;
+    if (state.scrollRaf) {
+      cancelAnimationFrame(state.scrollRaf);
+      state.scrollRaf = 0;
+    }
+    if (state.onScroll) {
+      list.removeEventListener("scroll", state.onScroll);
+      state.onScroll = null;
+    }
+    if (state.resizeObserver) {
+      state.resizeObserver.disconnect();
+      state.resizeObserver = null;
+    }
+    state.dotNetRef = null;
+    states.delete(list);
   }
 
   return {
@@ -136,29 +172,6 @@ window.chatScroll = (function () {
       }
     },
 
-    dispose: function (list) {
-      if (!list) {
-        return;
-      }
-      const state = getState(list);
-      if (!state) {
-        return;
-      }
-      state.disposed = true;
-      if (state.scrollRaf) {
-        cancelAnimationFrame(state.scrollRaf);
-        state.scrollRaf = 0;
-      }
-      if (state.onScroll) {
-        list.removeEventListener("scroll", state.onScroll);
-        state.onScroll = null;
-      }
-      if (state.resizeObserver) {
-        state.resizeObserver.disconnect();
-        state.resizeObserver = null;
-      }
-      state.dotNetRef = null;
-      states.delete(list);
-    },
+    dispose: dispose,
   };
 })();

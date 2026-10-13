@@ -29,7 +29,7 @@ public sealed class SessionMergerTests
     [Fact]
     public void Merge_SameSession_UnionsTurnsByNumber_LiveMetricsWin()
     {
-        var live = MakeConversation("s1", turn: 2, isLive: true, cost: 0.02m, request: "live-req…", response: "live-resp…");
+        var live = MakeConversation("s1", turn: 2, isLive: true, cost: 0.02m, request: Truncated("live-req"), response: Truncated("live-resp"));
         var persisted = MakeConversation("s1", turn: 1, isLive: false, cost: 0.01m, request: "full request", response: "full response");
         // Add turn 2 on persisted with different cost — live turn 2 must win metrics.
         persisted = persisted with
@@ -54,6 +54,50 @@ public sealed class SessionMergerTests
         Assert.True(merged.IsLive);
         Assert.Equal(0.03m, merged.TotalCost);
     }
+
+    [Fact]
+    public void Merge_LiveTextEndingInEllipsis_ButNotTruncated_KeepsLiveText()
+    {
+        var live = MakeConversation("s1", turn: 1, isLive: true, request: "wait...", response: "and so on…");
+        var persisted = MakeConversation("s1", turn: 1, isLive: false, request: "persisted-req", response: "persisted-resp");
+
+        var merged = Assert.Single(SessionMerger.Merge([live], [persisted]));
+
+        Assert.Equal("wait...", merged.Turns[0].RequestSummary);
+        Assert.Equal("and so on…", merged.Turns[0].ResponseSummary);
+    }
+
+    [Fact]
+    public void Merge_DuplicateTurnNumberWithinOneSide_DoesNotThrow_LaterTurnWins()
+    {
+        var live = MakeConversation("s1", turn: 2, isLive: true);
+        var persisted = MakeConversation("s1", turn: 1, isLive: false);
+        persisted = persisted with
+        {
+            Turns =
+            [
+                persisted.Turns[0],
+                MakeTurn(sessionId: "s1", turn: 1, isLive: false, cost: 0.05m, request: "reissued", response: "reissued")
+            ]
+        };
+
+        var merged = Assert.Single(SessionMerger.Merge([live], [persisted]));
+
+        Assert.Equal(2, merged.Turns.Count);
+        Assert.Equal("reissued", merged.Turns[0].RequestSummary);
+    }
+
+    [Fact]
+    public void IsTruncatedLiveSummary_RequiresCapPlusMarker()
+    {
+        Assert.True(SessionMerger.IsTruncatedLiveSummary(Truncated("x")));
+        Assert.False(SessionMerger.IsTruncatedLiveSummary("short…"));
+        Assert.False(SessionMerger.IsTruncatedLiveSummary(new string('x', 2500)));
+        Assert.False(SessionMerger.IsTruncatedLiveSummary(null));
+    }
+
+    /// <summary>Builds text the way the router's <c>TextTruncator</c> does: the 2,000-character cap plus a "…" marker.</summary>
+    private static string Truncated(string prefix) => prefix.PadRight(2000, '.') + "…";
 
     [Fact]
     public void Merge_DisjointSessions_KeepsBoth()
@@ -109,7 +153,7 @@ public sealed class SessionMergerTests
     public void Merge_TruncatedLiveSummary_ReplacedByPersistedText()
     {
         var live = MakeConversation("s1", turn: 1, isLive: true, cost: 0.01m,
-            request: "truncated live request...", response: "truncated live response…");
+            request: Truncated("truncated live request"), response: Truncated("truncated live response"));
         var persisted = MakeConversation("s1", turn: 1, isLive: false, cost: 9.99m,
             request: "full persisted request", response: "full persisted response");
 

@@ -92,6 +92,8 @@
     public EventCallback OnSelectionChanged { get; set; }
 
     private ElementReference _list;
+    private IReadOnlyList<ConversationTurn> _orderedTurns = [];
+    private HashSet<int> _turnNumbers = [];
     private DotNetObjectReference<SessionMessagesPane>? _dotNetRef;
     private readonly HashSet<string> _overflowKeys = new(StringComparer.Ordinal);
     private readonly HashSet<string> _expandedKeys = new(StringComparer.Ordinal);
@@ -104,16 +106,13 @@
     private string? _boundSessionId;
     private bool _disposed;
 
-    /// <summary>Turns in ascending order, windowed to the newest <see cref="_windowTurns"/>.</summary>
-    private IReadOnlyList<ConversationTurn> WindowedTurns
-    {
-        get
-        {
-            var ordered = Conversation.Turns.OrderBy(t => t.TurnNumber).ToList();
-            if (ordered.Count <= _windowTurns) return ordered;
-            return ordered.Skip(ordered.Count - _windowTurns).ToList();
-        }
-    }
+    /// <summary>
+    /// Turns in ascending order, windowed to the newest <see cref="_windowTurns"/>. Sorted once per parameter
+    /// change in <see cref="RebuildOrderedTurns"/> rather than on every access, since the row list, the
+    /// selection check on every row, and the search status line all read it during one render.
+    /// </summary>
+    private IEnumerable<ConversationTurn> WindowedTurns =>
+        _orderedTurns.Count <= _windowTurns ? _orderedTurns : _orderedTurns.Skip(_orderedTurns.Count - _windowTurns);
 
     private bool HasEarlierTurns => Conversation.Turns.Count > _windowTurns;
 
@@ -148,20 +147,18 @@
         get
         {
             var sel = ViewState.MessageSelection;
-            if (sel is not null && sel.SessionId == Conversation.Id
-                && Conversation.Turns.Any(t => t.TurnNumber == sel.TurnNumber))
+            if (sel is not null && sel.SessionId == Conversation.Id && _turnNumbers.Contains(sel.TurnNumber))
                 return sel;
 
-            var newest = Conversation.Turns.OrderBy(t => t.TurnNumber).LastOrDefault();
-            if (newest is null)
-                return new MessageSelection(Conversation.Id, 0, MessageSide.Response);
-            return new MessageSelection(Conversation.Id, newest.TurnNumber, MessageSide.Response);
+            return new MessageSelection(
+                Conversation.Id, _orderedTurns.Count == 0 ? 0 : _orderedTurns[^1].TurnNumber, MessageSide.Response);
         }
     }
 
     /// <inheritdoc/>
     protected override void OnParametersSet()
     {
+        RebuildOrderedTurns();
         if (_boundSessionId != Conversation.Id)
         {
             _boundSessionId = Conversation.Id;
@@ -175,8 +172,8 @@
                 ? 0
                 : Conversation.Turns.Max(t => t.TurnNumber);
             _atBottom = true;
-            // Preserve a selection that already belongs to this session so a Dashboard @key remount
-            // does not wipe the operator's request/response choice (#176 §6.5).
+            // A fresh pane (tab switch remount) starts unbound; keep a saved selection that still belongs to
+            // this session and drop only one left over from a different session.
             if (ViewState.MessageSelection is { } sel && sel.SessionId != Conversation.Id)
                 ViewState.ClearMessageSelection();
             return;
@@ -194,16 +191,18 @@
                 _maxSeenTurn = maxTurn;
             }
 
-            if (_atBottom)
-            {
-                // Implicit selection follows the newest response while pinned.
-                ViewState.ClearMessageSelection();
-            }
-            else
-            {
+            // An implicit selection (null) already follows the newest response; an explicit one is the
+            // operator's choice and must survive a live arrival, pinned to the bottom or not.
+            if (!_atBottom)
                 _pendingNew += added;
-            }
         }
+    }
+
+    /// <summary>Refreshes the cached ascending turn order and turn-number lookup from <see cref="Conversation"/>.</summary>
+    private void RebuildOrderedTurns()
+    {
+        _orderedTurns = [.. Conversation.Turns.OrderBy(t => t.TurnNumber)];
+        _turnNumbers = [.. _orderedTurns.Select(t => t.TurnNumber)];
     }
 
     /// <inheritdoc/>

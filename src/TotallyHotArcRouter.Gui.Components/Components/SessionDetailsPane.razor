@@ -81,7 +81,9 @@
         {
             if (Conversation is null || Conversation.Turns.Count == 0) return null;
             var sel = Selection;
-            if (sel is not null)
+            // A selection left over from another session (the messages pane clears it during the same render
+            // pass, after this pane's parameters were captured) must not pick a same-numbered turn here.
+            if (sel is not null && sel.SessionId == Conversation.Id)
             {
                 var match = Conversation.Turns.FirstOrDefault(t => t.TurnNumber == sel.TurnNumber);
                 if (match is not null) return match;
@@ -91,7 +93,7 @@
     }
 
     private MessageSide SelectedSide =>
-        Selection?.Side ?? MessageSide.Response;
+        Selection is not null && Selection.SessionId == Conversation?.Id ? Selection.Side : MessageSide.Response;
 
     private void SelectTab(SessionsDetailsTab tab) => ViewState.DetailsTab = tab;
 

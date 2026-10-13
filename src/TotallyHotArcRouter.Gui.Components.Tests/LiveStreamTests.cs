@@ -383,4 +383,54 @@ public sealed class LiveStreamTests
 
         cut.Find(".ls-history-notice").TextContent.Should().Be("Showing the newest 312 persisted turns.");
     }
+
+    [Fact]
+    public void Implicit_selection_reports_the_shown_session_once_without_selecting_it()
+    {
+        using var ctx = NewContext();
+        var shown = new List<string>();
+        var selected = new List<string>();
+
+        var cut = ctx.Render<LiveStream>(p => p
+            .Add(c => c.Conversations, [MakeConversation("s1", "First")])
+            .Add(c => c.SelectedId, string.Empty)
+            .Add(c => c.OnImplicitSessionShown, shown.Add)
+            .Add(c => c.OnSelect, selected.Add));
+        cut.Render(p => p.Add(c => c.Conversations, [MakeConversation("s1", "First")]));
+
+        shown.Should().Equal("s1");
+        selected.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Explicit_selection_does_not_report_an_implicit_session()
+    {
+        using var ctx = NewContext();
+        var shown = new List<string>();
+
+        ctx.Render<LiveStream>(p => p
+            .Add(c => c.Conversations, [MakeConversation("s1", "First")])
+            .Add(c => c.SelectedId, "s1")
+            .Add(c => c.OnImplicitSessionShown, shown.Add));
+
+        shown.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Rail_keeps_one_tab_stop_when_search_hides_the_selected_session()
+    {
+        var state = new SessionsViewState { RailSearch = "Second" };
+        using var ctx = new BunitContext();
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        ctx.Services.AddSingleton<IClipboardService>(new FakeClipboardService());
+        ctx.Services.AddSingleton(state);
+        ctx.Services.AddSingleton(TimeProvider.System);
+
+        var cut = ctx.Render<LiveStream>(p => p
+            .Add(c => c.Conversations, [MakeConversation("s1", "First"), MakeConversation("s2", "Second")])
+            .Add(c => c.SelectedId, "s1"));
+
+        cut.FindAll("[role='option']").Should().ContainSingle()
+            .Which.GetAttribute("tabindex").Should().Be("0");
+    }
 }
