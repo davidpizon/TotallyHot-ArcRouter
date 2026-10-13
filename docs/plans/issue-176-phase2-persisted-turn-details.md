@@ -148,6 +148,6 @@ Decided by David on 2026-10-13:
 
 Still open:
 
-4. Should the aggregate's model list stay capped at 20 (parent plan default), or list all models? Defaults to 20 unless you say otherwise.
+4. ~~Model list cap~~ Decided: keep 20 (David, 2026-10-13).
 
 Also decided on 2026-10-13: detection covers **every provider format the router translates** (§4.2), and **Amendment 1 to ADR-0025** is drafted in the ADR for the column and capture change. It needs David's acceptance before code.
