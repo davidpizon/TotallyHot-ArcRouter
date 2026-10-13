@@ -136,7 +136,7 @@ public sealed class LiveStreamTests
         var cut = ctx.Render<LiveStream>(p => p
             .Add(c => c.Conversations, conversations)
             .Add(c => c.SelectedId, string.Empty)
-            .Add(c => c.OnSelect, (string id) => selected = id));
+            .Add(c => c.OnSelect, id => selected = id));
 
         selected.Should().BeNull();
         cut.Find("[role='option'][aria-selected='true']").TextContent.Should().Contain("Newer");
@@ -160,7 +160,7 @@ public sealed class LiveStreamTests
         var cut = ctx.Render<LiveStream>(p => p
             .Add(c => c.Conversations, conversations)
             .Add(c => c.SelectedId, "s1")
-            .Add(c => c.OnSelect, (string id) => selected = id));
+            .Add(c => c.OnSelect, id => selected = id));
 
         cut.FindAll("[role='option']")
             .First(b => b.TextContent.Contains("Second", StringComparison.Ordinal))
@@ -186,7 +186,7 @@ public sealed class LiveStreamTests
         var cut = ctx.Render<LiveStream>(p => p
             .Add(c => c.Conversations, conversations)
             .Add(c => c.SelectedId, "s1")
-            .Add(c => c.OnSelect, (string id) => selected = id));
+            .Add(c => c.OnSelect, id => selected = id));
 
         cut.Find("[role='option'][aria-selected='true']")
             .KeyDown(key: "End");
