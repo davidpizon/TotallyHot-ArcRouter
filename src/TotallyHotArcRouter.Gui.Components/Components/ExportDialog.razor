@@ -248,34 +248,45 @@
         var cancellationToken = cancellation.Token;
         try
         {
-            var authorization = await PasskeyStore.AuthorizeOperationAsync(
-                operation: PasskeyOperations.Export,
-                parameters: PasskeyOperations.ExportParameters(filter, destination),
-                cancellationToken: cancellationToken);
-            await ExportStore.ExportAsync(filter, destination, authorization, cancellationToken);
+            try
+            {
+                var authorization = await PasskeyStore.AuthorizeOperationAsync(
+                    operation: PasskeyOperations.Export,
+                    parameters: PasskeyOperations.ExportParameters(filter, destination),
+                    cancellationToken: cancellationToken);
+                await ExportStore.ExportAsync(filter, destination, authorization, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                // The dialog was closed mid-export; the router cleans up the partial file.
+            }
+            catch (WebAuthnCeremonyException ex)
+            {
+                _errorMessage = ex.Message;
+            }
+            catch (GrpcAdminException ex)
+            {
+                _errorMessage = ex.IsUnavailable ? "Could not reach the router. Is the proxy running?" : ex.Message;
+            }
+            finally
+            {
+                _busy = false;
+            }
+
+            // The summary the dialog opened with is stale once an export has run (a turn may have landed meanwhile).
+            // Skipped when the dialog was closed mid-export, because nothing is left to show it.
+            if (!cancellationToken.IsCancellationRequested) await ExportStore.LoadSummaryAsync(cancellationToken);
         }
         catch (OperationCanceledException)
         {
-            // The dialog was closed mid-export; the router cleans up the partial file.
-        }
-        catch (WebAuthnCeremonyException ex)
-        {
-            _errorMessage = ex.Message;
-        }
-        catch (GrpcAdminException ex)
-        {
-            _errorMessage = ex.IsUnavailable ? "Could not reach the router. Is the proxy running?" : ex.Message;
+            // The dialog was closed while the summary reloaded; nothing is left to show it.
         }
         finally
         {
-            _busy = false;
-            _exportCancellation = null;
+            // A new export may have started during the reload and replaced the field; leave its source alone.
+            if (ReferenceEquals(_exportCancellation, cancellation)) _exportCancellation = null;
             cancellation.Dispose();
         }
-
-        // The summary the dialog opened with is stale once an export has run (a turn may have landed meanwhile).
-        // Skipped when the dialog was closed mid-export, because nothing is left to show it.
-        if (!cancellationToken.IsCancellationRequested) await ExportStore.LoadSummaryAsync(cancellationToken);
     }
 
     /// <summary>Returns to the form after a finished export, keeping the entered filter and destination.</summary>

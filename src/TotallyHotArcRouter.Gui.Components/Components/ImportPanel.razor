@@ -220,42 +220,53 @@
         var cancellationToken = cancellation.Token;
         try
         {
-            // With the local copy kept the conflict choice is not consulted, so say so rather than send a stale choice.
-            var options = new ConversationImportOptionsInfo(
-                _importTime, _keepLocal ? ConversationImportConflictChoice.Skip : _conflict, _keepLocal);
+            try
+            {
+                // With the local copy kept the conflict choice is not consulted, so say so rather than send a stale choice.
+                var options = new ConversationImportOptionsInfo(
+                    _importTime, _keepLocal ? ConversationImportConflictChoice.Skip : _conflict, _keepLocal);
 
-            _status = "Staging a copy of the zip…";
-            var staged = await ImportStore.StageImportAsync(_source.Trim(), cancellationToken);
+                _status = "Staging a copy of the zip…";
+                var staged = await ImportStore.StageImportAsync(_source.Trim(), cancellationToken);
 
-            _status = "Waiting for passkey…";
-            var authorization = await PasskeyStore.AuthorizeOperationAsync(
-                operation: PasskeyOperations.Import,
-                parameters: PasskeyOperations.ImportParameters(staged.Sha256),
-                cancellationToken: cancellationToken);
+                _status = "Waiting for passkey…";
+                var authorization = await PasskeyStore.AuthorizeOperationAsync(
+                    operation: PasskeyOperations.Import,
+                    parameters: PasskeyOperations.ImportParameters(staged.Sha256),
+                    cancellationToken: cancellationToken);
 
-            _status = "Importing…";
-            await ImportStore.ImportAsync(staged.StagedId, options, authorization, cancellationToken);
+                _status = "Importing…";
+                await ImportStore.ImportAsync(staged.StagedId, options, authorization, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                // The panel was disposed mid-import; the router keeps what it stored and a re-run fills in the rest.
+            }
+            catch (WebAuthnCeremonyException ex)
+            {
+                _errorMessage = ex.Message;
+            }
+            catch (GrpcAdminException ex)
+            {
+                _errorMessage = ex.IsUnavailable ? "Could not reach the router. Is the proxy running?" : ex.Message;
+            }
+            finally
+            {
+                _busy = false;
+            }
+
+            if (!cancellationToken.IsCancellationRequested) await ImportStore.LoadImportsAsync(cancellationToken);
         }
         catch (OperationCanceledException)
         {
-            // The panel was disposed mid-import; the router keeps what it stored and a re-run fills in the rest.
-        }
-        catch (WebAuthnCeremonyException ex)
-        {
-            _errorMessage = ex.Message;
-        }
-        catch (GrpcAdminException ex)
-        {
-            _errorMessage = ex.IsUnavailable ? "Could not reach the router. Is the proxy running?" : ex.Message;
+            // The panel was disposed while the list reloaded; nothing is left to show it.
         }
         finally
         {
-            _busy = false;
-            _cancellation = null;
+            // A new import may have started during the reload and replaced the field; leave its source alone.
+            if (ReferenceEquals(_cancellation, cancellation)) _cancellation = null;
             cancellation.Dispose();
         }
-
-        if (!cancellationToken.IsCancellationRequested) await ImportStore.LoadImportsAsync(cancellationToken);
     }
 
     /// <summary>Deletes one past import after the operator has confirmed it.</summary>
