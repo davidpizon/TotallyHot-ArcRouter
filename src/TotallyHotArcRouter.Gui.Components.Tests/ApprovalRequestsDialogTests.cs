@@ -104,7 +104,7 @@ public sealed class ApprovalRequestsDialogTests
     [Fact]
     public async Task Approving_runs_the_passkey_ceremony_for_that_request_and_removes_it()
     {
-        using var ctx = NewContext(out var passkeys, out var ceremony, Pending("a1"), Pending("a2"));
+        await using var ctx = NewContext(out var passkeys, out var ceremony, Pending("a1"), Pending("a2"));
         var cut = ctx.Render<ApprovalRequestsDialog>(p => p.Add(c => c.OnClose, () => { }));
 
         await cut.InvokeAsync(() => cut.FindAll("[data-testid='approval-approve']")[1].Click());
@@ -119,7 +119,7 @@ public sealed class ApprovalRequestsDialogTests
     [Fact]
     public async Task A_dismissed_passkey_prompt_is_shown_inline_and_approves_nothing()
     {
-        using var ctx = NewContext(out var passkeys, out var ceremony, Pending("a1"));
+        await using var ctx = NewContext(out var passkeys, out var ceremony, Pending("a1"));
         ceremony.Failure = new WebAuthnCeremonyException("The passkey prompt was dismissed.");
         var cut = ctx.Render<ApprovalRequestsDialog>(p => p.Add(c => c.OnClose, () => { }));
 
@@ -133,7 +133,7 @@ public sealed class ApprovalRequestsDialogTests
     [Fact]
     public async Task A_request_that_lapsed_meanwhile_shows_the_routers_refusal_and_rereads_the_list()
     {
-        using var ctx = NewContext(out var passkeys, out _, Pending("a1"));
+        await using var ctx = NewContext(out var passkeys, out _, Pending("a1"));
         var cut = ctx.Render<ApprovalRequestsDialog>(p => p.Add(c => c.OnClose, () => { }));
         passkeys.DecisionFailure = new GrpcAdminException("This approval request is no longer waiting.");
         passkeys.Pending = [];
@@ -147,7 +147,7 @@ public sealed class ApprovalRequestsDialogTests
     [Fact]
     public async Task Denying_refuses_the_request_without_opening_a_passkey_prompt()
     {
-        using var ctx = NewContext(out var passkeys, out var ceremony, Pending("a1"));
+        await using var ctx = NewContext(out var passkeys, out var ceremony, Pending("a1"));
         var cut = ctx.Render<ApprovalRequestsDialog>(p => p.Add(c => c.OnClose, () => { }));
 
         await Click(cut, "[data-testid='approval-deny']");
@@ -209,7 +209,7 @@ public sealed class ApprovalRequestsDialogTests
     [Fact]
     public async Task Refresh_picks_up_a_request_filed_after_the_dialog_opened()
     {
-        using var ctx = NewContext(out var passkeys, out _);
+        await using var ctx = NewContext(out var passkeys, out _);
         var cut = ctx.Render<ApprovalRequestsDialog>(p => p.Add(c => c.OnClose, () => { }));
         cut.FindAll("[data-testid='approval-destination']").Should().BeEmpty();
         passkeys.Pending = [Pending("a1")];
@@ -222,7 +222,7 @@ public sealed class ApprovalRequestsDialogTests
     [Fact]
     public async Task Done_runs_OnClose()
     {
-        using var ctx = NewContext(out _, out _);
+        await using var ctx = NewContext(out _, out _);
         var closed = 0;
         var cut = ctx.Render<ApprovalRequestsDialog>(p => p.Add(c => c.OnClose, () => closed++));
 

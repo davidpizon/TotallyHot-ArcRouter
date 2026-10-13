@@ -19,6 +19,8 @@ public sealed class ConversationImportCatalog(
     Lazy<SessionStore> store,
     SessionMaintenance maintenance,
     Transcripts.TranscriptDatabase database,
+    // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local
+    // The one use, in Delete, is a refusal guard, but it reads live state (IsRunning) on every call, so it is not a constructor-time check.
     ConversationImporter? importer = null)
 {
     private readonly string _folder = SessionStore.FolderBeside(database.DatabasePath);

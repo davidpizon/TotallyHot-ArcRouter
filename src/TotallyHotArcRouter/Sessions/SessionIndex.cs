@@ -329,7 +329,7 @@ public sealed class SessionIndex
                                                          last_turn_at_utc, session_sha256)
                               VALUES ($id, $client, $file, $key, $length, $frames, $turns, $created, $last, $sha);
                               """;
-        command.Parameters.AddWithValue("$sha", row.SessionSha256 is { } sha ? sha : DBNull.Value);
+        command.Parameters.AddWithValue("$sha", (object?)row.SessionSha256 ?? DBNull.Value);
         command.Parameters.AddWithValue("$id", row.ArchiveSessionId.ToString("D"));
         command.Parameters.AddWithValue("$client", row.ClientSessionId);
         command.Parameters.AddWithValue("$file", row.FileName);
@@ -871,7 +871,7 @@ public sealed class SessionIndex
         {
             turn.Value = body.ArchiveTurnId.ToString("D");
             kind.Value = (int)body.Kind;
-            sha.Value = body.Sha256 is { } digest ? digest : DBNull.Value;
+            sha.Value = (object?)body.Sha256 ?? DBNull.Value;
             length.Value = body.Length;
             missing.Value = body.Missing ? 1 : 0;
             obscured.Value = body.Obscured is { } changed ? (changed ? 1 : 0) : DBNull.Value;

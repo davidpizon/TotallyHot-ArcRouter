@@ -157,7 +157,7 @@ public sealed class ConversationAdminGrpcServiceTests : IDisposable
         Assert.Contains(writer.Written, message => message.Progress is { TurnsWritten: 3 });
         Assert.True(File.Exists(destination));
         Assert.False(File.Exists(destination + ".partial"));
-        using var zip = ZipFile.OpenRead(destination);
+        await using var zip = ZipFile.OpenRead(destination);
         Assert.NotNull(zip.GetEntry("manifest.json"));
     }
 
