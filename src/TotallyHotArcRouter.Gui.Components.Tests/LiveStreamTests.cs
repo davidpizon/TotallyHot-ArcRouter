@@ -292,8 +292,8 @@ public sealed class LiveStreamTests
         var cut = ctx.Render<LiveStream>(p => p
             .Add(c => c.Conversations, [MakeConversation("s1", "First")])
             .Add(c => c.SelectedId, string.Empty)
-            .Add(c => c.OnImplicitSessionShown, id => shown.Add(id))
-            .Add(c => c.OnSelect, id => selected.Add(id)));
+            .Add(c => c.OnImplicitSessionShown, shown.Add)
+            .Add(c => c.OnSelect, selected.Add));
         cut.Render(p => p.Add(c => c.Conversations, [MakeConversation("s1", "First")]));
 
         shown.Should().Equal("s1");
@@ -309,7 +309,7 @@ public sealed class LiveStreamTests
         ctx.Render<LiveStream>(p => p
             .Add(c => c.Conversations, [MakeConversation("s1", "First")])
             .Add(c => c.SelectedId, "s1")
-            .Add(c => c.OnImplicitSessionShown, id => shown.Add(id)));
+            .Add(c => c.OnImplicitSessionShown, shown.Add));
 
         shown.Should().BeEmpty();
     }
