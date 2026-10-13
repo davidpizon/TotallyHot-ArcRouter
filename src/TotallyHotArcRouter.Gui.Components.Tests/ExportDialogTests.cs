@@ -194,13 +194,13 @@ public sealed class ExportDialogTests
 
         var running = cut.Find("[data-testid='export-confirm']").ClickAsync();
 
-        cut.WaitForAssertion(() => cut.Find("[data-testid='export-progress']").TextContent
+        await cut.WaitForAssertionAsync(() => cut.Find("[data-testid='export-progress']").TextContent
             .Should().Contain("2 turns").And.Contain("2.0 KB"), timeout: TimeSpan.FromSeconds(5));
         cut.Find("[data-testid='export-confirm']").HasAttribute("disabled").Should().BeTrue("one export at a time");
 
         hold.SetResult();
         await running;
-        cut.WaitForAssertion(() => cut.Find("[data-testid='export-result']"), timeout: TimeSpan.FromSeconds(5));
+        await cut.WaitForAssertionAsync(() => cut.Find("[data-testid='export-result']"), timeout: TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -314,7 +314,7 @@ public sealed class ExportDialogTests
         var cut = ctx.Render<ExportDialog>(p => p.Add(c => c.OnClose, () => closed = true));
         await Enter(cut, "export-destination", Destination);
         var running = cut.Find("[data-testid='export-confirm']").ClickAsync();
-        cut.WaitForAssertion(() => cut.Find("[data-testid='export-progress']"), timeout: TimeSpan.FromSeconds(5));
+        await cut.WaitForAssertionAsync(() => cut.Find("[data-testid='export-progress']"), timeout: TimeSpan.FromSeconds(5));
 
         await cut.InvokeAsync(() => cut.Find("button[aria-label='Close export dialog']").Click());
 

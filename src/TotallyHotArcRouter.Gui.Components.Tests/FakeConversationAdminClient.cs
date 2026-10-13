@@ -11,11 +11,11 @@ namespace TotallyHot.ArcRouter.Gui.Tests;
 /// </summary>
 internal sealed class FakeConversationAdminClient : IConversationAdminClient
 {
-    /// <summary>Gets or sets the summary <see cref="GetSummaryAsync"/> returns.</summary>
-    public ConversationExportSummaryInfo Summary { get; set; } = new(SessionCount: 3, TurnCount: 1_250, BytesOnDisk: 5_242_880);
+    /// <summary>Gets the summary <see cref="GetSummaryAsync"/> returns.</summary>
+    private ConversationExportSummaryInfo Summary { get; } = new(SessionCount: 3, TurnCount: 1_250, BytesOnDisk: 5_242_880);
 
     /// <summary>Gets or sets the progress reports streamed before the result.</summary>
-    public List<ConversationExportProgressInfo> Progress { get; set; } = [new(TurnsWritten: 2, BytesWritten: 2_048)];
+    public List<ConversationExportProgressInfo> Progress { get; init; } = [new(TurnsWritten: 2, BytesWritten: 2_048)];
 
     /// <summary>Gets or sets the result streamed last; its path is replaced by the requested destination.</summary>
     public ConversationExportResultInfo Result { get; set; } = new(

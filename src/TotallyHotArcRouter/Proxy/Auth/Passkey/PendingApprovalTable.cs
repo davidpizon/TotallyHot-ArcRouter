@@ -91,7 +91,7 @@ public sealed class PendingApprovalTable
     private const int IdBytes = 16;
 
     private readonly ConcurrentDictionary<string, Entry> _entries = new(StringComparer.Ordinal);
-    private readonly object _admission = new();
+    private readonly Lock _admission = new();
     private readonly Uri _dashboardBaseUrl;
     private readonly TimeProvider _time;
 

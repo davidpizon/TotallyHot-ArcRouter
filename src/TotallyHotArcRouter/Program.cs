@@ -656,11 +656,14 @@ public static class Program
         string command)
     {
         using var cancellation = new CancellationTokenSource();
+        // Bind the members up front so the handler does not close over the disposable source itself.
+        Action cancel = cancellation.Cancel;
+        var cancellationToken = cancellation.Token;
         ConsoleCancelEventHandler onCancel = (_, eventArgs) =>
         {
             // Let the command report the cancellation and exit instead of the runtime killing the process mid-write.
             eventArgs.Cancel = true;
-            cancellation.Cancel();
+            cancel();
         };
         Console.CancelKeyPress += onCancel;
         try
@@ -678,7 +681,7 @@ public static class Program
             }
 
             using var logFactory = new Serilog.Extensions.Logging.SerilogLoggerFactory(Log.Logger);
-            return await run(token, logFactory, cancellation.Token);
+            return await run(token, logFactory, cancellationToken);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException)
         {

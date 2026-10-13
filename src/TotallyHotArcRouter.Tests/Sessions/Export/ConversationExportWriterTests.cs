@@ -62,7 +62,7 @@ public sealed class ConversationExportWriterTests : IDisposable
 
         Assert.Equal(path, result.Path);
         Assert.False(File.Exists(path + ".partial"));
-        using var zip = ZipFile.OpenRead(path);
+        await using var zip = ZipFile.OpenRead(path);
         var manifest = ReadJson(zip, "manifest.json");
         Assert.Equal(1, manifest.GetProperty("schema_version").GetInt32());
         Assert.False(manifest.GetProperty("incomplete").GetBoolean());
@@ -129,7 +129,7 @@ public sealed class ConversationExportWriterTests : IDisposable
 
         await _writer.WriteAsync(Store, new ConversationExportFilter(), path, null, CancellationToken.None);
 
-        using var zip = ZipFile.OpenRead(path);
+        await using var zip = ZipFile.OpenRead(path);
         var lines = Lines(ReadBytes(zip, "turns.jsonl"));
         var keys = lines.Select(l => (
             l.GetProperty("client_session_id").GetString()!,
@@ -157,7 +157,7 @@ public sealed class ConversationExportWriterTests : IDisposable
         var result = await _writer.WriteAsync(Store, new ConversationExportFilter(), path, null, CancellationToken.None);
 
         Assert.Equal(1, result.MissingBodies);
-        using var zip = ZipFile.OpenRead(path);
+        await using var zip = ZipFile.OpenRead(path);
         var line = Lines(ReadBytes(zip, "turns.jsonl"))
             .Single(l => l.GetProperty("archive_turn_id").GetGuid() == corpus.MissingTurnId);
         Assert.Equal("missing-body", line.GetProperty("content_fidelity").GetString());
@@ -174,14 +174,14 @@ public sealed class ConversationExportWriterTests : IDisposable
     public async Task Export_BodiesAreByteIdenticalToStoredPlaintext()
     {
         var sessionId = Store.ResolveArchiveSessionId("client-bytes");
-        var request = Encoding.UTF8.GetBytes("{ \"a\" :\t\"héllo wörld ✓ <>&'+\"\r\n }\n  ").Concat(new byte[] { 0xFF, 0xFE, 0xC0 }).ToArray();
+        var request = "{ \"a\" :\t\"héllo wörld ✓ <>&'+\"\r\n }\n  "u8.ToArray().Concat(new byte[] { 0xFF, 0xFE, 0xC0 }).ToArray();
         var turn = Turn(request, "data: {\"x\":1}\n\n"u8.ToArray());
         Store.AppendTurn(sessionId, "client-bytes", turn);
         var path = OutputPath();
 
         await _writer.WriteAsync(Store, new ConversationExportFilter(), path, null, CancellationToken.None);
 
-        using var zip = ZipFile.OpenRead(path);
+        await using var zip = ZipFile.OpenRead(path);
         var stored = Store.ReadBodies(sessionId);
         var prefix = $"conversations/{sessionId:D}/turns/0000.";
         Assert.Equal(stored.Single(f => f.Kind == SessionBodyKind.ClientRequest).Plaintext, ReadBytes(zip, prefix + "request.json"));
@@ -204,7 +204,7 @@ public sealed class ConversationExportWriterTests : IDisposable
 
         await _writer.WriteAsync(Store, new ConversationExportFilter(), path, null, CancellationToken.None);
 
-        using var zip = ZipFile.OpenRead(path);
+        await using var zip = ZipFile.OpenRead(path);
         foreach (var entry in zip.Entries)
         {
             var text = Encoding.UTF8.GetString(ReadBytes(zip, entry.FullName));
@@ -221,10 +221,13 @@ public sealed class ConversationExportWriterTests : IDisposable
         Seed();
         var path = OutputPath();
         using var cts = new CancellationTokenSource();
-        var progress = new SyncProgress(_ => cts.Cancel());
+        // Bind the members up front so no lambda closes over the disposable source itself.
+        Action cancel = cts.Cancel;
+        var token = cts.Token;
+        var progress = new SyncProgress(_ => cancel());
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => _writer.WriteAsync(Store, new ConversationExportFilter(), path, progress, cts.Token));
+            () => _writer.WriteAsync(Store, new ConversationExportFilter(), path, progress, token));
 
         Assert.Empty(Directory.EnumerateFileSystemEntries(_outputDirectory));
         Assert.Empty(Directory.EnumerateFiles(_fixture.Folder, "*.tmp"));
@@ -344,7 +347,7 @@ public sealed class ConversationExportWriterTests : IDisposable
 
         var path = OutputPath();
         await _writer.WriteAsync(Store, new ConversationExportFilter(Harness: "codex", Model: "gpt-x"), path, null, CancellationToken.None);
-        using var zip = ZipFile.OpenRead(path);
+        await using var zip = ZipFile.OpenRead(path);
         var filter = ReadJson(zip, "manifest.json").GetProperty("filter");
         Assert.Equal("codex", filter.GetProperty("harness").GetString());
         Assert.Equal("gpt-x", filter.GetProperty("model").GetString());
@@ -364,7 +367,7 @@ public sealed class ConversationExportWriterTests : IDisposable
 
         Assert.Equal(1, result.CorruptTurns);
         Assert.Equal(corpus.TurnCount - 1, result.Turns);
-        using var zip = ZipFile.OpenRead(path);
+        await using var zip = ZipFile.OpenRead(path);
         var manifest = ReadJson(zip, "manifest.json");
         var corrupt = Assert.Single(manifest.GetProperty("corrupt_turns").EnumerateArray());
         Assert.Equal(corpus.TranslatedTurnId, corrupt.GetProperty("archive_turn_id").GetGuid());
@@ -394,7 +397,7 @@ public sealed class ConversationExportWriterTests : IDisposable
 
         Assert.Equal(1, result.Turns);
         Assert.Equal(1, result.CorruptTurns);
-        using var zip = ZipFile.OpenRead(path);
+        await using var zip = ZipFile.OpenRead(path);
         var line = Assert.Single(Lines(ReadBytes(zip, "turns.jsonl")));
         Assert.Equal(second.ArchiveTurnId, line.GetProperty("archive_turn_id").GetGuid());
         Assert.Equal(
@@ -417,7 +420,7 @@ public sealed class ConversationExportWriterTests : IDisposable
 
         Assert.Equal(corpus.TurnCount, result.Turns);
         Assert.Equal(0, result.CorruptTurns);
-        using var zip = ZipFile.OpenRead(path);
+        await using var zip = ZipFile.OpenRead(path);
         var lines = Lines(ReadBytes(zip, "turns.jsonl"));
         Assert.All(lines.Where(l => l.GetProperty("archive_turn_id").GetGuid() != corpus.MissingTurnId),
             l => Assert.Equal("full-body", l.GetProperty("content_fidelity").GetString()));
@@ -449,7 +452,7 @@ public sealed class ConversationExportWriterTests : IDisposable
 
         Assert.Equal(1, result.Turns);
         Assert.Equal(1, result.IncompleteSessions);
-        using var zip = ZipFile.OpenRead(path);
+        await using var zip = ZipFile.OpenRead(path);
         var manifest = ReadJson(zip, "manifest.json");
         Assert.True(manifest.GetProperty("incomplete").GetBoolean());
         var bodies = manifest.GetProperty("bodies").EnumerateArray().ToList();
@@ -481,7 +484,7 @@ public sealed class ConversationExportWriterTests : IDisposable
         var result = await _writer.WriteAsync(Store, new ConversationExportFilter(), path, progress, CancellationToken.None);
 
         Assert.Equal(2, result.Turns);
-        using var zip = ZipFile.OpenRead(path);
+        await using var zip = ZipFile.OpenRead(path);
         Assert.DoesNotContain(
             Lines(ReadBytes(zip, "turns.jsonl")), l => l.GetProperty("archive_turn_id").GetGuid() == late.ArchiveTurnId);
         Assert.Equal(3, Store.ListTurns(sessionId).Count);
@@ -491,7 +494,7 @@ public sealed class ConversationExportWriterTests : IDisposable
     {
         var path = OutputPath();
         await _writer.WriteAsync(Store, filter, path, null, CancellationToken.None);
-        using var zip = ZipFile.OpenRead(path);
+        await using var zip = ZipFile.OpenRead(path);
         return Lines(ReadBytes(zip, "turns.jsonl")).Select(l => l.GetProperty("archive_turn_id").GetGuid()).ToList();
     }
 

@@ -142,10 +142,10 @@ public sealed class ConversationImporterTests : IDisposable
     public async Task Import_AZipSlipEntryName_IsRefused()
     {
         var path = Path.Combine(_work, "slip.zip");
-        using (var stream = File.Create(path))
-        using (var zip = new ZipArchive(stream, ZipArchiveMode.Create))
+        await using (var stream = File.Create(path))
+        await using (var zip = new ZipArchive(stream, ZipArchiveMode.Create))
         {
-            using var entry = zip.CreateEntry("../evil.txt").Open();
+            await using var entry = zip.CreateEntry("../evil.txt").Open();
             entry.Write("x"u8);
         }
 
