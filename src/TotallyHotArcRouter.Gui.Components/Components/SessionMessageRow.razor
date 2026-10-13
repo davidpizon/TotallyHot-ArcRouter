@@ -4,6 +4,7 @@
      id="@RowDomId">
     <button type="button"
             class="ls-msg-select"
+            data-msg-select="@RowKey"
             aria-pressed="@(IsSelected ? "true" : "false")"
             aria-label="@SelectAriaLabel"
             @onclick="() => OnSelect.InvokeAsync()"
@@ -131,7 +132,7 @@
                 && !string.Equals(Turn.SubstitutionReason, "None", StringComparison.Ordinal)
                 && !string.Equals(Turn.SubstitutionReason, "AutoSelect", StringComparison.Ordinal))
                 yield return ("⇄ substituted", "ds-badge-warning");
-            if (IsTruncatedLiveSummary(IsRequest ? Turn.RequestSummary : Turn.ResponseSummary))
+            if (Turn.IsLive && SessionMerger.IsTruncatedLiveSummary(Turn.ResponseSummary))
                 yield return ("truncated", "ls-msg-chip-muted");
         }
     }
@@ -143,8 +144,5 @@
         if (e.Key is "ArrowUp" or "ArrowDown")
             await OnNavigateKey.InvokeAsync(e);
     }
-
-    private static bool IsTruncatedLiveSummary(string? text) =>
-        !string.IsNullOrEmpty(text) && text.Length > 2000;
 
 }

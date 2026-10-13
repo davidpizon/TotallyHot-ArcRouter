@@ -281,4 +281,36 @@ public sealed class LiveStreamTests
 
         cut.Find(".ls-history-notice").TextContent.Should().Be("Showing the newest 312 persisted turns.");
     }
+
+    [Fact]
+    public void Implicit_selection_reports_the_shown_session_once_without_selecting_it()
+    {
+        using var ctx = NewContext();
+        var shown = new List<string>();
+        var selected = new List<string>();
+
+        var cut = ctx.Render<LiveStream>(p => p
+            .Add(c => c.Conversations, [MakeConversation("s1", "First")])
+            .Add(c => c.SelectedId, string.Empty)
+            .Add(c => c.OnImplicitSessionShown, id => shown.Add(id))
+            .Add(c => c.OnSelect, id => selected.Add(id)));
+        cut.Render(p => p.Add(c => c.Conversations, [MakeConversation("s1", "First")]));
+
+        shown.Should().Equal("s1");
+        selected.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Explicit_selection_does_not_report_an_implicit_session()
+    {
+        using var ctx = NewContext();
+        var shown = new List<string>();
+
+        ctx.Render<LiveStream>(p => p
+            .Add(c => c.Conversations, [MakeConversation("s1", "First")])
+            .Add(c => c.SelectedId, "s1")
+            .Add(c => c.OnImplicitSessionShown, id => shown.Add(id)));
+
+        shown.Should().BeEmpty();
+    }
 }

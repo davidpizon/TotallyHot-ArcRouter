@@ -30,7 +30,7 @@
                        class="w-full px-2 py-1.5 text-xs font-mono ds-input ds-input-secondary"
                        aria-label="Search loaded messages"/>
                 <p class="text-xs text-slate-500" role="status">
-                    @MatchCount matches in @VisibleRowCount loaded messages.
+                    @VisibleRowCount matches in @AllRows.Count() loaded messages.
                     @if (HasEarlierTurns)
                     {
                         <span> Earlier turns aren't searched. Show earlier turns to include them.</span>
@@ -91,6 +91,8 @@
     public EventCallback OnSelectionChanged { get; set; }
 
     private ElementReference _list;
+    private IReadOnlyList<ConversationTurn> _orderedTurns = [];
+    private HashSet<int> _turnNumbers = [];
     private DotNetObjectReference<SessionMessagesPane>? _dotNetRef;
     private readonly HashSet<string> _overflowKeys = new(StringComparer.Ordinal);
     private readonly HashSet<string> _expandedKeys = new(StringComparer.Ordinal);
@@ -101,16 +103,13 @@
     private string? _boundSessionId;
     private bool _disposed;
 
-    /// <summary>Turns in ascending order, windowed to the newest <see cref="_windowTurns"/>.</summary>
-    private IReadOnlyList<ConversationTurn> WindowedTurns
-    {
-        get
-        {
-            var ordered = Conversation.Turns.OrderBy(t => t.TurnNumber).ToList();
-            if (ordered.Count <= _windowTurns) return ordered;
-            return ordered.Skip(ordered.Count - _windowTurns).ToList();
-        }
-    }
+    /// <summary>
+    /// Turns in ascending order, windowed to the newest <see cref="_windowTurns"/>. Sorted once per parameter
+    /// change in <see cref="RebuildOrderedTurns"/> rather than on every access, since the row list, the
+    /// selection check on every row, and the search status line all read it during one render.
+    /// </summary>
+    private IEnumerable<ConversationTurn> WindowedTurns =>
+        _orderedTurns.Count <= _windowTurns ? _orderedTurns : _orderedTurns.Skip(_orderedTurns.Count - _windowTurns);
 
     private bool HasEarlierTurns => Conversation.Turns.Count > _windowTurns;
 
@@ -135,27 +134,24 @@
     }
 
     private int VisibleRowCount => VisibleRows.Count();
-    private int MatchCount => string.IsNullOrEmpty(ViewState.InSessionFilter) ? VisibleRowCount : VisibleRowCount;
 
     private MessageSelection EffectiveSelection
     {
         get
         {
             var sel = ViewState.MessageSelection;
-            if (sel is not null && sel.SessionId == Conversation.Id
-                && Conversation.Turns.Any(t => t.TurnNumber == sel.TurnNumber))
+            if (sel is not null && sel.SessionId == Conversation.Id && _turnNumbers.Contains(sel.TurnNumber))
                 return sel;
 
-            var newest = Conversation.Turns.OrderBy(t => t.TurnNumber).LastOrDefault();
-            if (newest is null)
-                return new MessageSelection(Conversation.Id, 0, MessageSide.Response);
-            return new MessageSelection(Conversation.Id, newest.TurnNumber, MessageSide.Response);
+            return new MessageSelection(
+                Conversation.Id, _orderedTurns.Count == 0 ? 0 : _orderedTurns[^1].TurnNumber, MessageSide.Response);
         }
     }
 
     /// <inheritdoc/>
     protected override void OnParametersSet()
     {
+        RebuildOrderedTurns();
         if (_boundSessionId != Conversation.Id)
         {
             _boundSessionId = Conversation.Id;
@@ -173,16 +169,17 @@
         {
             var added = Conversation.Turns.Count - _lastTurnCount;
             _lastTurnCount = Conversation.Turns.Count;
-            if (_atBottom)
-            {
-                // Implicit selection follows the newest response while pinned.
-                ViewState.ClearMessageSelection();
-            }
-            else
-            {
-                _pendingNew += added;
-            }
+            // An implicit selection (null) already follows the newest response; an explicit one is the
+            // operator's choice and must survive a live arrival, pinned to the bottom or not.
+            if (!_atBottom) _pendingNew += added;
         }
+    }
+
+    /// <summary>Refreshes the cached ascending turn order and turn-number lookup from <see cref="Conversation"/>.</summary>
+    private void RebuildOrderedTurns()
+    {
+        _orderedTurns = [.. Conversation.Turns.OrderBy(t => t.TurnNumber)];
+        _turnNumbers = [.. _orderedTurns.Select(t => t.TurnNumber)];
     }
 
     /// <inheritdoc/>
@@ -248,8 +245,10 @@
         await SelectRow(rows[next]);
         try
         {
-            await Js.InvokeVoidAsync("chatScroll.scrollIntoView",
-                $"ls-msg-{rows[next].Turn.TurnNumber}-{(rows[next].IsRequest ? "req" : "res")}");
+            // The roving focus has to follow the selection: otherwise the next arrow press fires from the
+            // old row again and the operator can only ever move one step.
+            await Js.InvokeVoidAsync("chatScroll.focusByAttribute", "data-msg-select",
+                RowKey(rows[next].Turn, rows[next].IsRequest));
         }
         catch (JSDisconnectedException) { }
         catch (ObjectDisposedException) { }

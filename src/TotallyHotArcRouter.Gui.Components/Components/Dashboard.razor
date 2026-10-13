@@ -113,7 +113,7 @@
             @switch (_activeTab)
             {
                 case Tab.Live:
-                    <LiveStream Conversations="MergedSessionConversations()" SelectedId="@_selectedConversationId" OnSelect="OpenPersistedSessionAsync" HistoryNotice="@PersistedSessionStore.HistoryNotice"
+                    <LiveStream Conversations="MergedSessionConversations()" SelectedId="@_selectedConversationId" OnSelect="OpenPersistedSessionAsync" OnImplicitSessionShown="id => PersistedSessionStore.LoadTurnTextsAsync(id)" HistoryNotice="@PersistedSessionStore.HistoryNotice"
                                 TranscriptCaptureEnabled="PersistedSessionStore.TranscriptCaptureEnabled"
                                 ShowContentGate="true"
                                 ContentLocked="@(!ContentGrant.IsActive)"

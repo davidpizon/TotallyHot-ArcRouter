@@ -59,8 +59,8 @@ public static class SessionMerger
     /// <summary>Unions turns of one session that exists on both the live and persisted sides.</summary>
     private static Conversation MergeSameSession(Conversation live, Conversation persisted)
     {
-        var liveByTurn = live.Turns.ToDictionary(t => t.TurnNumber);
-        var persistedByTurn = persisted.Turns.ToDictionary(t => t.TurnNumber);
+        var liveByTurn = ByTurnNumber(live.Turns);
+        var persistedByTurn = ByTurnNumber(persisted.Turns);
         var turnNumbers = liveByTurn.Keys.Union(persistedByTurn.Keys).OrderBy(n => n);
 
         var turns = new List<ConversationTurn>();
@@ -98,6 +98,18 @@ public static class SessionMerger
     }
 
     /// <summary>
+    /// Indexes <paramref name="turns"/> by turn number. A turn number reissued after a restart (before the
+    /// turn tracker also seeded from transcripts) can appear twice in one session; the later turn wins
+    /// rather than throwing, since a duplicate key here would fail the whole Sessions tab render.
+    /// </summary>
+    private static Dictionary<int, ConversationTurn> ByTurnNumber(IEnumerable<ConversationTurn> turns)
+    {
+        var byNumber = new Dictionary<int, ConversationTurn>();
+        foreach (var turn in turns) byNumber[turn.TurnNumber] = turn;
+        return byNumber;
+    }
+
+    /// <summary>
     /// Keeps live metrics and <see cref="ConversationTurn.IsLive"/>, but swaps in persisted prompt/response
     /// text when the live summary is missing or marked truncated (ends with the server's ellipsis marker).
     /// </summary>
@@ -125,12 +137,22 @@ public static class SessionMerger
     }
 
     /// <summary>
-    /// The live stream truncates summaries server-side with a trailing ellipsis (see telemetry.md). A
-    /// persisted full text replaces that marker when both sides have the same turn.
+    /// The live stream's summary cap (<c>TextTruncator.DefaultMaxLength</c> on the router): longer text is cut
+    /// to this many characters and a single "…" marker is appended.
     /// </summary>
-    private static bool IsTruncatedLiveSummary(string text) =>
-        text.EndsWith('…') || text.EndsWith("...", StringComparison.Ordinal);
+    private const int LiveSummaryMaxLength = 2000;
 
+    /// <summary>
+    /// Whether <paramref name="text"/> is a live summary the router truncated (see telemetry.md): exactly the
+    /// cap plus the trailing "…" marker. Checking the length as well as the marker keeps untruncated text that
+    /// merely ends in an ellipsis, and persisted full text longer than the cap, from being flagged.
+    /// </summary>
+    /// <param name="text">A live prompt or response summary.</param>
+    /// <returns><see langword="true"/> when the router cut <paramref name="text"/> at the cap.</returns>
+    public static bool IsTruncatedLiveSummary(string? text) =>
+        text is { Length: LiveSummaryMaxLength + 1 } && text[^1] == '…';
+
+    /// <summary>The instant of <paramref name="conversation"/>'s newest turn, or the minimum when it has none.</summary>
     private static DateTimeOffset NewestTurnUtc(Conversation conversation) =>
         conversation.Turns.Count == 0
             ? DateTimeOffset.MinValue

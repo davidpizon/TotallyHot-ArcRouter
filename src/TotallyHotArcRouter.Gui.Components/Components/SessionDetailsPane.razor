@@ -1,5 +1,7 @@
 @* Right pane of the Sessions three-pane layout: Message / Routing / Session tabs (#176 §4.4 / §7). *@
+@using Microsoft.JSInterop
 @inject SessionsViewState ViewState
+@inject IJSRuntime Js
 
 <div class="ls-details-pane flex flex-col min-h-0 h-full panel-enter" @key="Conversation?.Id">
     <div role="tablist" aria-label="Session details" class="ls-details-tabs shrink-0 flex">
@@ -77,7 +79,9 @@
         {
             if (Conversation is null || Conversation.Turns.Count == 0) return null;
             var sel = Selection;
-            if (sel is not null)
+            // A selection left over from another session (the messages pane clears it during the same render
+            // pass, after this pane's parameters were captured) must not pick a same-numbered turn here.
+            if (sel is not null && sel.SessionId == Conversation.Id)
             {
                 var match = Conversation.Turns.FirstOrDefault(t => t.TurnNumber == sel.TurnNumber);
                 if (match is not null) return match;
@@ -87,18 +91,31 @@
     }
 
     private MessageSide SelectedSide =>
-        Selection?.Side ?? MessageSide.Response;
+        Selection is not null && Selection.SessionId == Conversation?.Id ? Selection.Side : MessageSide.Response;
 
     private void SelectTab(SessionsDetailsTab tab) => ViewState.DetailsTab = tab;
 
-    private void OnTabKey(KeyboardEventArgs e, SessionsDetailsTab current)
+    private async Task OnTabKey(KeyboardEventArgs e, SessionsDetailsTab current)
     {
         var index = Array.FindIndex(Tabs, t => t.Id == current);
         if (index < 0) return;
+        SessionsDetailsTab next;
         if (e.Key == "ArrowRight")
-            ViewState.DetailsTab = Tabs[(index + 1) % Tabs.Length].Id;
+            next = Tabs[(index + 1) % Tabs.Length].Id;
         else if (e.Key == "ArrowLeft")
-            ViewState.DetailsTab = Tabs[(index - 1 + Tabs.Length) % Tabs.Length].Id;
+            next = Tabs[(index - 1 + Tabs.Length) % Tabs.Length].Id;
+        else
+            return;
+
+        ViewState.DetailsTab = next;
+        try
+        {
+            // Roving tabindex: move focus with the selection so repeated arrow presses keep advancing.
+            await Js.InvokeVoidAsync("chatScroll.focusByAttribute", "id", $"ls-details-tab-{next}");
+        }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) { }
+        catch (JSException) { }
     }
 
 }

@@ -150,4 +150,17 @@ public sealed class SessionDetailsPaneTests
         cut.Markup.Should().Contain("≥");
         cut.Markup.Should().Contain("unpriced");
     }
+
+    [Fact]
+    public void Selection_from_another_session_is_ignored()
+    {
+        using var ctx = NewContext();
+        var cut = ctx.Render<SessionDetailsPane>(p => p
+            .Add(c => c.Conversation, MakeConversation())
+            .Add(c => c.Selection, new MessageSelection("other-session", 1, MessageSide.Request)));
+
+        // The stale request-side selection belongs to another session, so the pane falls back to the
+        // newest response row instead of showing this session's same-numbered turn on the request side.
+        cut.Markup.Should().Contain("Response · Turn 1");
+    }
 }

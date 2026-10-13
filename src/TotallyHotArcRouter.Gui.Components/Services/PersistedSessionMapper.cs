@@ -30,8 +30,8 @@ public static class PersistedSessionMapper
         ArgumentNullException.ThrowIfNull(conversation);
 
         var turns = conversation.Turns.Select(ToModel).ToList();
-        // Prefer the aggregator's conversation totals when present; recount unpriced turns from the
-        // now-nullable per-turn costs so a GUI merge can surface a floor (#176 §5.1).
+        // Re-total from the now-nullable per-turn values so the totals, UnpricedTurns and a later per-turn
+        // merge all agree; the aggregator's own totals are only used for a conversation with no turns (#176 §5.1).
         var totalCost = turns.Count == 0
             ? conversation.TotalCostUsd
             : turns.Sum(t => t.TotalCost ?? 0m);

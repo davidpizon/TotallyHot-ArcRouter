@@ -1,6 +1,7 @@
 @* Left pane of the Sessions three-pane layout: session search, listbox, and status footer (#176 §3). *@
+@using Microsoft.JSInterop
 @inject SessionsViewState ViewState
-@inject TimeProvider Time
+@inject IJSRuntime Js
 
 <div class="ls-sessions-rail flex flex-col min-h-0 h-full">
     <div class="shrink-0 p-2 space-y-2">
@@ -157,8 +158,17 @@
             "End" => list.Count - 1,
             _ => index
         };
-        if (list[next].Id != DisplayedId)
-            await SelectExplicitAsync(list[next].Id);
+        if (list[next].Id == DisplayedId) return;
+        await SelectExplicitAsync(list[next].Id);
+        try
+        {
+            // Roving tabindex: focus has to follow the selection, otherwise the next arrow press fires from
+            // the previously focused item and the operator can only ever move one step.
+            await Js.InvokeVoidAsync("chatScroll.focusByAttribute", "data-rail-id", list[next].Id);
+        }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) { }
+        catch (JSException) { }
     }
 
     private string? NewestId()
