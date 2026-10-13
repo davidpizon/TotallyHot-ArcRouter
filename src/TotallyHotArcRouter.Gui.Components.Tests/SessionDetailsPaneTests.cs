@@ -69,6 +69,23 @@ public sealed class SessionDetailsPaneTests
     }
 
     [Fact]
+    public void Arrow_key_focuses_the_newly_active_tab()
+    {
+        var state = new SessionsViewState { DetailsTab = SessionsDetailsTab.Message };
+        using var ctx = NewContext(state);
+        var cut = ctx.Render<SessionDetailsPane>(p => p
+            .Add(c => c.Conversation, MakeConversation()));
+
+        cut.Find("#ls-details-tab-Message").KeyDown("ArrowRight");
+
+        state.DetailsTab.Should().Be(SessionsDetailsTab.Routing);
+        cut.Find("#ls-details-tab-Routing").GetAttribute("tabindex").Should().Be("0");
+        cut.Find("#ls-details-tab-Message").GetAttribute("tabindex").Should().Be("-1");
+        ctx.JSInterop.VerifyInvoke("chatScroll.focusById")
+            .Arguments[0]!.ToString().Should().Be("ls-details-tab-Routing");
+    }
+
+    [Fact]
     public void Request_side_shows_prompt_fields()
     {
         using var ctx = NewContext();
@@ -90,6 +107,29 @@ public sealed class SessionDetailsPaneTests
 
         cut.Markup.Should().Contain("Persisted history does not record latency");
         cut.Markup.Should().NotContain(">120 ms<");
+    }
+
+    [Fact]
+    public void Merged_live_conversation_persisted_turn_shows_dash_for_ttft_and_cache_not_zero()
+    {
+        // Conversation is live (merged), but the selected turn came from persisted history only —
+        // TimeToFirstTokenMs / CacheHitRate are 0 placeholders and must render as "—", never "0".
+        using var ctx = NewContext();
+        var conversation = MakeConversation(isLive: true, synthesized: false, turnIsLive: false);
+
+        var responseCut = ctx.Render<SessionDetailsPane>(p => p
+            .Add(c => c.Conversation, conversation)
+            .Add(c => c.Selection, new MessageSelection("s1", 1, MessageSide.Response)));
+
+        responseCut.Markup.Should().Contain("Persisted history does not record latency");
+        responseCut.Markup.Should().NotContain("0 ms");
+
+        var requestCut = ctx.Render<SessionDetailsPane>(p => p
+            .Add(c => c.Conversation, conversation)
+            .Add(c => c.Selection, new MessageSelection("s1", 1, MessageSide.Request)));
+
+        requestCut.Markup.Should().Contain("Persisted history does not record cache-hit rate");
+        requestCut.Markup.Should().NotContain("0.0%");
     }
 
     [Fact]

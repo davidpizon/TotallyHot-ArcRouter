@@ -3,7 +3,7 @@
 
 <button type="button"
         role="option"
-        data-rail-id="@Conversation.Id"
+        id="@($"ls-rail-{Conversation.Id}")"
         aria-selected="@(IsSelected ? "true" : "false")"
         tabindex="@(IsTabStop ? 0 : -1)"
         aria-label="@AriaLabel"
@@ -19,11 +19,13 @@
             @if (Conversation.HasFallbackTurns)
             {
                 <span class="rounded px-1.5 py-0.5 text-xs font-semibold ls-tip ds-badge-warning"
+                      aria-describedby="ls-tooltip"
                       data-tip="One or more turns in this conversation used fallback routing">⚠</span>
             }
             @if (Conversation.IsUsedForTraining)
             {
                 <span class="rounded px-1.5 py-0.5 text-xs font-semibold ls-tip ds-badge-success"
+                      aria-describedby="ls-tooltip"
                       data-tip="One or more turns in this session were folded into the router's live-learning corpus">🎓</span>
             }
         </span>
@@ -43,9 +45,8 @@
     public bool IsSelected { get; set; }
 
     /// <summary>
-    /// Whether this item holds the listbox's roving <c>tabindex="0"</c>. Usually the selected item, but the
-    /// rail hands it to the first visible result when search hides the selected one, so the listbox stays
-    /// reachable with Tab.
+    /// Whether this option is the listbox's single tab stop. Distinct from <see cref="IsSelected"/> so a
+    /// search that hides the selected session can keep a visible option tabbable.
     /// </summary>
     [Parameter]
     public bool IsTabStop { get; set; }

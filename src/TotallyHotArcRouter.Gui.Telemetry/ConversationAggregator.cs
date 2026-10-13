@@ -1,11 +1,35 @@
 namespace TotallyHot.ArcRouter.Gui.Telemetry;
 
 /// <summary>One turn (routed request) within a live-aggregated conversation.</summary>
-/// <remarks>
-/// <paramref name="SubagentSignal"/> is the optional fixed-vocabulary <c>harness/kind</c> label of the
-/// subagent or helper marker on the request (for example <c>claude-code/explore</c>), or
-/// <see langword="null"/> when the turn carried none (ADR-0021).
-/// </remarks>
+/// <param name="SessionId">Session id every event for this turn shares.</param>
+/// <param name="TurnNumber">1-based turn index within the session.</param>
+/// <param name="Agent">Display agent/model label copied from the telemetry event.</param>
+/// <param name="Model">Resolved model name from the telemetry event.</param>
+/// <param name="PromptTokens">Prompt tokens when reported; <see langword="null"/> when unknown.</param>
+/// <param name="CompletionTokens">Completion tokens when reported; <see langword="null"/> when unknown.</param>
+/// <param name="EstimatedCostUsd">Estimated cost when known; <see langword="null"/> when unpriced.</param>
+/// <param name="IsFallback">Whether fallback routing served this turn.</param>
+/// <param name="LatencyToHeadersMs">Time to response headers in milliseconds (TTFT proxy).</param>
+/// <param name="TimestampUtc">UTC instant of the turn.</param>
+/// <param name="CacheCreationTokens">Cache-creation tokens when reported.</param>
+/// <param name="CacheReadTokens">Cache-read tokens when reported.</param>
+/// <param name="RequestSummary">Truncated request text, or <see langword="null"/> when absent.</param>
+/// <param name="ResponseSummary">Truncated response text, or <see langword="null"/> when absent.</param>
+/// <param name="CostConfidence">Cost-confidence name, or <see langword="null"/> when absent.</param>
+/// <param name="RequestedModel">Client-requested model, or <see langword="null"/> when absent.</param>
+/// <param name="RoutedModel">Model that actually served, or <see langword="null"/> when absent.</param>
+/// <param name="SubstitutionReason">Substitution reason name, or <see langword="null"/> when absent.</param>
+/// <param name="SubagentSignal">
+/// Optional fixed-vocabulary <c>harness/kind</c> label of the subagent or helper marker on the request
+/// (for example <c>claude-code/explore</c>), or <see langword="null"/> when the turn carried none
+/// (ADR-0021).
+/// </param>
+/// <param name="Provider">Upstream provider id from the live event, or <see langword="null"/> when absent.</param>
+/// <param name="IsStreaming">Whether the live response was streamed. Defaults to <see langword="false"/>.</param>
+/// <param name="TotalDurationMs">End-to-end duration in milliseconds. Defaults to 0 when unreported.</param>
+/// <param name="StatusCode">Upstream HTTP status. Defaults to 0 when unreported.</param>
+/// <param name="RouterTokens">Router overhead token count. Defaults to 0 when unreported.</param>
+/// <param name="RouterCostUsd">Router overhead cost in USD. Defaults to 0 when unreported.</param>
 public sealed record LiveConversationTurn(
     string SessionId,
     int TurnNumber,

@@ -151,8 +151,8 @@ flowchart TD
      `focusin`/`focusout` (in addition to hover) and dismisses on Escape. The shared tooltip element
      is hidden via opacity rather than `display:none` specifically so it stays in the accessibility
      tree (`display:none` would break `aria-describedby`). The handful of `data-tip` spans that *are*
-     nested inside a card's outer `<button>` (e.g. every stat, and the fallback/training badges, on a
-     `ConversationCard`) intentionally skip `tabindex` - nesting
+     nested inside a listbox option's outer `<button>` (e.g. the fallback/training badges on a
+     `SessionRailItem`) intentionally skip `tabindex` - nesting
      a focusable element inside a `<button>` is an ARIA anti-pattern - and instead the outer button
      carries a comprehensive `aria-label` summarizing the same facts for screen-reader users.
 

@@ -112,28 +112,26 @@ window.splitPane = {
 
     let dragging = false;
 
-    divider.addEventListener("pointerdown", function (e) {
+    function onPointerDown(e) {
       dragging = true;
       divider.setPointerCapture(e.pointerId);
       divider.classList.add("dragging");
       e.preventDefault();
-    });
+    }
 
-    divider.addEventListener("pointermove", function (e) {
+    function onPointerMove(e) {
       if (!dragging) {
         return;
       }
       applyPct(pctFromClientX(e.clientX), true);
-    });
+    }
 
-    const endDrag = function () {
+    function endDrag() {
       dragging = false;
       divider.classList.remove("dragging");
-    };
-    divider.addEventListener("pointerup", endDrag);
-    divider.addEventListener("pointercancel", endDrag);
+    }
 
-    divider.addEventListener("keydown", function (e) {
+    function onKeyDown(e) {
       const b = bounds();
       const current = parseFloat(panel.style.width) || defaultPct;
       const step = 2;
@@ -150,15 +148,44 @@ window.splitPane = {
         e.preventDefault();
         applyPct(b.max, true);
       }
-    });
+    }
 
+    divider.addEventListener("pointerdown", onPointerDown);
+    divider.addEventListener("pointermove", onPointerMove);
+    divider.addEventListener("pointerup", endDrag);
+    divider.addEventListener("pointercancel", endDrag);
+    divider.addEventListener("keydown", onKeyDown);
+
+    let resizeObserver = null;
     if (typeof ResizeObserver !== "undefined") {
-      const ro = new ResizeObserver(function () {
+      resizeObserver = new ResizeObserver(function () {
         // Re-clamp the operator's stored width (not the possibly already-clamped one on screen) so the
         // panel springs back to it when the window grows again.
         applyPct(desiredPct, false);
       });
-      ro.observe(container);
+      resizeObserver.observe(container);
     }
+
+    // Explicit teardown so Dashboard's @key tab switch does not accumulate observers (#176 §6.4).
+    divider._splitPaneDispose = function () {
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+        resizeObserver = null;
+      }
+      divider.removeEventListener("pointerdown", onPointerDown);
+      divider.removeEventListener("pointermove", onPointerMove);
+      divider.removeEventListener("pointerup", endDrag);
+      divider.removeEventListener("pointercancel", endDrag);
+      divider.removeEventListener("keydown", onKeyDown);
+      delete divider.dataset.splitInit;
+      delete divider._splitPaneDispose;
+    };
+  },
+
+  dispose: function (divider) {
+    if (!divider || typeof divider._splitPaneDispose !== "function") {
+      return;
+    }
+    divider._splitPaneDispose();
   },
 };

@@ -1,5 +1,5 @@
-@* Left pane of the Sessions three-pane layout: session search, listbox, and status footer (#176 §3). *@
 @using Microsoft.JSInterop
+@* Left pane of the Sessions three-pane layout: session search, listbox, and status footer (#176 §3). *@
 @inject SessionsViewState ViewState
 @inject IJSRuntime Js
 
@@ -32,14 +32,13 @@
         else
         {
             var staggerIndex = 0;
-            var visible = Filtered.ToList();
-            var tabStopId = visible.Any(c => c.Id == DisplayedId) ? DisplayedId : visible[0].Id;
-            foreach (var conversation in visible)
+            var focusableId = FocusableId;
+            foreach (var conversation in Filtered)
             {
                 <SessionRailItem @key="conversation.Id"
                                  Conversation="conversation"
                                  IsSelected="DisplayedId == conversation.Id"
-                                 IsTabStop="tabStopId == conversation.Id"
+                                 IsTabStop="focusableId == conversation.Id"
                                  StaggerIndex="_listHasRendered ? 0 : Math.Min(staggerIndex++, 8)"
                                  OnSelect="SelectExplicitAsync"
                                  OnNavigateKey="e => NavigateAsync(e, conversation.Id)"/>
@@ -82,6 +81,7 @@
 
     private bool _listHasRendered;
     private string? _implicitId;
+    private string? _focusOptionId;
 
     /// <summary>The id currently highlighted: explicit <see cref="SelectedId"/> or the implicit newest.</summary>
     private string DisplayedId
@@ -103,6 +103,23 @@
                         || c.Turns.Any(t => t.Agent.Contains(ViewState.RailSearch, StringComparison.OrdinalIgnoreCase)
                                             || t.Model.Contains(ViewState.RailSearch, StringComparison.OrdinalIgnoreCase)))
             .OrderByDescending(NewestTurnUtc);
+
+    /// <summary>
+    /// The option that should receive the listbox's single tab stop. Prefer the displayed selection when
+    /// it is still visible; otherwise the first filtered result so search never leaves the listbox
+    /// without a tabbable option.
+    /// </summary>
+    private string? FocusableId
+    {
+        get
+        {
+            var list = Filtered.ToList();
+            if (list.Count == 0) return null;
+            if (list.Any(c => c.Id == DisplayedId))
+                return DisplayedId;
+            return list[0].Id;
+        }
+    }
 
     /// <summary>How many conversations are currently live.</summary>
     private int LiveCount => Conversations.Count(c => c.IsLive);
@@ -129,10 +146,20 @@
     }
 
     /// <inheritdoc/>
-    protected override void OnAfterRender(bool firstRender)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (Conversations.Count > 0)
             _listHasRendered = true;
+
+        if (_focusOptionId is not { } id) return;
+        _focusOptionId = null;
+        try
+        {
+            await Js.InvokeVoidAsync("chatScroll.focusById", $"ls-rail-{id}");
+        }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) { }
+        catch (JSException) { /* Loose mode / missing script in tests */ }
     }
 
     private void OnSearchInput(ChangeEventArgs e) =>
@@ -161,17 +188,13 @@
             "End" => list.Count - 1,
             _ => index
         };
-        if (list[next].Id == DisplayedId) return;
-        await SelectExplicitAsync(list[next].Id);
-        try
-        {
-            // Roving tabindex: focus has to follow the selection, otherwise the next arrow press fires from
-            // the previously focused item and the operator can only ever move one step.
-            await Js.InvokeVoidAsync("chatScroll.focusByAttribute", "data-rail-id", list[next].Id);
-        }
-        catch (JSDisconnectedException) { }
-        catch (ObjectDisposedException) { }
-        catch (JSException) { }
+        var nextId = list[next].Id;
+        if (nextId != DisplayedId)
+            await SelectExplicitAsync(nextId);
+        // Move DOM focus to the newly selected option so the next arrow key uses its id, and so
+        // ArrowUp/Down do not keep scrolling the page from the previously focused option.
+        _focusOptionId = nextId;
+        await InvokeAsync(StateHasChanged);
     }
 
     private string? NewestId()

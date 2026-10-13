@@ -189,8 +189,48 @@ public sealed class SessionMessagesPaneTests
         var cut = ctx.Render<SessionMessagesPane>(p => p
             .Add(c => c.Conversation, MakeConversation(250)));
 
-        cut.Markup.Should().Contain("matches in");
+        // Window holds 200 turns × 2 rows = 400 loaded; "hello" hits only the request rows → 200 matches.
+        cut.Markup.Should().Contain("200 matches in 400 loaded messages");
         cut.Markup.Should().Contain("Earlier turns aren't searched");
+    }
+
+    [Fact]
+    public void Remounting_the_same_session_preserves_message_selection()
+    {
+        var state = new SessionsViewState
+        {
+            MessageSelection = new MessageSelection("s1", 1, MessageSide.Request)
+        };
+        using var ctx = NewContext(state);
+        var conversation = MakeConversation(2);
+
+        var cut = ctx.Render<SessionMessagesPane>(p => p
+            .Add(c => c.Conversation, conversation));
+        cut.Dispose();
+
+        var cut2 = ctx.Render<SessionMessagesPane>(p => p
+            .Add(c => c.Conversation, conversation));
+
+        state.MessageSelection.Should().NotBeNull();
+        state.MessageSelection!.TurnNumber.Should().Be(1);
+        state.MessageSelection.Side.Should().Be(MessageSide.Request);
+        cut2.FindAll(".ls-msg-select")[0].GetAttribute("aria-pressed").Should().Be("true");
+    }
+
+    [Fact]
+    public void Newly_appended_live_turns_receive_the_row_enter_append_class()
+    {
+        using var ctx = NewContext();
+        var first = MakeConversation();
+        var cut = ctx.Render<SessionMessagesPane>(p => p
+            .Add(c => c.Conversation, first));
+
+        cut.FindAll(".row-enter-append").Should().BeEmpty();
+
+        var grown = MakeConversation(2);
+        cut.Render(p => p.Add(c => c.Conversation, grown));
+
+        cut.FindAll(".row-enter-append").Should().HaveCount(2); // request + response for turn 2
     }
 
     [Fact]

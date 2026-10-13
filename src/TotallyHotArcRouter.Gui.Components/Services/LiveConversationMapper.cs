@@ -9,8 +9,8 @@ namespace TotallyHot.ArcRouter.Gui.Services;
 /// Maps the live-telemetry aggregation output (<see cref="LiveConversation"/> /
 /// <see cref="LiveConversationTurn"/>, produced by <c>TotallyHot.ArcRouter.Gui.Telemetry</c>) onto the
 /// dashboard's existing view-model shape (<see cref="Conversation"/> / <see cref="ConversationTurn"/>)
-/// so <c>LiveStream</c>, <c>ConversationCard</c>, and <c>ConversationSummary</c> can
-/// render live data without knowing it isn't <see cref="MockData"/>.
+/// so the Sessions tab (<c>LiveStream</c> rail, messages pane, and details tabs) can render live data
+/// without knowing it isn't <see cref="MockData"/>.
 /// </summary>
 /// <remarks>
 /// Several <see cref="ConversationTurn"/> fields have no live-data source given the proxy's current
@@ -143,7 +143,7 @@ public static class LiveConversationMapper
         return steps;
     }
 
-    /// <summary>Builds the conversation card's display title, marking untracked (synthesized) sessions distinctly.</summary>
+    /// <summary>Builds the Sessions rail display title, marking untracked (synthesized) sessions distinctly.</summary>
     private static string BuildTitle(LiveConversation conversation)
     {
         return conversation.IsSessionSynthesized

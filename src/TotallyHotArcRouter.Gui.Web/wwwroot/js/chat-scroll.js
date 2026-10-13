@@ -144,15 +144,31 @@ window.chatScroll = (function () {
       }
     },
 
-    // Moves keyboard focus to the element whose `attribute` equals `value`, so a roving-tabindex
-    // listbox/tablist keeps focus on the item the arrow key just selected.
-    focusByAttribute: function (attribute, value) {
-      const nodes = document.querySelectorAll("[" + attribute + "]");
-      for (let i = 0; i < nodes.length; i++) {
-        if (nodes[i].getAttribute(attribute) === value) {
-          nodes[i].focus();
-          return;
-        }
+    scrollIntoView: function (id) {
+      if (!id) {
+        return;
+      }
+      const el = document.getElementById(id);
+      if (!el) {
+        return;
+      }
+      el.scrollIntoView({ block: "nearest" });
+      // Keyboard row navigation must move focus to the newly selected select button; otherwise
+      // repeated ArrowUp/ArrowDown keep firing on the previous row with the old current index.
+      const btn = el.querySelector(".ls-msg-select");
+      if (btn && typeof btn.focus === "function") {
+        btn.focus({ preventScroll: true });
+      }
+    },
+
+    // Shared by the rail listbox and details tablist: move DOM focus after a roving-tabindex change.
+    focusById: function (id) {
+      if (!id) {
+        return;
+      }
+      const el = document.getElementById(id);
+      if (el && typeof el.focus === "function") {
+        el.focus({ preventScroll: true });
       }
     },
 

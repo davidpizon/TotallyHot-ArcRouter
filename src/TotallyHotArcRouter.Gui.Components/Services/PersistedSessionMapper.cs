@@ -88,7 +88,7 @@ public static class PersistedSessionMapper
             IsLive: false);
     }
 
-    /// <summary>Builds the conversation card's display title for a persisted session.</summary>
+    /// <summary>Builds the Sessions rail display title for a persisted session.</summary>
     private static string BuildTitle(PersistedConversation conversation)
     {
         return $"Session {ShortId(conversation.SessionId)}";

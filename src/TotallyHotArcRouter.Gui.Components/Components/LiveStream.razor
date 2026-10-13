@@ -1,6 +1,7 @@
 @using Microsoft.JSInterop
 @* Sessions tab: always-on three-pane layout (session rail · messages · details). #176 Phase 1. *@
 @implements IDisposable
+@implements IAsyncDisposable
 @inject IJSRuntime Js
 @inject SessionsViewState ViewState
 
@@ -252,6 +253,20 @@
             await Js.InvokeVoidAsync("splitPane.init", _container, _rightDivider, _detailsPanel,
                 new { edge = "right", minPct = 20, maxPct = 40, defaultPct = 28,
                     storageKey = "arcrouter.sessions.rightPct", minPx = 280, siblingMinPx = 220, middleMinPx = 360, dividersPx = 24 });
+        }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) { }
+        catch (JSException) { /* Loose mode / missing script in tests */ }
+    }
+
+    /// <inheritdoc/>
+    public async ValueTask DisposeAsync()
+    {
+        Dispose();
+        try
+        {
+            await Js.InvokeVoidAsync("splitPane.dispose", _leftDivider);
+            await Js.InvokeVoidAsync("splitPane.dispose", _rightDivider);
         }
         catch (JSDisconnectedException) { }
         catch (ObjectDisposedException) { }

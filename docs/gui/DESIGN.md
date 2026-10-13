@@ -168,12 +168,13 @@ actually appear in `app.css`.
 
 ## 4. Components
 
-- **Cards** (`ConversationCard`, ticker stat cards) — `--surface-card` (`#181818`)
+- **Cards** (ticker stat cards, Governance provider cards) — `--surface-card` (`#181818`)
   background, `border-color: var(--border-button)` (1px), `rounded-lg` (8px, `.5rem`, matching
   `--radius-card`) corners, `.card-hover`/`.ds-card:hover` for interactive cards (background shift to
   `--surface-elevated-a` and/or `--shadow-elevated` over 150ms). Agent identity and fallback state are
   communicated by tinting the card's left border and background with the agent/alert color rather
-  than adding an icon.
+  than adding an icon. (The Sessions tab no longer uses conversation cards — it uses the three-pane
+  rail / messages / details layout from #176.)
 - **Badges / pills** — `rounded-full` (`.rounded-full`, pill shape) is used for status dots and small
   count/label chips (e.g. the agent-color dot, fallback `⚠` badge); larger containers use `rounded`
   (4px) or `rounded-lg` (8px). The ranked metric-picker pill row in Cost Analytics follows the same
@@ -785,9 +786,9 @@ See §4.2's `.btn-*` classes and §4's `.overlay-backdrop` as the reference patt
 ### Refactoring Status
 **Complete.** All static and conditional inline styles have been extracted to CSS classes. The
 following classes have been added to support this, on top of the earlier round below:
-- `.ls-stat-strip-gap` — `ConversationSummary`'s stat-strip spacing. It was added alongside
-  `.ls-turn-card`, `.ls-turn-card-toggle` and `.ls-flex-auto` for `TurnCard`'s static chrome; those
-  three were deleted with `TurnCard` (§1).
+- `.ls-stat-strip-gap` — leftover spacing utility from the deleted Sessions card/summary layout; the
+  Sessions details Session tab now uses `.ls-kv-grid` (`SessionOverviewTab`). Safe to remove in a
+  later CSS cleanup once nothing references it.
 - `.ds-doc-link` — the "Methodology" citation anchors in `CostAnalytics`/`RegretHarnessAdmin`.
   Supplies underline + `text-underline-offset` + case/letter-spacing reset, because the
   compiled blob ships no `underline`, `underline-offset-*`, `normal-case` or `tracking-normal`
@@ -804,8 +805,9 @@ following classes have been added to support this, on top of the earlier round b
   `PriceSourcesAdmin`'s conditional `style="cursor:@cursor"` with class binding
 - `.ls-provider-budget-chart`, `.ls-provider-trend-chart` — `ProvidersAdmin` chart container sizing
 - `.ls-price-overrides-grid` — grid-template-columns for `PriceOverridesAdmin`
-- `.ls-livestream-right-panel`, `.ls-model-distribution-panel` — panel sizing for `LiveStream`/
-  `ModelDistribution`
+- `.ls-model-distribution-panel` — panel sizing for `ModelDistribution`. (The former
+  `.ls-livestream-right-panel` sizing class was removed with the Sessions three-pane layout; Sessions
+  now uses `.ls-sessions-layout` / `.ls-details-pane`.)
 
 Earlier round of classes:
 - `.ds-surface-base`, `.ds-surface-card-bordered`, `.ds-toolbar` — card and container styling
