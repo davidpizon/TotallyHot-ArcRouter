@@ -1,7 +1,7 @@
 # Plan: Sessions tab Phase 2 — persisted turn details (#176)
 
 **Issue:** [#176](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/176)
-**Status:** Draft — awaiting David's sign-off (standing rule: approved plan before coding)
+**Status:** Approved by David Pizon on 2026-10-13 (in chat). ADR-0025 and its Amendment 1 are accepted. Implementation may start.
 **Date:** 2026-10-13
 **Parent plan:** [`issue-176-sessions-three-pane.md`](issue-176-sessions-three-pane.md) (approved 2026-10-12). This file **supersedes its §5.2–§5.6 and the Phase 2 bullets of §11 and §12**, and keeps the rest (§4, §6, §7, §8, §9). Every deviation is listed in §2.
 **ADR first:** [ADR-0025](../adr/0025-serve-persisted-turn-details-and-a-session-aggregate-on-a-metadata-only-rpc.md) (**accepted** by David on 2026-10-13). Proto, router, and GUI work still wait on this plan's own sign-off (§8).

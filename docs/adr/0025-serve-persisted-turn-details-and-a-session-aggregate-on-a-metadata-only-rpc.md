@@ -102,7 +102,7 @@ paging rule are specified in [`docs/plans/issue-176-phase2-persisted-turn-detail
 
 ## Amendment 1 (2026-10-13): record whether a reply carried tool calls
 
-**Status:** proposed
+**Status:** accepted (accepted by David Pizon on 2026-10-13)
 
 The Sessions details pane cannot tell a tool-call-only reply from an unreadable row. A stored
 `response_text_length` of `0` covers both, and nothing on the `request_transcripts` row flags tool calls. Showing
