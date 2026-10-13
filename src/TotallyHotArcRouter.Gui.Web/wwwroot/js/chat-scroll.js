@@ -113,8 +113,26 @@ window.chatScroll = (function () {
         return;
       }
       const el = document.getElementById(id);
-      if (el) {
-        el.scrollIntoView({ block: "nearest" });
+      if (!el) {
+        return;
+      }
+      el.scrollIntoView({ block: "nearest" });
+      // Keyboard row navigation must move focus to the newly selected select button; otherwise
+      // repeated ArrowUp/ArrowDown keep firing on the previous row with the old current index.
+      const btn = el.querySelector(".ls-msg-select");
+      if (btn && typeof btn.focus === "function") {
+        btn.focus({ preventScroll: true });
+      }
+    },
+
+    // Shared by the rail listbox and details tablist: move DOM focus after a roving-tabindex change.
+    focusById: function (id) {
+      if (!id) {
+        return;
+      }
+      const el = document.getElementById(id);
+      if (el && typeof el.focus === "function") {
+        el.focus({ preventScroll: true });
       }
     },
 

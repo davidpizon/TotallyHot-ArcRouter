@@ -1,5 +1,7 @@
+@using Microsoft.JSInterop
 @* Right pane of the Sessions three-pane layout: Message / Routing / Session tabs (#176 §4.4 / §7). *@
 @inject SessionsViewState ViewState
+@inject IJSRuntime Js
 
 <div class="ls-details-pane flex flex-col min-h-0 h-full panel-enter" @key="Conversation?.Id">
     <div role="tablist" aria-label="Session details" class="ls-details-tabs shrink-0 flex">
@@ -14,7 +16,7 @@
                     tabindex="@(active ? 0 : -1)"
                     class="ls-details-tab @(active ? "active" : "inactive")"
                     @onclick="() => SelectTab(tab.Id)"
-                    @onkeydown="e => OnTabKey(e, tab.Id)">
+                    @onkeydown="e => OnTabKeyAsync(e, tab.Id)">
                 <Icon Name="@tab.Icon" Size="20"/>
                 <span>@tab.Label</span>
             </button>
@@ -71,6 +73,8 @@
         (SessionsDetailsTab.Session, "queue-list", "Session")
     ];
 
+    private SessionsDetailsTab? _focusTab;
+
     private ConversationTurn? SelectedTurn
     {
         get
@@ -91,14 +95,33 @@
 
     private void SelectTab(SessionsDetailsTab tab) => ViewState.DetailsTab = tab;
 
-    private void OnTabKey(KeyboardEventArgs e, SessionsDetailsTab current)
+    private async Task OnTabKeyAsync(KeyboardEventArgs e, SessionsDetailsTab current)
     {
+        if (e.Key is not ("ArrowLeft" or "ArrowRight")) return;
+
         var index = Array.FindIndex(Tabs, t => t.Id == current);
         if (index < 0) return;
-        if (e.Key == "ArrowRight")
-            ViewState.DetailsTab = Tabs[(index + 1) % Tabs.Length].Id;
-        else if (e.Key == "ArrowLeft")
-            ViewState.DetailsTab = Tabs[(index - 1 + Tabs.Length) % Tabs.Length].Id;
+        var next = e.Key == "ArrowRight"
+            ? Tabs[(index + 1) % Tabs.Length].Id
+            : Tabs[(index - 1 + Tabs.Length) % Tabs.Length].Id;
+        ViewState.DetailsTab = next;
+        _focusTab = next;
+        // Re-render so the newly active tab's tabindex is 0 before focus moves.
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <inheritdoc/>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusTab is not { } tab) return;
+        _focusTab = null;
+        try
+        {
+            await Js.InvokeVoidAsync("chatScroll.focusById", $"ls-details-tab-{tab}");
+        }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) { }
+        catch (JSException) { /* Loose mode / missing script in tests */ }
     }
 
 }

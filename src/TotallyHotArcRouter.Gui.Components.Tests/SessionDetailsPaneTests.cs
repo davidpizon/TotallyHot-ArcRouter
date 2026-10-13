@@ -69,6 +69,23 @@ public sealed class SessionDetailsPaneTests
     }
 
     [Fact]
+    public void Arrow_key_focuses_the_newly_active_tab()
+    {
+        var state = new SessionsViewState { DetailsTab = SessionsDetailsTab.Message };
+        using var ctx = NewContext(state);
+        var cut = ctx.Render<SessionDetailsPane>(p => p
+            .Add(c => c.Conversation, MakeConversation()));
+
+        cut.Find("#ls-details-tab-Message").KeyDown("ArrowRight");
+
+        state.DetailsTab.Should().Be(SessionsDetailsTab.Routing);
+        cut.Find("#ls-details-tab-Routing").GetAttribute("tabindex").Should().Be("0");
+        cut.Find("#ls-details-tab-Message").GetAttribute("tabindex").Should().Be("-1");
+        ctx.JSInterop.VerifyInvoke("chatScroll.focusById")
+            .Arguments[0]!.ToString().Should().Be("ls-details-tab-Routing");
+    }
+
+    [Fact]
     public void Request_side_shows_prompt_fields()
     {
         using var ctx = NewContext();

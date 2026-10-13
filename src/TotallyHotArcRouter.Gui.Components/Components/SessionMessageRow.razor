@@ -96,7 +96,7 @@
     public EventCallback<bool> OnExpandedChanged { get; set; }
 
     /// <summary>Stable key used by chat-scroll.js's overflow probe (<c>data-msg-key</c>).</summary>
-    public string RowKey => $"{Turn.TurnNumber}:{(IsRequest ? "req" : "res")}";
+    private string RowKey => $"{Turn.TurnNumber}:{(IsRequest ? "req" : "res")}";
 
     /// <summary>DOM id for keyboard scroll-into-view.</summary>
     private string RowDomId => $"ls-msg-{Turn.TurnNumber}-{(IsRequest ? "req" : "res")}";
@@ -125,11 +125,11 @@
         get
         {
             if (IsRequest) yield break;
-            if (Turn.IsLive && Turn.IsFallback)
+            if (Turn is { IsLive: true, IsFallback: true })
                 yield return ("⚠ fallback", "ds-badge-warning");
-            if (!string.IsNullOrEmpty(Turn.SubstitutionReason)
-                && !string.Equals(Turn.SubstitutionReason, "None", StringComparison.Ordinal)
-                && !string.Equals(Turn.SubstitutionReason, "AutoSelect", StringComparison.Ordinal))
+            if (Turn.SubstitutionReason is { Length: > 0 } reason
+                && !string.Equals(reason, "None", StringComparison.Ordinal)
+                && !string.Equals(reason, "AutoSelect", StringComparison.Ordinal))
                 yield return ("⇄ substituted", "ds-badge-warning");
             if (IsTruncatedLiveSummary(IsRequest ? Turn.RequestSummary : Turn.ResponseSummary))
                 yield return ("truncated", "ls-msg-chip-muted");

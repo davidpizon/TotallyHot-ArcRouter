@@ -55,5 +55,10 @@ public sealed class SessionsViewStateTests
         cut2.Find("input[aria-label='Search sessions']").GetAttribute("value").Should().Be("alpha");
         state.DetailsTab.Should().Be(SessionsDetailsTab.Routing);
         state.InSessionFilter.Should().Be("hello");
+        state.MessageSelection.Should().NotBeNull();
+        state.MessageSelection!.TurnNumber.Should().Be(1);
+        state.MessageSelection.Side.Should().Be(MessageSide.Request);
+        cut2.FindAll(".ls-msg-select[aria-pressed='true']").Should().ContainSingle()
+            .Which.GetAttribute("aria-label").Should().Contain("turn 1");
     }
 }

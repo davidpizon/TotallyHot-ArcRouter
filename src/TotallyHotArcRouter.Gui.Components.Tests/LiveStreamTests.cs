@@ -136,7 +136,7 @@ public sealed class LiveStreamTests
         var cut = ctx.Render<LiveStream>(p => p
             .Add(c => c.Conversations, conversations)
             .Add(c => c.SelectedId, string.Empty)
-            .Add(c => c.OnSelect, (string id) => selected = id));
+            .Add(c => c.OnSelect, id => selected = id));
 
         selected.Should().BeNull();
         cut.Find("[role='option'][aria-selected='true']").TextContent.Should().Contain("Newer");
@@ -160,7 +160,7 @@ public sealed class LiveStreamTests
         var cut = ctx.Render<LiveStream>(p => p
             .Add(c => c.Conversations, conversations)
             .Add(c => c.SelectedId, "s1")
-            .Add(c => c.OnSelect, (string id) => selected = id));
+            .Add(c => c.OnSelect, id => selected = id));
 
         cut.FindAll("[role='option']")
             .First(b => b.TextContent.Contains("Second", StringComparison.Ordinal))
@@ -191,7 +191,7 @@ public sealed class LiveStreamTests
         var cut = ctx.Render<LiveStream>(p => p
             .Add(c => c.Conversations, conversations)
             .Add(c => c.SelectedId, startId)
-            .Add(c => c.OnSelect, (string id) => selected = id));
+            .Add(c => c.OnSelect, id => selected = id));
 
         cut.Find("[role='option'][aria-selected='true']")
             .KeyDown(key: key);
@@ -219,6 +219,63 @@ public sealed class LiveStreamTests
         var options = cut.FindAll("[role='option']").Select(o => o.TextContent).ToList();
         options.Should().Contain(t => t.Contains("Second", StringComparison.Ordinal));
         options.Should().NotContain(t => t.Contains("First", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Filtered_rail_keeps_a_tabbable_option_when_selection_is_hidden()
+    {
+        using var ctx = NewContext();
+
+        var conversations = new[]
+        {
+            MakeConversation("s1", "First", agent: "Alpha"),
+            MakeConversation("s2", "Second", agent: "Beta")
+        };
+
+        var cut = ctx.Render<LiveStream>(p => p
+            .Add(c => c.Conversations, conversations)
+            .Add(c => c.SelectedId, "s1"));
+
+        cut.Find("input[aria-label='Search sessions']").Input("Second");
+
+        // Selection stays on s1 (middle/right panes), but the only visible option must remain tabbable.
+        cut.Find(".ls-chat-title").TextContent.Should().Contain("First");
+        var options = cut.FindAll("[role='option']");
+        options.Should().ContainSingle();
+        options[0].GetAttribute("tabindex").Should().Be("0");
+        options[0].GetAttribute("aria-selected").Should().Be("false");
+    }
+
+    [Fact]
+    public void Rail_badge_spans_are_not_nested_tab_stops()
+    {
+        using var ctx = NewContext();
+        var conversation = MakeConversation("s1", "First") with
+        {
+            HasFallbackTurns = true,
+            IsUsedForTraining = true
+        };
+
+        var cut = ctx.Render<LiveStream>(p => p
+            .Add(c => c.Conversations, [conversation])
+            .Add(c => c.SelectedId, "s1"));
+
+        cut.FindAll(".ls-rail-item .ls-tip").Should().HaveCount(2);
+        foreach (var tip in cut.FindAll(".ls-rail-item .ls-tip"))
+            tip.HasAttribute("tabindex").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Disposing_LiveStream_calls_splitPane_dispose()
+    {
+        await using var ctx = NewContext();
+        var cut = ctx.Render<LiveStream>(p => p
+            .Add(c => c.Conversations, [MakeConversation("s1", "First")])
+            .Add(c => c.SelectedId, "s1"));
+
+        await cut.Instance.DisposeAsync();
+
+        ctx.JSInterop.VerifyInvoke("splitPane.dispose", calledTimes: 2);
     }
 
     [Fact]

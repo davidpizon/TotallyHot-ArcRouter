@@ -23,12 +23,81 @@ public sealed record TokenBucket(string Slot, decimal Prompt, decimal Completion
 public sealed record ModelShare(string Model, decimal Value, string Color);
 
 /// <summary>A single turn (one multi-step agentic workflow) within a conversation.</summary>
-/// <remarks>
-/// <paramref name="SubagentSignal"/> is the harness/kind label of the subagent or helper marker the
-/// request carried (for example <c>claude-code/explore</c>), or <see langword="null"/> when it carried
-/// none or the source has no live-routing concept (ADR-0021). Rendered as a badge on the turn's
-/// separator in the Sessions conversation pane.
-/// </remarks>
+/// <param name="Id">Stable turn id within the conversation.</param>
+/// <param name="Agent">Display agent/model label used for palette coloring.</param>
+/// <param name="Model">Resolved model name shown on the response row.</param>
+/// <param name="TurnNumber">1-based turn index within the session.</param>
+/// <param name="PromptTokens">Prompt tokens when reported; <see langword="null"/> when unknown.</param>
+/// <param name="CompletionTokens">Completion tokens when reported; <see langword="null"/> when unknown.</param>
+/// <param name="RoutingRoi">Estimated routing ROI for the turn.</param>
+/// <param name="TotalCost">Turn cost when known; <see langword="null"/> contributes to unpriced totals.</param>
+/// <param name="ToolExecutionSteps">Tool-call step count for the turn.</param>
+/// <param name="CacheHitRate">
+/// Cache-hit rate for live turns. Persisted-only turns leave this at 0 and the details pane renders "—"
+/// when <paramref name="IsLive"/> is <see langword="false"/>.
+/// </param>
+/// <param name="TimeToFirstTokenMs">
+/// TTFT for live turns. Persisted-only turns leave this at 0 and the details pane renders "—" when
+/// <paramref name="IsLive"/> is <see langword="false"/>.
+/// </param>
+/// <param name="ContextBufferPercent">Context-buffer fill percentage.</param>
+/// <param name="Timestamp">Lossy local display time (<c>HH:mm:ss</c>).</param>
+/// <param name="RoutingSteps">Routing decision log steps for the inspector.</param>
+/// <param name="RequestSummary">Truncated or full request text, or <see langword="null"/> when absent.</param>
+/// <param name="ResponseSummary">Truncated or full response text, or <see langword="null"/> when absent.</param>
+/// <param name="IsFallback">Whether fallback routing served this turn.</param>
+/// <param name="TimestampUtc">
+/// Real UTC instant of the turn (the display <paramref name="Timestamp"/> is lossy). Used by Cost Analytics
+/// to bucket turns onto a time axis. Defaulted so test fixtures keep compiling; live turns get the real
+/// value from <c>LiveConversationMapper</c>.
+/// </param>
+/// <param name="CostConfidence">
+/// How <paramref name="TotalCost"/> was arrived at (a Telemetry.CostConfidence name), or
+/// <see langword="null"/> when the source has no confidence concept.
+/// </param>
+/// <param name="RequestedModel">Client-requested model, or <see langword="null"/> when unknown.</param>
+/// <param name="RoutedModel">Model that actually served, or <see langword="null"/> when unknown.</param>
+/// <param name="SubstitutionReason">
+/// Why requested and routed models differ (a Telemetry.RoutingSubstitutionReason name), or
+/// <see langword="null"/> when the source has no live-routing concept.
+/// </param>
+/// <param name="SubagentSignal">
+/// Harness/kind label of the subagent or helper marker the request carried (for example
+/// <c>claude-code/explore</c>), or <see langword="null"/> when it carried none (ADR-0021).
+/// </param>
+/// <param name="TranscriptId">
+/// <c>request_transcripts.id</c> for a persisted turn so chat text can be loaded. Zero for a live-only turn.
+/// </param>
+/// <param name="IsLive">
+/// Whether this turn's metrics came from the live stream (<see langword="true"/>) or persisted history
+/// (<see langword="false"/>). Gates live-only fields in the Sessions details pane after a per-turn merge
+/// (#176 §5.1).
+/// </param>
+/// <param name="Provider">
+/// Upstream provider id for live turns; <see langword="null"/> on persisted-only turns where it was never
+/// stored.
+/// </param>
+/// <param name="IsStreaming">
+/// Whether the live response was streamed; <see langword="null"/> on persisted-only turns.
+/// </param>
+/// <param name="TotalDurationMs">
+/// End-to-end duration in milliseconds for live turns; <see langword="null"/> on persisted-only turns.
+/// </param>
+/// <param name="StatusCode">
+/// Upstream HTTP status for live turns; <see langword="null"/> on persisted-only turns.
+/// </param>
+/// <param name="CacheCreationTokens">
+/// Cache-creation tokens when reported; <see langword="null"/> when unknown or persisted-only.
+/// </param>
+/// <param name="CacheReadTokens">
+/// Cache-read tokens when reported; <see langword="null"/> when unknown or persisted-only.
+/// </param>
+/// <param name="RouterTokens">
+/// Router overhead tokens for live turns; <see langword="null"/> on persisted-only turns.
+/// </param>
+/// <param name="RouterCostUsd">
+/// Router overhead cost for live turns; <see langword="null"/> on persisted-only turns.
+/// </param>
 public sealed record ConversationTurn(
     string Id,
     string Agent,
@@ -47,28 +116,13 @@ public sealed record ConversationTurn(
     string? RequestSummary = null,
     string? ResponseSummary = null,
     bool IsFallback = false,
-    // Real UTC instant of the turn (the display `Timestamp` above is a lossy "HH:mm:ss" string).
-    // Used by the Cost Analytics tab to bucket turns onto a time axis. Optional/defaulted so test
-    // fixtures and older call sites keep compiling; live turns get the real value from
-    // LiveConversationMapper.
     DateTimeOffset TimestampUtc = default,
-    // How TotalCost was arrived at (a Telemetry.CostConfidence name, e.g. "Catalog", "Unknown"), or null
-    // when the source has no confidence concept. Backs the turn card's cost-stat confidence indicator
-    // (docs/router/token-tracking-implementation-plan.md Phase 3, §5.6).
     string? CostConfidence = null,
-    // The client's literal requested model, the model that actually served, and why they differ (a
-    // Telemetry.RoutingSubstitutionReason name), or null when the source has no live-routing concept.
-    // Plumbed through by Phase M2 (docs/router/orchestrator-live-path-plan.md §M2.2) and rendered by
-    // Phase M3.1: LiveConversationMapper.BuildRoutingSteps turns a visible reason (anything but None or
-    // AutoSelect) into the Live Stream inspector's substitution warning step.
     string? RequestedModel = null,
     string? RoutedModel = null,
     string? SubstitutionReason = null,
     string? SubagentSignal = null,
-    // request_transcripts.id for a persisted turn, so opening the chat can load its text. Zero for a live turn.
     long TranscriptId = 0,
-    // Whether this turn's metrics came from the live stream (true) or persisted history (false). Gates
-    // live-only fields in the Sessions details pane after a per-turn merge (#176 §5.1).
     bool IsLive = false,
     string? Provider = null,
     bool? IsStreaming = null,

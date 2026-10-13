@@ -277,7 +277,7 @@ public sealed class SessionMergerTests
             TotalCost: ordered.Sum(t => t.TotalCost ?? 0m),
             TotalPromptTokens: ordered.Sum(t => t.PromptTokens ?? 0),
             TotalCompletionTokens: ordered.Sum(t => t.CompletionTokens ?? 0),
-            HasFallbackTurns: ordered.Any(t => t.IsLive && t.IsFallback),
+            HasFallbackTurns: ordered.Any(t => t is { IsLive: true, IsFallback: true }),
             Turns: ordered,
             UnpricedTurns: ordered.Count(t => t.TotalCost is null),
             IsLive: isLive,

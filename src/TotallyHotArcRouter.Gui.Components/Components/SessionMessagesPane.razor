@@ -30,7 +30,7 @@
                        class="w-full px-2 py-1.5 text-xs font-mono ds-input ds-input-secondary"
                        aria-label="Search loaded messages"/>
                 <p class="text-xs text-slate-500" role="status">
-                    @MatchCount matches in @VisibleRowCount loaded messages.
+                    @MatchCount matches in @LoadedRowCount loaded messages.
                     @if (HasEarlierTurns)
                     {
                         <span> Earlier turns aren't searched. Show earlier turns to include them.</span>
@@ -53,6 +53,7 @@
                                    Turn="row.Turn"
                                    IsRequest="row.IsRequest"
                                    IsSelected="IsRowSelected(row)"
+                                   IsLiveArrival="_liveArrivalTurns.Contains(row.Turn.TurnNumber)"
                                    Overflows="_overflowKeys.Contains(key)"
                                    Expanded="_expandedKeys.Contains(key)"
                                    ContentLocked="ContentLocked"
@@ -94,10 +95,12 @@
     private DotNetObjectReference<SessionMessagesPane>? _dotNetRef;
     private readonly HashSet<string> _overflowKeys = new(StringComparer.Ordinal);
     private readonly HashSet<string> _expandedKeys = new(StringComparer.Ordinal);
+    private readonly HashSet<int> _liveArrivalTurns = [];
     private int _windowTurns = WindowSize;
     private bool _atBottom = true;
     private int _pendingNew;
     private int _lastTurnCount;
+    private int _maxSeenTurn;
     private string? _boundSessionId;
     private bool _disposed;
 
@@ -134,8 +137,11 @@
         }
     }
 
-    private int VisibleRowCount => VisibleRows.Count();
-    private int MatchCount => string.IsNullOrEmpty(ViewState.InSessionFilter) ? VisibleRowCount : VisibleRowCount;
+    /// <summary>How many request/response rows the pane currently holds (search denominator).</summary>
+    private int LoadedRowCount => AllRows.Count();
+
+    /// <summary>How many loaded rows match the in-session filter (search numerator).</summary>
+    private int MatchCount => VisibleRows.Count();
 
     private MessageSelection EffectiveSelection
     {
@@ -162,10 +168,17 @@
             _windowTurns = WindowSize;
             _overflowKeys.Clear();
             _expandedKeys.Clear();
+            _liveArrivalTurns.Clear();
             _pendingNew = 0;
             _lastTurnCount = Conversation.Turns.Count;
+            _maxSeenTurn = Conversation.Turns.Count == 0
+                ? 0
+                : Conversation.Turns.Max(t => t.TurnNumber);
             _atBottom = true;
-            ViewState.ClearMessageSelection();
+            // Preserve a selection that already belongs to this session so a Dashboard @key remount
+            // does not wipe the operator's request/response choice (#176 §6.5).
+            if (ViewState.MessageSelection is { } sel && sel.SessionId != Conversation.Id)
+                ViewState.ClearMessageSelection();
             return;
         }
 
@@ -173,6 +186,14 @@
         {
             var added = Conversation.Turns.Count - _lastTurnCount;
             _lastTurnCount = Conversation.Turns.Count;
+            var maxTurn = Conversation.Turns.Max(t => t.TurnNumber);
+            if (maxTurn > _maxSeenTurn)
+            {
+                foreach (var turn in Conversation.Turns.Where(t => t.TurnNumber > _maxSeenTurn && t.IsLive))
+                    _liveArrivalTurns.Add(turn.TurnNumber);
+                _maxSeenTurn = maxTurn;
+            }
+
             if (_atBottom)
             {
                 // Implicit selection follows the newest response while pinned.
