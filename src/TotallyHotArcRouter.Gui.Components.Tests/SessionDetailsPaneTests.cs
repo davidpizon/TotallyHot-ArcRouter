@@ -93,6 +93,29 @@ public sealed class SessionDetailsPaneTests
     }
 
     [Fact]
+    public void Merged_live_conversation_persisted_turn_shows_dash_for_ttft_and_cache_not_zero()
+    {
+        // Conversation is live (merged), but the selected turn came from persisted history only —
+        // TimeToFirstTokenMs / CacheHitRate are 0 placeholders and must render as "—", never "0".
+        using var ctx = NewContext();
+        var conversation = MakeConversation(isLive: true, synthesized: false, turnIsLive: false);
+
+        var responseCut = ctx.Render<SessionDetailsPane>(p => p
+            .Add(c => c.Conversation, conversation)
+            .Add(c => c.Selection, new MessageSelection("s1", 1, MessageSide.Response)));
+
+        responseCut.Markup.Should().Contain("Persisted history does not record latency");
+        responseCut.Markup.Should().NotContain("0 ms");
+
+        var requestCut = ctx.Render<SessionDetailsPane>(p => p
+            .Add(c => c.Conversation, conversation)
+            .Add(c => c.Selection, new MessageSelection("s1", 1, MessageSide.Request)));
+
+        requestCut.Markup.Should().Contain("Persisted history does not record cache-hit rate");
+        requestCut.Markup.Should().NotContain("0.0%");
+    }
+
+    [Fact]
     public void Null_token_counts_render_as_dash_not_zero()
     {
         using var ctx = NewContext();

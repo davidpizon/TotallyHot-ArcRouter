@@ -28,7 +28,9 @@ public class ConversationAggregatorTests
         string? costConfidence = null,
         string? routedModel = null,
         string? substitutionReason = null,
-        string? subagentSignal = null)
+        string? subagentSignal = null,
+        int routerTokens = 0,
+        decimal routerCostUsd = 0m)
     {
         return new RoutingTelemetryEventDto(
             SessionId: sessionId,
@@ -52,6 +54,8 @@ public class ConversationAggregatorTests
             RequestSummary: requestSummary,
             ResponseSummary: responseSummary,
             CostConfidence: costConfidence,
+            RouterTokens: routerTokens,
+            RouterCostUsd: routerCostUsd,
             SubstitutionReason: substitutionReason,
             SubagentSignal: subagentSignal);
     }
@@ -346,5 +350,35 @@ public class ConversationAggregatorTests
 
         var turn = Assert.Single(result[0].Turns);
         Assert.Equal(expected: "CatalogApproximate", actual: turn.CostConfidence);
+    }
+
+    [Fact]
+    public void Aggregate_Section51_LiveFields_PassThroughToTurn()
+    {
+        var events = new[]
+        {
+            CreateEvent(
+                sessionId: "session-1",
+                provider: "anthropic",
+                isStreaming: true,
+                totalDurationMs: 1500,
+                statusCode: 201,
+                cacheCreationTokens: 25,
+                cacheReadTokens: 75,
+                routerTokens: 8,
+                routerCostUsd: 0.0002m)
+        };
+
+        var result = ConversationAggregator.Aggregate(events);
+
+        var turn = Assert.Single(result[0].Turns);
+        Assert.Equal(expected: "anthropic", actual: turn.Provider);
+        Assert.True(turn.IsStreaming);
+        Assert.Equal(1500, actual: turn.TotalDurationMs);
+        Assert.Equal(201, actual: turn.StatusCode);
+        Assert.Equal(25, actual: turn.CacheCreationTokens);
+        Assert.Equal(75, actual: turn.CacheReadTokens);
+        Assert.Equal(8, actual: turn.RouterTokens);
+        Assert.Equal(0.0002m, actual: turn.RouterCostUsd);
     }
 }

@@ -306,4 +306,58 @@ public sealed class LiveConversationMapperTests
         LiveConversationMapper.ToModel(conversation).Turns.Should().ContainSingle()
             .Which.SubagentSignal.Should().Be(signal);
     }
+
+    [Fact]
+    public void ToModel_passes_through_section_5_1_live_fields()
+    {
+        var turn = new LiveConversationTurn(
+            SessionId: "s1",
+            1,
+            Agent: "gpt-4o-mini",
+            Model: "gpt-4o-mini",
+            PromptTokens: null,
+            CompletionTokens: null,
+            EstimatedCostUsd: null,
+            false,
+            250,
+            TimestampUtc: new DateTimeOffset(2026, 10, 12, 15, 0, 0, TimeSpan.Zero),
+            CacheCreationTokens: 40,
+            CacheReadTokens: 60,
+            Provider: "openai",
+            IsStreaming: true,
+            TotalDurationMs: 900,
+            StatusCode: 200,
+            RouterTokens: 12,
+            RouterCostUsd: 0.0001m);
+
+        var conversation = new LiveConversation(
+            SessionId: "s1",
+            false,
+            FirstTimestampUtc: turn.TimestampUtc,
+            LastTimestampUtc: turn.TimestampUtc,
+            0m,
+            0,
+            0,
+            false,
+            Turns: [turn],
+            UnpricedTurns: 1);
+
+        var model = LiveConversationMapper.ToModel(conversation);
+        var mapped = model.Turns.Should().ContainSingle().Subject;
+
+        model.IsLive.Should().BeTrue();
+        model.UnpricedTurns.Should().Be(1);
+        mapped.IsLive.Should().BeTrue();
+        mapped.Provider.Should().Be("openai");
+        mapped.IsStreaming.Should().BeTrue();
+        mapped.StatusCode.Should().Be(200);
+        mapped.TotalDurationMs.Should().Be(900);
+        mapped.RouterTokens.Should().Be(12);
+        mapped.RouterCostUsd.Should().Be(0.0001m);
+        mapped.CacheCreationTokens.Should().Be(40);
+        mapped.CacheReadTokens.Should().Be(60);
+        mapped.PromptTokens.Should().BeNull();
+        mapped.CompletionTokens.Should().BeNull();
+        mapped.TotalCost.Should().BeNull();
+    }
 }

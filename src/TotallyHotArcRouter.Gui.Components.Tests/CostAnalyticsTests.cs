@@ -196,4 +196,47 @@ public sealed class CostAnalyticsTests
 
         cut.WaitForAssertion(assertion: () => cut.Markup.Should().NotContain("demo data"), timeout: WaitTimeout);
     }
+
+    [Fact]
+    public async Task Unknown_null_token_counts_and_cost_still_plot_as_zero()
+    {
+        // #176 §5.1 / §12: CostAnalytics coalesces null PromptTokens / CompletionTokens / TotalCost to 0
+        // when building chart points, so unknown values keep today's plotted zeroes.
+        await using var ctx = CreateContext();
+
+        var conversations = new[]
+        {
+            new Conversation(
+                Id: "null-priced",
+                Title: "Unknown Metrics",
+                FirstTimestamp: "10:00:00",
+                LastTimestamp: "10:00:00",
+                0m,
+                0,
+                0,
+                false,
+                Turns:
+                [
+                    new ConversationTurn(
+                        Id: "null-priced-t1", Agent: "A", Model: "gpt-4o-mini", 1,
+                        PromptTokens: null, CompletionTokens: null, 0m, TotalCost: null,
+                        0, 0m, 0, 0m, Timestamp: "10:00:00", RoutingSteps: [],
+                        TimestampUtc: DateTimeOffset.UtcNow, IsLive: true)
+                ],
+                UnpricedTurns: 1)
+        };
+
+        var cut = ctx.Render<CostAnalytics>(p =>
+            p.Add(parameterSelector: c => c.Conversations, value: conversations));
+
+        await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Turn Cost").Click());
+        await cut.WaitForAssertionAsync(
+            assertion: () => cut.Find(".metric-accent").TextContent.Trim().Should().Be("$0.00"),
+            timeout: WaitTimeout);
+
+        await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Tokens").Click());
+        await cut.WaitForAssertionAsync(
+            assertion: () => cut.Find(".metric-accent").TextContent.Trim().Should().Be("0"),
+            timeout: WaitTimeout);
+    }
 }
