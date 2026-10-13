@@ -55,6 +55,7 @@
                                    IsSelected="IsRowSelected(row)"
                                    Overflows="_overflowKeys.Contains(key)"
                                    Expanded="_expandedKeys.Contains(key)"
+                                   IsLiveArrival="row.Turn.TurnNumber > _arrivedAfterTurn"
                                    ContentLocked="ContentLocked"
                                    OnSelect="() => SelectRow(row)"
                                    OnNavigateKey="e => NavigateRows(e, row)"
@@ -100,6 +101,10 @@
     private bool _atBottom = true;
     private int _pendingNew;
     private int _lastTurnCount;
+
+    // Highest turn number that was already present before the latest live append; rows above it get the
+    // row-enter-append animation. int.MaxValue means "nothing has arrived since this session was bound".
+    private int _arrivedAfterTurn = int.MaxValue;
     private string? _boundSessionId;
     private bool _disposed;
 
@@ -160,14 +165,19 @@
             _expandedKeys.Clear();
             _pendingNew = 0;
             _lastTurnCount = Conversation.Turns.Count;
+            _arrivedAfterTurn = int.MaxValue;
             _atBottom = true;
-            ViewState.ClearMessageSelection();
+            // A fresh pane (tab switch remount) starts unbound; keep a saved selection that still belongs to
+            // this session and drop only one left over from a different session.
+            if (ViewState.MessageSelection?.SessionId != Conversation.Id)
+                ViewState.ClearMessageSelection();
             return;
         }
 
         if (Conversation.Turns.Count > _lastTurnCount)
         {
             var added = Conversation.Turns.Count - _lastTurnCount;
+            _arrivedAfterTurn = _orderedTurns.Count > added ? _orderedTurns[^(added + 1)].TurnNumber : 0;
             _lastTurnCount = Conversation.Turns.Count;
             // An implicit selection (null) already follows the newest response; an explicit one is the
             // operator's choice and must survive a live arrival, pinned to the bottom or not.

@@ -1,5 +1,6 @@
 @using Microsoft.JSInterop
 @* Sessions tab: always-on three-pane layout (session rail · messages · details). #176 Phase 1. *@
+@implements IDisposable
 @inject IJSRuntime Js
 @inject SessionsViewState ViewState
 
@@ -194,6 +195,37 @@
     }
 
     private string? _lastImplicitShownId;
+    private Timer? _statusTimer;
+
+    /// <inheritdoc/>
+    protected override void OnInitialized()
+    {
+        // Rail dots and the Session tab status are functions of the clock (the 5-minute idle threshold), but
+        // Blazor only re-renders on data changes. Without telemetry a "live and active" session would stay
+        // green forever, so re-render periodically.
+        _statusTimer = new Timer(_ => RefreshStatus(), null, StatusRefreshInterval, StatusRefreshInterval);
+    }
+
+    private void RefreshStatus()
+    {
+        try
+        {
+            _ = InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Tick raced with disposal.
+        }
+    }
+
+    private static readonly TimeSpan StatusRefreshInterval = TimeSpan.FromSeconds(30);
+
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        _statusTimer?.Dispose();
+        _statusTimer = null;
+    }
 
     /// <inheritdoc/>
     protected override async Task OnParametersSetAsync()

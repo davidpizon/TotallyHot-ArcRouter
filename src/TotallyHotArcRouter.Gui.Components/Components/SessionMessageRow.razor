@@ -9,10 +9,7 @@
             aria-label="@SelectAriaLabel"
             @onclick="() => OnSelect.InvokeAsync()"
             @onkeydown="OnKeyDown">
-        <span class="ls-msg-sender ls-truncate"
-              tabindex="0"
-              aria-describedby="ls-tooltip"
-              data-tip="@SenderTip">
+        <span class="ls-msg-sender ls-truncate" data-tip="@SenderTip">
             @if (!IsRequest)
             {
                 <span class="ls-msg-model-dot" style="--agent-color:@AgentColor" aria-hidden="true"></span>
@@ -119,7 +116,8 @@
         : (Turn.RoutedModel ?? Turn.Model);
 
     private string SelectAriaLabel =>
-        $"{SenderLabel}, turn {Turn.TurnNumber}, {Turn.Timestamp}";
+        $"{SenderLabel}, turn {Turn.TurnNumber}, {Turn.Timestamp}" +
+        (IsRequest ? $", requested model {Turn.RequestedModel ?? "unknown"}" : string.Empty);
 
     private IEnumerable<(string Text, string Css)> Chips
     {
@@ -130,6 +128,8 @@
                 yield return ("⚠ fallback", "ds-badge-warning");
             if (Turn.SubstitutionReason is not (null or "" or "None" or "AutoSelect"))
                 yield return ("⇄ substituted", "ds-badge-warning");
+            if (!string.IsNullOrEmpty(Turn.SubagentSignal))
+                yield return (Turn.SubagentSignal, "ls-signal-badge");
             if (Turn.IsLive && SessionMerger.IsTruncatedLiveSummary(Turn.ResponseSummary))
                 yield return ("truncated", "ls-msg-chip-muted");
         }

@@ -313,4 +313,22 @@ public sealed class LiveStreamTests
 
         shown.Should().BeEmpty();
     }
+
+    [Fact]
+    public void Rail_keeps_one_tab_stop_when_search_hides_the_selected_session()
+    {
+        var state = new SessionsViewState { RailSearch = "Second" };
+        using var ctx = new BunitContext();
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        ctx.Services.AddSingleton<IClipboardService>(new FakeClipboardService());
+        ctx.Services.AddSingleton(state);
+        ctx.Services.AddSingleton(TimeProvider.System);
+
+        var cut = ctx.Render<LiveStream>(p => p
+            .Add(c => c.Conversations, [MakeConversation("s1", "First"), MakeConversation("s2", "Second")])
+            .Add(c => c.SelectedId, "s1"));
+
+        cut.FindAll("[role='option']").Should().ContainSingle()
+            .Which.GetAttribute("tabindex").Should().Be("0");
+    }
 }

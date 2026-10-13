@@ -32,11 +32,14 @@
         else
         {
             var staggerIndex = 0;
-            foreach (var conversation in Filtered)
+            var visible = Filtered.ToList();
+            var tabStopId = visible.Any(c => c.Id == DisplayedId) ? DisplayedId : visible[0].Id;
+            foreach (var conversation in visible)
             {
                 <SessionRailItem @key="conversation.Id"
                                  Conversation="conversation"
                                  IsSelected="DisplayedId == conversation.Id"
+                                 IsTabStop="tabStopId == conversation.Id"
                                  StaggerIndex="_listHasRendered ? 0 : Math.Min(staggerIndex++, 8)"
                                  OnSelect="SelectExplicitAsync"
                                  OnNavigateKey="e => NavigateAsync(e, conversation.Id)"/>

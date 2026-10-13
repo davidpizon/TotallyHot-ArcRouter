@@ -220,4 +220,27 @@ public sealed class SessionMessagesPaneTests
         // Only the two request rows are labelled "Client"; all four rows are loaded.
         cut.Find("[role='status']").TextContent.Should().Contain("2 matches in 4 loaded messages");
     }
+
+    [Fact]
+    public void Remount_keeps_a_saved_selection_that_belongs_to_the_same_session()
+    {
+        var state = new SessionsViewState { MessageSelection = new MessageSelection("s1", 1, MessageSide.Request) };
+        using var ctx = NewContext(state);
+
+        ctx.Render<SessionMessagesPane>(p => p.Add(c => c.Conversation, MakeConversation(2)));
+
+        state.MessageSelection.Should().NotBeNull();
+        state.MessageSelection!.Side.Should().Be(MessageSide.Request);
+    }
+
+    [Fact]
+    public void Remount_drops_a_saved_selection_from_another_session()
+    {
+        var state = new SessionsViewState { MessageSelection = new MessageSelection("other", 1, MessageSide.Request) };
+        using var ctx = NewContext(state);
+
+        ctx.Render<SessionMessagesPane>(p => p.Add(c => c.Conversation, MakeConversation(2)));
+
+        state.MessageSelection.Should().BeNull();
+    }
 }

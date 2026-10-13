@@ -582,6 +582,30 @@ public class SqliteTranscriptStoreTests : IDisposable
     }
 
     [Fact]
+    public void GetMaxTurnNumber_LegacyTableWithoutSessionIdColumn_FallsBackToCorrelationPrefix()
+    {
+        // A pre-migration database with capture off never gets the session_id column; the read must neither
+        // throw nor add it.
+        Directory.CreateDirectory(_tempDirectory);
+        using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            connection.Open();
+            using var create = connection.CreateCommand();
+            create.CommandText = """
+                                 CREATE TABLE request_transcripts (id INTEGER PRIMARY KEY, correlation_id TEXT NOT NULL);
+                                 INSERT INTO request_transcripts (correlation_id) VALUES ('sess-T:2'), ('sess-T:7'), ('sess-TX:9'), ('other:4');
+                                 """;
+            create.ExecuteNonQuery();
+        }
+
+        var store = new SqliteTranscriptStore(CreateDatabase(),
+            new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
+
+        Assert.Equal(7, store.GetMaxTurnNumber("sess-T"));
+        Assert.Equal(0, store.GetMaxTurnNumber("unknown"));
+    }
+
+    [Fact]
     public void GetMaxTurnNumber_NoDatabaseFile_ReturnsZeroAndCreatesNothing()
     {
         var database = CreateDatabase();

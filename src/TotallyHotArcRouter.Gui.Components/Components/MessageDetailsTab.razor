@@ -3,7 +3,7 @@
 
 <div class="space-y-3">
     <div class="flex items-center gap-2 text-xs text-slate-400">
-        <span>@(IsRequest ? "Request" : "Response") · Turn @Turn.TurnNumber of @TurnCount</span>
+        <span>@(IsRequest ? "Request" : "Response") · Turn @Turn.TurnNumber · @TurnCount loaded</span>
         <button type="button"
                 class="ml-auto shrink-0 text-slate-500 hover:text-slate-200 transition-colors"
                 aria-label="Copy correlation id"
