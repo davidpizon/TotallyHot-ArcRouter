@@ -126,7 +126,7 @@
         get
         {
             if (IsRequest) yield break;
-            if (Turn.IsLive && Turn.IsFallback)
+            if (Turn is { IsLive: true, IsFallback: true })
                 yield return ("⚠ fallback", "ds-badge-warning");
             if (Turn.SubstitutionReason is not (null or "" or "None" or "AutoSelect"))
                 yield return ("⇄ substituted", "ds-badge-warning");
