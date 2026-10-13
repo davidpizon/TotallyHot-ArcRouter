@@ -69,7 +69,7 @@
          under systemd (sd_notify readiness/stop signaling, journal-formatted console logging); a no-op
          when launched any other way, mirroring Microsoft.Extensions.Hosting.WindowsServices above. -->
     <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.12" />
-    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.8" />
+    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.10" />
     <PackageReference Include="Grpc.AspNetCore" Version="2.84.0" />
     <PackageReference Include="Grpc.Tools" Version="2.84.0">
       <PrivateAssets>all</PrivateAssets>
@@ -88,7 +88,7 @@
     <!-- Local, in-process BGE-large embedding inference for PLAN.md Phase J's task-embedding-keyed
          memory - no network hop inline with routing, no dependency on an operator having configured
          an embeddings-capable provider. -->
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.30.0" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.31.0" />
     <!-- WordPiece tokenizer matching BGE's BERT-family vocabulary; used by OnnxEmbeddingClient to
          turn task text into the token ids OnnxRuntime's InferenceSession expects. -->
     <PackageReference Include="FastBertTokenizer" Version="1.2.6" />
