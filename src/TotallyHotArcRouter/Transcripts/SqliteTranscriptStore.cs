@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -770,6 +771,39 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
             _logger.LogWarning(ex, "Could not read extracts for session {ArchiveSessionId}.", archiveSessionId);
             return new Dictionary<Guid, SessionExtracts>();
         }
+    }
+
+    /// <inheritdoc/>
+    public int GetMaxTurnNumber(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+
+        // Never create a database or schema: a default install with capture off must stay file-free, and a
+        // restart with capture off must still see turns written earlier (#176 §5.7).
+        if (!File.Exists(_database.DatabasePath)) return 0;
+
+        using var connection = _database.OpenConnection();
+        using (var tableCheck = connection.CreateCommand())
+        {
+            tableCheck.CommandText =
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'request_transcripts';";
+            if ((long)tableCheck.ExecuteScalar()! == 0) return 0;
+        }
+
+        using var command = connection.CreateCommand();
+        // correlation_id is "{sessionId}:{turnNumber}". A non-numeric suffix casts to 0 in SQLite, so it
+        // cannot inflate the max. Uses the session_id index rather than scanning every row.
+        command.CommandText = """
+                              SELECT MAX(CAST(substr(correlation_id, length($sessionId) + 2, 10) AS INTEGER))
+                              FROM request_transcripts
+                              WHERE session_id = $sessionId;
+                              """;
+        command.Parameters.AddWithValue("$sessionId", sessionId);
+
+        var result = command.ExecuteScalar();
+        return result is null or DBNull
+            ? 0
+            : Convert.ToInt32(value: result, provider: CultureInfo.InvariantCulture);
     }
 
     /// <inheritdoc/>

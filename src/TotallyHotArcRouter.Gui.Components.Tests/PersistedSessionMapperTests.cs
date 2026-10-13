@@ -115,8 +115,9 @@ public sealed class PersistedSessionMapperTests
     }
 
     [Fact]
-    public void ToModel_turnWithNoCostOrTokens_defaultsToZeroRatherThanNull()
+    public void ToModel_turnWithNoCostOrTokens_keepsNullPerTurn()
     {
+        // #176 §5.1: unknown stays unknown; conversation totals coalesce with ?? 0.
         var turn = new PersistedConversationTurn(
             CorrelationId: "s1:1",
             1,
@@ -143,8 +144,12 @@ public sealed class PersistedSessionMapperTests
         var model = PersistedSessionMapper.ToModel(conversation);
         var mappedTurn = model.Turns.Should().ContainSingle().Subject;
 
-        mappedTurn.PromptTokens.Should().Be(0);
-        mappedTurn.CompletionTokens.Should().Be(0);
-        mappedTurn.TotalCost.Should().Be(0m);
+        mappedTurn.PromptTokens.Should().BeNull();
+        mappedTurn.CompletionTokens.Should().BeNull();
+        mappedTurn.TotalCost.Should().BeNull();
+        model.UnpricedTurns.Should().Be(1);
+        model.TotalCost.Should().Be(0m);
+        model.IsLive.Should().BeFalse();
+        model.IsSessionSynthesized.Should().BeNull();
     }
 }

@@ -1,0 +1,135 @@
+@* Message tab of the Sessions details pane (#176 §7): request- or response-side fields. *@
+@inject IClipboardService Clipboard
+
+<div class="space-y-3">
+    <div class="flex items-center gap-2 text-xs text-slate-400">
+        <span>@(IsRequest ? "Request" : "Response") · Turn @Turn.TurnNumber of @TurnCount</span>
+        <button type="button"
+                class="ml-auto shrink-0 text-slate-500 hover:text-slate-200 transition-colors"
+                aria-label="Copy correlation id"
+                @onclick="CopyCorrelationAsync">
+            <Icon Name="copy" Size="14"/>
+        </button>
+    </div>
+
+    <section>
+        <div class="ls-stat-label mb-1">Identity</div>
+        <div class="ls-kv-grid">
+            <span>Turn</span><span class="font-mono">@Turn.TurnNumber</span>
+            <span>Correlation</span><span class="font-mono ls-truncate" tabindex="0" aria-describedby="ls-tooltip" data-tip="@CorrelationId">@CorrelationId</span>
+            <span>Timestamp</span><span class="font-mono">@FullTimestamp</span>
+        </div>
+    </section>
+
+    @if (IsRequest)
+    {
+        <section>
+            <div class="ls-stat-label mb-1">Request</div>
+            <div class="ls-kv-grid">
+                <span>Requested model</span><span>@(Turn.RequestedModel ?? "—")</span>
+                <span>Prompt tokens</span><span class="font-mono">@NullableInt(Turn.PromptTokens, "not reported")</span>
+                <span>Cache read</span><span class="font-mono">@LiveOnly(Turn.CacheReadTokens?.ToString(CultureInfo.InvariantCulture), "Persisted history does not record cache tokens")</span>
+                <span>Cache creation</span><span class="font-mono">@LiveOnly(Turn.CacheCreationTokens?.ToString(CultureInfo.InvariantCulture), "Persisted history does not record cache tokens")</span>
+                <span>Cache-hit %</span><span class="font-mono">@CacheHitDisplay</span>
+                <span>Text length</span><span class="font-mono">@TextLength(Turn.RequestSummary)</span>
+            </div>
+        </section>
+    }
+    else
+    {
+        <section>
+            <div class="ls-stat-label mb-1">Response</div>
+            <div class="ls-kv-grid">
+                <span>Routed model</span><span>@(Turn.RoutedModel ?? Turn.Model)</span>
+                <span>Resolved model</span><span>@Turn.Model</span>
+                <span>Provider</span><span>@LiveOnly(Turn.Provider, "Persisted history does not record provider")</span>
+                <span>HTTP status</span><span class="font-mono">@LiveOnly(Turn.StatusCode?.ToString(CultureInfo.InvariantCulture), "Persisted history does not record HTTP status")</span>
+                <span>Streaming</span><span>@LiveOnly(Turn.IsStreaming is null ? null : (Turn.IsStreaming.Value ? "yes" : "no"), "Persisted history does not record streaming")</span>
+                <span>TTFT</span><span class="font-mono">@LiveOnlyMs(Turn.IsLive ? Turn.TimeToFirstTokenMs : null, "Persisted history does not record latency")</span>
+                <span>Duration</span><span class="font-mono">@LiveOnly(Turn.TotalDurationMs is null ? null : $"{Turn.TotalDurationMs} ms", "Persisted history does not record duration")</span>
+                <span>Completion tokens</span><span class="font-mono">@NullableInt(Turn.CompletionTokens, "not reported")</span>
+                <span>Cost</span><span class="font-mono">@CostDisplay</span>
+                <span>Confidence</span><span>@(Turn.CostConfidence ?? "—")</span>
+                <span>Fallback</span><span>@FallbackDisplay</span>
+                <span>Substitution</span><span>@(VisibleSubstitution ?? "—")</span>
+                <span>Text length</span><span class="font-mono">@TextLength(Turn.ResponseSummary)</span>
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+
+    /// <summary>The selected turn.</summary>
+    [Parameter]
+    [EditorRequired]
+    public ConversationTurn Turn { get; set; } = null!;
+
+    /// <summary>Session id used to compose the correlation id.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string SessionId { get; set; } = string.Empty;
+
+    /// <summary>Whether the request side is selected (otherwise response).</summary>
+    [Parameter]
+    public bool IsRequest { get; set; }
+
+    /// <summary>Total turns in the loaded conversation (for "Turn n of m").</summary>
+    [Parameter]
+    public int TurnCount { get; set; }
+
+    private string CorrelationId => $"{SessionId}:{Turn.TurnNumber}";
+
+    private string FullTimestamp =>
+        Turn.TimestampUtc == default
+            ? Turn.Timestamp
+            : Turn.TimestampUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
+    private MarkupString CostDisplay =>
+        Turn.TotalCost is null
+            ? new MarkupString(DashHtml("not priced"))
+            : new MarkupString($"${Turn.TotalCost.Value.ToString("F6", CultureInfo.InvariantCulture)}");
+
+    private MarkupString FallbackDisplay =>
+        Turn.IsLive
+            ? new MarkupString(Turn.IsFallback ? "yes" : "no")
+            : new MarkupString(DashHtml("Persisted history does not record fallback"));
+
+    private string? VisibleSubstitution =>
+        string.IsNullOrEmpty(Turn.SubstitutionReason)
+        || string.Equals(Turn.SubstitutionReason, "None", StringComparison.Ordinal)
+        || string.Equals(Turn.SubstitutionReason, "AutoSelect", StringComparison.Ordinal)
+            ? null
+            : Turn.SubstitutionReason;
+
+    private MarkupString CacheHitDisplay
+    {
+        get
+        {
+            if (!Turn.IsLive) return new MarkupString(DashHtml("Persisted history does not record cache-hit rate"));
+            if (Turn.CacheReadTokens is null || Turn.CacheCreationTokens is null || Turn.PromptTokens is null)
+                return new MarkupString(DashHtml("cache token counts not reported"));
+            return new MarkupString($"{Turn.CacheHitRate.ToString("F1", CultureInfo.InvariantCulture)}%");
+        }
+    }
+
+    private MarkupString LiveOnly(string? value, string reason) =>
+        new(Turn.IsLive && value is not null
+            ? System.Net.WebUtility.HtmlEncode(value)
+            : DashHtml(reason));
+
+    private MarkupString LiveOnlyMs(int? ms, string reason) =>
+        LiveOnly(ms is null ? null : $"{ms} ms", reason);
+
+    private static MarkupString NullableInt(int? value, string reason) =>
+        new(value is null ? DashHtml(reason) : value.Value.ToString("N0", CultureInfo.InvariantCulture));
+
+    private static string TextLength(string? text) =>
+        text is null ? "—" : text.Length.ToString("N0", CultureInfo.InvariantCulture);
+
+    private static string DashHtml(string reason) =>
+        $"<span class=\"text-slate-500\" tabindex=\"0\" aria-describedby=\"ls-tooltip\" data-tip=\"{System.Net.WebUtility.HtmlEncode(reason)}\">—</span>";
+
+    private async Task CopyCorrelationAsync() => await Clipboard.SetTextAsync(CorrelationId);
+
+}

@@ -1,16 +1,13 @@
 @using Microsoft.JSInterop
-@* Sessions tab (formerly "Live Stream"): a full-width, oldest-first list of session cards.
-   Double-clicking a card opens a split view - session details (left) and a chat-style reproduction
-   of the conversation (right) - separated by a draggable divider (wwwroot/js/split-pane.js). The
-   left pane's back button collapses the split back to the full-width list. *@
+@* Sessions tab: always-on three-pane layout (session rail · messages · details). #176 Phase 1. *@
 @inject IJSRuntime Js
+@inject SessionsViewState ViewState
 
 @if (Conversations.Count == 0)
 {
     <div class="h-full flex flex-col min-h-0 p-4">
         @if (OnExportRequested.HasDelegate)
         {
-            @* Export stays available with an empty list so an operator can still export archived sessions that the Sessions tab is not showing (filters / retention). *@
             <div class="flex justify-end shrink-0 mb-2">
                 <button @onclick="OnExportRequested"
                         data-testid="sessions-export"
@@ -33,8 +30,6 @@
     return;
 }
 
-@{ var opened = OpenedConversation; }
-
 <div class="h-full flex flex-col min-h-0">
     @if (HistoryNotice is not null)
     {
@@ -42,7 +37,6 @@
     }
     @if (ShowContentGate)
     {
-        @* ADR-0020: prompt/response text is withheld until a passkey unlock; the strip is the unlock/lock control. *@
         <ContentGateBar Locked="ContentLocked"
                         ShowEnrollmentHint="ShowEnrollmentHint"
                         EnrollmentCommandHint="@EnrollmentCommandHint"
@@ -51,117 +45,92 @@
                         OnAddPasskey="OnAddPasskeyRequested"
                         OnLock="OnLockRequested"/>
     }
-    <div class="flex items-center gap-2 shrink-0 mb-2">
-        <div class="relative flex-1">
-            <Icon Name="search" Size="20" Class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"/>
-            <input type="text"
-                   placeholder="Search conversations, agents, models..."
-                   value="@_search"
-                   @oninput="e => _search = (string?)e.Value ?? string.Empty"
-                   class="w-full pl-8 pr-3 py-2 text-xs font-mono ds-input ds-input-secondary"/>
+
+    <div class="ls-sessions-scroll flex-1 min-h-0">
+        <div @ref="_container" class="ls-sessions-layout">
+            <div @ref="_railPanel" class="ls-sessions-rail-host min-h-0">
+                <SessionRail Conversations="OrderedConversations"
+                             SelectedId="@SelectedId"
+                             OnSelect="OnSelect"
+                             TranscriptCaptureEnabled="TranscriptCaptureEnabled"
+                             OnExportRequested="OnExportRequested"/>
+            </div>
+
+            <div @ref="_leftDivider" class="ls-divider" title="Drag to resize session rail"></div>
+
+            <div class="ls-chat-host flex flex-col min-h-0 flex-1">
+                @if (ActiveConversation is not null)
+                {
+                    <SessionMessagesPane Conversation="ActiveConversation"
+                                         ContentLocked="ShowContentGate && ContentLocked"
+                                         OnSelectionChanged="StateHasChanged"/>
+                }
+            </div>
+
+            <div @ref="_rightDivider" class="ls-divider" title="Drag to resize details pane"></div>
+
+            <div @ref="_detailsPanel" class="ls-details-host min-h-0">
+                <SessionDetailsPane Conversation="ActiveConversation"
+                                    Selection="ViewState.MessageSelection"/>
+            </div>
         </div>
-        @if (OnExportRequested.HasDelegate)
-        {
-            @* #165 phase 3: opens the Export dialog. A host that has no export surface passes no callback and sees no button. *@
-            <button @onclick="OnExportRequested"
-                    data-testid="sessions-export"
-                    class="shrink-0 flex items-center gap-1.5 rounded px-2.5 py-2 text-xs font-medium border border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200 transition-colors">
-                Export
-            </button>
-        }
     </div>
-
-    @if (opened is null)
-    {
-        @* Full-width card list, oldest-first. *@
-        <div class="flex-1 overflow-y-auto ls-sessions-grid">
-            @{ var staggerIndex = 0; }
-            @foreach (var conversation in Filtered)
-            {
-                <ConversationCard @key="conversation.Id"
-                                  Conversation="conversation"
-                                  IsSelected="SelectedId == conversation.Id"
-                                  StaggerIndex="_listHasRendered ? 0 : Math.Min(val1: staggerIndex++, 8)"
-                                  OnSelect="OnSelect"
-                                  OnDoubleClick="OpenSessionAsync"/>
-            }
-        </div>
-    }
-    else
-    {
-        <div @ref="_container" class="flex flex-1 min-h-0">
-            @* Left panel: session details + back button *@
-            <div @ref="_leftPanel" class="ls-left ls-sessions-detail-pane flex flex-col min-h-0 gap-2">
-                <button @onclick="CloseSession"
-                        aria-label="Back to the sessions list"
-                        class="ls-sessions-back-btn flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 transition-colors shrink-0">
-                    <Icon Name="x" Size="16"/>
-                    <span>Back to Sessions</span>
-                </button>
-                <ConversationSummary Conversation="opened"/>
-            </div>
-
-            @* Draggable divider *@
-            <div @ref="_divider" class="ls-divider" title="Drag to resize panels"></div>
-
-            @* Right panel: chat-style conversation reproduction *@
-            <div class="flex flex-col min-h-0 flex-1 ls-livestream-right-panel">
-                <SessionConversationPane Conversation="opened" ContentLocked="ShowContentGate && ContentLocked"/>
-            </div>
-        </div>
-    }
 </div>
 
 @code {
 
-    /// <summary>All conversations shown in the session list.</summary>
+    /// <summary>All conversations shown in the session rail (live + persisted, already merged by the host).</summary>
     [Parameter]
     [EditorRequired]
     public IReadOnlyList<Conversation> Conversations { get; set; } = [];
 
     /// <summary>
-    /// The id of the conversation Dashboard currently tracks as selected (shared with the Cost
-    /// Analytics tab's initial-session behavior). Updated when a card is double-clicked to open the
-    /// split view - see <see cref="OpenSessionAsync"/>.
+    /// Dashboard's shared selection id. When empty or stale, the rail implicitly shows the most recently
+    /// active session without calling <see cref="OnSelect"/>.
     /// </summary>
     [Parameter]
     [EditorRequired]
     public string SelectedId { get; set; } = string.Empty;
 
-    /// <summary>Invoked with a conversation's id when its card is double-clicked and the split view opens.</summary>
+    /// <summary>Invoked only on explicit rail selection (click or keyboard), never on implicit fallback.</summary>
     [Parameter]
     public EventCallback<string> OnSelect { get; set; }
 
     /// <summary>
-    /// A one-line notice about persisted history - a failed load, or that only the newest turns are shown - or
-    /// <see langword="null"/> for none. See <see cref="PersistedSessionStore.HistoryNotice"/>.
+    /// Whether the router has transcript capture enabled. Shown in the rail footer; Phase 2 also gates
+    /// persisted detail sections on this.
+    /// </summary>
+    [Parameter]
+    public bool TranscriptCaptureEnabled { get; set; }
+
+    /// <summary>
+    /// A one-line notice about persisted history — a failed load, or that only the newest turns are shown —
+    /// or <see langword="null"/> for none. See <see cref="PersistedSessionStore.HistoryNotice"/>.
     /// </summary>
     [Parameter]
     public string? HistoryNotice { get; set; }
 
     /// <summary>
-    /// Whether this host has the passkey content gate (ADR-0020) and so shows the lock/unlock strip. Off by
-    /// default so a host without the gate renders exactly as before.
+    /// Whether this host has the passkey content gate (ADR-0020) and so shows the lock/unlock strip.
     /// </summary>
     [Parameter]
     public bool ShowContentGate { get; set; }
 
-    /// <summary>Whether conversation text is currently locked (no active content grant). Only read when <see cref="ShowContentGate"/> is set.</summary>
+    /// <summary>Whether conversation text is currently locked. Only read when <see cref="ShowContentGate"/> is set.</summary>
     [Parameter]
     public bool ContentLocked { get; set; }
 
     /// <summary>
-    /// Whether the router has confirmed that no passkey is enrolled, so the strip names the enrollment command
-    /// and offers Add passkey in place of an unlock that cannot succeed.
+    /// Whether the router has confirmed that no passkey is enrolled, so the strip names the enrollment command.
     /// </summary>
     [Parameter]
     public bool ShowEnrollmentHint { get; set; }
 
-    /// <summary>The elevated-shell command that mints an enrollment code, named in the enrollment hint.</summary>
+    /// <summary>The elevated-shell command that mints an enrollment code.</summary>
     [Parameter]
     public string EnrollmentCommandHint { get; set; } = PasskeyOperations.EnrollmentCommandFlag;
 
-    /// <summary>When the active unlock lapses, shown while unlocked; <see langword="null"/> shows no time.</summary>
+    /// <summary>When the active unlock lapses; <see langword="null"/> shows no time.</summary>
     [Parameter]
     public DateTimeOffset? ContentExpiresAtUtc { get; set; }
 
@@ -178,86 +147,58 @@
     public EventCallback OnLockRequested { get; set; }
 
     /// <summary>
-    /// Invoked when the operator asks to export conversations (#165 phase 3). The Export button is shown only
-    /// when a host supplies this callback.
+    /// Invoked when the operator asks to export conversations. The Export button is shown only when a host
+    /// supplies this callback.
     /// </summary>
     [Parameter]
     public EventCallback OnExportRequested { get; set; }
 
-    private string _search = string.Empty;
-
-    // Gates the conversation list's entrance stagger to its first appearance only. Cards that arrive
-    // later from the live gRPC stream pass StaggerIndex 0 and animate immediately: staggering a live
-    // append would make a busy stream read as a slot machine (docs/gui/MOTION.md §7).
-    private bool _listHasRendered;
-
-    // The id of the conversation currently opened into the split view; null means the full-width
-    // list is showing. Not the same concept as SelectedId - this is purely which session's split
-    // view is expanded, whereas SelectedId is Dashboard's shared selection (also read by Cost
-    // Analytics). Kept in sync with SelectedId in OpenSessionAsync.
-    private string? _openedConversationId;
-
     private ElementReference _container;
-    private ElementReference _divider;
-    private ElementReference _leftPanel;
+    private ElementReference _railPanel;
+    private ElementReference _detailsPanel;
+    private ElementReference _leftDivider;
+    private ElementReference _rightDivider;
 
-    /// <summary>Conversations matching the search box (title, id, agent, or model, case-insensitively), oldest first.</summary>
-    private IEnumerable<Conversation> Filtered =>
-        Conversations
-            .Where(c => string.IsNullOrEmpty(_search)
-                        || c.Title.Contains(value: _search, comparisonType: StringComparison.OrdinalIgnoreCase)
-                        || c.Id.Contains(value: _search, comparisonType: StringComparison.OrdinalIgnoreCase)
-                        || c.Turns.Any(t => t.Agent.Contains(value: _search, comparisonType: StringComparison.OrdinalIgnoreCase)
-                                            || t.Model.Contains(value: _search, comparisonType: StringComparison.OrdinalIgnoreCase)))
-            .OrderBy(FirstTurnTimestampUtc);
-
-    // Conversation carries no aggregate UTC instant of its own (FirstTimestamp/LastTimestamp are
-    // display-only "HH:mm:ss" strings, unreliable to sort by across a day boundary) - each turn's
-    // real TimestampUtc is, so the earliest turn's instant is the sort key. A conversation with no
-    // turns (shouldn't happen in practice) sorts last rather than first.
-    /// <summary>
-    /// The real UTC instant of <paramref name="conversation"/>'s earliest turn, used to sort the session list
-    /// oldest-first.
-    /// </summary>
-    private static DateTimeOffset FirstTurnTimestampUtc(Conversation conversation)
-    {
-        return conversation.Turns.Count == 0 ? DateTimeOffset.MaxValue : conversation.Turns.Min(t => t.TimestampUtc);
-    }
+    /// <summary>Conversations sorted most recently active first for the rail.</summary>
+    private IReadOnlyList<Conversation> OrderedConversations =>
+        Conversations.OrderByDescending(NewestTurnUtc).ToList();
 
     /// <summary>
-    /// The conversation currently opened into the split view, or <see langword="null"/> when the full-width list is
-    /// showing.
+    /// The conversation shown in the middle and right panes: explicit <see cref="SelectedId"/> when still
+    /// present, otherwise the most recently active session (implicit; does not call <see cref="OnSelect"/>).
     /// </summary>
-    private Conversation? OpenedConversation =>
-        _openedConversationId is null ? null : Conversations.FirstOrDefault(c => c.Id == _openedConversationId);
-
-    /// <summary>Opens <paramref name="id"/>'s conversation into the split view and reports it as Dashboard's shared selection.</summary>
-    private async Task OpenSessionAsync(string id)
+    private Conversation? ActiveConversation
     {
-        _openedConversationId = id;
-        await OnSelect.InvokeAsync(id);
-    }
-
-    /// <summary>Collapses the split view back to the full-width session list.</summary>
-    private void CloseSession()
-    {
-        _openedConversationId = null;
+        get
+        {
+            if (!string.IsNullOrEmpty(SelectedId))
+            {
+                var selected = Conversations.FirstOrDefault(c => c.Id == SelectedId);
+                if (selected is not null) return selected;
+            }
+            return OrderedConversations.FirstOrDefault();
+        }
     }
 
     /// <inheritdoc/>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        // Re-invoked on every render: splitPane.init no-ops once the divider is already wired, and
-        // this covers the case where the split view first appears on a later render.
-        if (Conversations.Count > 0)
+        if (Conversations.Count == 0) return;
+        try
         {
-            _listHasRendered = true;
+            await Js.InvokeVoidAsync("splitPane.init", _container, _leftDivider, _railPanel,
+                new { edge = "left", minPct = 15, maxPct = 35, defaultPct = 22,
+                    storageKey = "arcrouter.sessions.leftPct", minPx = 220, siblingMinPx = 280, middleMinPx = 360, dividersPx = 24 });
+            await Js.InvokeVoidAsync("splitPane.init", _container, _rightDivider, _detailsPanel,
+                new { edge = "right", minPct = 20, maxPct = 40, defaultPct = 28,
+                    storageKey = "arcrouter.sessions.rightPct", minPx = 280, siblingMinPx = 220, middleMinPx = 360, dividersPx = 24 });
         }
-
-        if (OpenedConversation is not null)
-        {
-            await Js.InvokeVoidAsync(identifier: "splitPane.init", _container, _divider, _leftPanel);
-        }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) { }
+        catch (JSException) { /* Loose mode / missing script in tests */ }
     }
+
+    private static DateTimeOffset NewestTurnUtc(Conversation c) =>
+        c.Turns.Count == 0 ? DateTimeOffset.MinValue : c.Turns.Max(t => t.TimestampUtc);
 
 }

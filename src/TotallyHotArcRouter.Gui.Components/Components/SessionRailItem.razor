@@ -1,0 +1,124 @@
+@* One session entry in the Sessions left rail (#176 §4.2). Status dot + title + badges + meta line. *@
+@inject TimeProvider Time
+
+<button type="button"
+        role="option"
+        aria-selected="@(IsSelected ? "true" : "false")"
+        tabindex="@(IsSelected ? 0 : -1)"
+        aria-label="@AriaLabel"
+        @onclick="() => OnSelect.InvokeAsync(Conversation.Id)"
+        @onkeydown="OnKeyDown"
+        class="ls-rail-item row-enter @(IsSelected ? "ls-rail-item-selected" : "") @(Conversation.IsLive ? "" : "ls-rail-item-history")"
+        style="--i:@StaggerIndex">
+    <div class="flex items-center gap-2">
+        <span class="ls-status-dot @StatusClass @(StatusClass == "ls-status-live" ? "pulse-dot" : "")"
+              aria-hidden="true"></span>
+        <span class="text-xs font-semibold text-slate-200 ls-truncate">@Conversation.Title</span>
+        <span class="ml-auto flex items-center gap-1 shrink-0">
+            @if (Conversation.HasFallbackTurns)
+            {
+                <span class="rounded px-1.5 py-0.5 text-xs font-semibold ls-tip ds-badge-warning"
+                      tabindex="0" aria-describedby="ls-tooltip"
+                      data-tip="One or more turns in this conversation used fallback routing">⚠</span>
+            }
+            @if (Conversation.IsUsedForTraining)
+            {
+                <span class="rounded px-1.5 py-0.5 text-xs font-semibold ls-tip ds-badge-success"
+                      tabindex="0" aria-describedby="ls-tooltip"
+                      data-tip="One or more turns in this session were folded into the router's live-learning corpus">🎓</span>
+            }
+        </span>
+    </div>
+    <div class="text-xs font-mono text-slate-500 ls-truncate mt-0.5">@MetaLine</div>
+</button>
+
+@code {
+
+    /// <summary>The conversation this rail item summarizes.</summary>
+    [Parameter]
+    [EditorRequired]
+    public Conversation Conversation { get; set; } = null!;
+
+    /// <summary>Whether this item is the currently selected session.</summary>
+    [Parameter]
+    public bool IsSelected { get; set; }
+
+    /// <summary>Invoked with the conversation id on an explicit click or keyboard move.</summary>
+    [Parameter]
+    public EventCallback<string> OnSelect { get; set; }
+
+    /// <summary>
+    /// Keyboard navigation over the rail listbox: Up/Down/Home/End move selection (and selecting is
+    /// explicit, so the parent calls <see cref="OnSelect"/>).
+    /// </summary>
+    [Parameter]
+    public EventCallback<KeyboardEventArgs> OnNavigateKey { get; set; }
+
+    /// <summary>
+    /// Per-item entrance delay index for <c>.row-enter</c> (MOTION.md §7). Non-zero only on first mount.
+    /// </summary>
+    [Parameter]
+    public int StaggerIndex { get; set; }
+
+    /// <summary>CSS class for the status dot: live, idle, or history-only.</summary>
+    private string StatusClass
+    {
+        get
+        {
+            if (!Conversation.IsLive) return "ls-status-history";
+            var newest = Conversation.Turns.Count == 0
+                ? DateTimeOffset.MinValue
+                : Conversation.Turns.Max(t => t.TimestampUtc);
+            return Time.GetUtcNow() - newest < SessionsViewState.IdleThreshold ? "ls-status-live" : "ls-status-idle";
+        }
+    }
+
+    /// <summary>Spoken status for the aria-label (the dot is never color-only).</summary>
+    private string StatusWords => StatusClass switch
+    {
+        "ls-status-live" => "live and active",
+        "ls-status-idle" => "live but idle",
+        _ => "history only"
+    };
+
+    /// <summary>Meta line: last-active time · turns · cost.</summary>
+    private string MetaLine
+    {
+        get
+        {
+            var newest = Conversation.Turns.Count == 0
+                ? DateTimeOffset.MinValue
+                : Conversation.Turns.Max(t => t.TimestampUtc);
+            var local = newest == DateTimeOffset.MinValue
+                ? "—"
+                : FormatActive(newest.ToLocalTime());
+            var turns = Conversation.Turns.Count;
+            var cost = Conversation.TotalCost.ToString("F6", CultureInfo.InvariantCulture);
+            return $"{local} · {turns} {(turns == 1 ? "turn" : "turns")} · ${cost}";
+        }
+    }
+
+    /// <summary>Accessible label restating status, badges, and the meta line.</summary>
+    private string AriaLabel =>
+        $"{Conversation.Title}, {StatusWords}" +
+        (Conversation.HasFallbackTurns ? ", fallback routing used" : string.Empty) +
+        (Conversation.IsUsedForTraining ? ", used for live training" : string.Empty) +
+        $". {MetaLine}";
+
+    /// <summary>Forwards listbox navigation keys to the parent rail.</summary>
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key is "ArrowUp" or "ArrowDown" or "Home" or "End")
+            await OnNavigateKey.InvokeAsync(e);
+    }
+
+    /// <summary>HH:mm today, MMM d before today.</summary>
+    private static string FormatActive(DateTimeOffset local)
+    {
+        var today = DateTimeOffset.Now.Date;
+        return local.Date == today
+            ? local.ToString("HH:mm", CultureInfo.InvariantCulture)
+            : local.ToString("MMM d", CultureInfo.InvariantCulture);
+    }
+
+}

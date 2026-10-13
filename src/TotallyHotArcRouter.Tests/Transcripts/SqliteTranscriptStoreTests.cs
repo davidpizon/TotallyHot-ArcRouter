@@ -551,6 +551,89 @@ public class SqliteTranscriptStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task GetMaxTurnNumber_ReturnsHighestTurnSuffixForSession()
+    {
+        var (_, store) = CreateEnabledStore();
+        await store.InsertAsync(MakeRecord("sess-T:2"), TestContext.Current.CancellationToken);
+        await store.InsertAsync(MakeRecord("sess-T:5"), TestContext.Current.CancellationToken);
+        await store.InsertAsync(MakeRecord("sess-T:3"), TestContext.Current.CancellationToken);
+        await store.InsertAsync(MakeRecord("other:9"), TestContext.Current.CancellationToken);
+
+        Assert.Equal(5, store.GetMaxTurnNumber("sess-T"));
+        Assert.Equal(9, store.GetMaxTurnNumber("other"));
+        Assert.Equal(0, store.GetMaxTurnNumber("unknown"));
+    }
+
+    [Fact]
+    public async Task GetMaxTurnNumber_CaptureDisabled_StillReadsExistingDatabase()
+    {
+        // Capture off at restart must still see turns written earlier (#176 §5.7).
+        var database = CreateDatabase();
+        database.EnsureCreated();
+        var enabled = new SqliteTranscriptStore(database,
+            new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
+        await enabled.InsertAsync(MakeRecord("sess-T:5"), TestContext.Current.CancellationToken);
+
+        var disabled = new SqliteTranscriptStore(database,
+            new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
+
+        Assert.Equal(5, disabled.GetMaxTurnNumber("sess-T"));
+        Assert.True(File.Exists(_dbPath));
+    }
+
+    [Fact]
+    public void GetMaxTurnNumber_NoDatabaseFile_ReturnsZeroAndCreatesNothing()
+    {
+        var database = CreateDatabase();
+        var store = new SqliteTranscriptStore(database,
+            new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
+
+        Assert.Equal(0, store.GetMaxTurnNumber("sess-T"));
+        Assert.False(File.Exists(_dbPath));
+        Assert.False(Directory.Exists(_tempDirectory) && Directory.EnumerateFileSystemEntries(_tempDirectory).Any());
+    }
+
+    [Fact]
+    public void GetMaxTurnNumber_DatabaseWithoutTranscriptsTable_ReturnsZeroAndLeavesFileUnchanged()
+    {
+        Directory.CreateDirectory(_tempDirectory);
+        using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "CREATE TABLE unrelated (id INTEGER PRIMARY KEY);";
+            command.ExecuteNonQuery();
+        }
+
+        var before = File.GetLastWriteTimeUtc(_dbPath);
+        var store = new SqliteTranscriptStore(CreateDatabase(),
+            new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = false }));
+
+        Assert.Equal(0, store.GetMaxTurnNumber("sess-T"));
+        Assert.Equal(before, File.GetLastWriteTimeUtc(_dbPath));
+    }
+
+    [Fact]
+    public async Task GetMaxTurnNumber_NonNumericSuffix_CountsAsZero()
+    {
+        var (_, store) = CreateEnabledStore();
+        await store.InsertAsync(MakeRecord("sess-T:abc"), TestContext.Current.CancellationToken);
+        await store.InsertAsync(MakeRecord("sess-T:4"), TestContext.Current.CancellationToken);
+
+        Assert.Equal(4, store.GetMaxTurnNumber("sess-T"));
+    }
+
+    [Fact]
+    public async Task GetMaxTurnNumber_LongSessionId_ParsesTurnSuffix()
+    {
+        var sessionId = new string('a', 100_000);
+        var (_, store) = CreateEnabledStore();
+        await store.InsertAsync(MakeRecord($"{sessionId}:7"), TestContext.Current.CancellationToken);
+
+        Assert.Equal(7, store.GetMaxTurnNumber(sessionId));
+    }
+
+    [Fact]
     public async Task InsertAsync_WritesSessionIdParsedFromCorrelationId()
     {
         var (database, store) = CreateEnabledStore();

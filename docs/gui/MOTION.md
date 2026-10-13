@@ -213,8 +213,9 @@ every future layout property into the animation.
                        border-color: transparent; }
 ```
 
-All four selected-one-of-N families share this timing: `.tab-button` (Dashboard nav), `.gov-tab`
-(Governance), `.metric-button` (Cost Analytics), `.filter-button` (Model Distribution).
+All five selected-one-of-N families share this timing: `.tab-button` (Dashboard nav), `.gov-tab`
+(Governance), `.ls-details-tab` (Sessions details), `.metric-button` (Cost Analytics),
+`.filter-button` (Model Distribution).
 
 ### Overlay Rise — *Coded and wired (§10) — not confirmed in UI*
 
@@ -235,10 +236,10 @@ markup silently opts out of it. See [`DESIGN.md`](DESIGN.md) §4.1.
 .overlay-panel    { animation: overlay-panel-enter    var(--dur-slow)    var(--ease-out-quart); }
 ```
 
-### Row Enter — *Coded and wired on `ConversationCard` (§10) — not confirmed in UI; `TurnCard` never got this treatment before the component was orphaned by the Sessions-tab rebuild (`DESIGN.md` §1)*
+### Row Enter — *Shipping on the Sessions rail (`SessionRailItem`)*
 
-A new conversation or turn arriving from the live gRPC stream. Rows prepend (newest first), so the
-row moves *down* into place from `-4px`.
+A new session arriving in the rail. Items prepend (most recently active first), so the row moves
+*down* into place from `-4px`.
 
 **Live arrivals are never staggered.** Stagger implies a batch the operator is scanning for the first
 time; telemetry arrives one row at a time, already in motion. Staggering it would make a busy stream
@@ -250,6 +251,19 @@ look like a slot machine. Stagger applies only on initial mount — see §7.
   to   { opacity: 1; transform: translateY(0); }
 }
 .row-enter { animation: row-enter var(--dur-default) var(--ease-out-expo); }
+```
+
+### Row Enter Append — *Shipping on Sessions message rows (`SessionMessageRow`) — Proposed mirror of Row Enter*
+
+Message rows append at the bottom of the chat list, so they rise into place from `+4px` (the mirror of
+Row Enter's "move toward the resting position"). Live arrivals are never staggered.
+
+```css
+@keyframes row-enter-append {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.row-enter-append { animation: row-enter-append var(--dur-default) var(--ease-out-expo); }
 ```
 
 ### Reorder Settle — *Shipping*
@@ -475,17 +489,15 @@ reading direction.
 
 | Surface | Motion | Delay | Order carries |
 |---|---|---|---|
-| Conversation list (initial) | Row Enter | `min(i, 8) * 30ms` | Recency — newest first, top-down |
+| Sessions rail (initial) | Row Enter | `min(i, 8) * 30ms` | Recency — newest first, top-down |
 | Provider / model card grid | Row Enter | `min(i, 8) * 30ms` | Scan order, not rank |
 | Routing-decision steps | Disclosure Expand | `i * 25ms` | **Causal sequence** — step order is the meaning |
 
 **Cap the index at 8.** A 200-row conversation list must not leave the last row arriving six seconds
 late. After the eighth item everything lands together.
 
-**The stat strip never staggers.** `ConversationSummary`'s pinned aggregate strip packs several stats
-into one line designed to be scanned as a unit (`DESIGN.md` §1). Staggering them would defeat the
-density the layout exists to provide. (`TurnCard`'s denser 8-stat strip demonstrated this most
-clearly, but the component is orphaned since the Sessions-tab rebuild — see `DESIGN.md` §1.)
+**The Session overview totals never stagger.** `SessionOverviewTab`'s key/value grid is scanned as a
+unit (`DESIGN.md` §1). Staggering its rows would defeat the density the layout exists to provide.
 
 Blazor sets the per-item delay via an inline custom property on the loop index:
 
@@ -571,8 +583,8 @@ cannot read a custom property from there. Keep the two in step.
 | Duration + easing tokens | `app.css` `:root` |
 | Bare `ease` → `var(--ease-standard)` | `.card-hover`, `.ls-divider`, input focus |
 | `.tab-indicator` actually applied (was dead CSS) | `Dashboard.razor` nav buttons |
-| Tab Chrome Crossfade — border geometry reserved on the base rule so selection no longer reflows the tab row | `.tab-button` |
-| `transition: all` retired on every selected-one-of-N control | `.tab-button`, `.tab-indicator`, `.gov-tab`, `.metric-button`, `.filter-button` |
+| Tab Chrome Crossfade — border geometry reserved on the base rule so selection no longer reflows the tab row | `.tab-button`, `.ls-details-tab` |
+| `transition: all` retired on every selected-one-of-N control | `.tab-button`, `.tab-indicator`, `.gov-tab`, `.ls-details-tab`, `.metric-button`, `.filter-button` |
 | Disclosure Collapse — two-way expand/contract via `grid-template-rows` | `.ls-disclosure`; `BenchmarkData` (Task Matrix + Local Voter Model), `ProvidersAdmin` add-model pane |
 | `prefers-reduced-motion` block | `app.css` |
 | Reorder Settle — FLIP slide on every rank change and on drop, grab-handle-only reorder (chevron rank buttons removed) | `PriceSourcesAdmin`; `js/reorder-flip.js` |
@@ -590,16 +602,16 @@ accessibility setting forcing `prefers-reduced-motion: reduce` (collapses all du
 |---|---|
 | Panel Crossfade on tab switch | `Dashboard.razor` — `@key`-ed wrapper in `<main>` |
 | Overlay Rise | `SettingsModal`, `ProviderEditDialog` |
-| Row Enter + first-mount stagger | `ConversationCard` via `LiveStream._listHasRendered` |
+| Row Enter + first-mount stagger | `SessionRailItem` via `SessionRail._listHasRendered` |
+| Row Enter Append | `SessionMessageRow` live arrivals (`.row-enter-append`) |
+| Tab Chrome Crossfade (fifth family) | `.ls-details-tab` on the Sessions details pane |
 
 ### Not yet implemented
 
 | Item | Why it's deferred |
 |---|---|
 | **Value Tick** (§6) | Needs per-stat previous-value tracking to fire on. The CSS is intentionally *not* in `app.css` — unused rules rot, as `.tab-indicator` did. Add rule and wiring together. |
-| **Row Enter on `TurnCard`** | Moot — `TurnCard` is orphaned since the Sessions-tab rebuild (`DESIGN.md` §1) and never got this treatment before being replaced. If `SessionConversationPane`'s chat-bubble turn list ever gets entrance motion, the same first-mount gate `LiveStream` uses for conversations would apply. |
 | **Grid stagger on provider/model cards** (§7) | Straightforward; not yet applied. |
-| **Disclosure Collapse on `TurnCard`** (§6) | Moot — `TurnCard` is orphaned since the Sessions-tab rebuild (`DESIGN.md` §1); its routing-decision log and request/response `<pre>` payloads no longer render anywhere. The original reasoning (staying mounted for a collapse animation would mean rendering every collapsed turn's payload across a long list) would still apply if a dense turn list returns. |
 
 ### Notes for future work
 

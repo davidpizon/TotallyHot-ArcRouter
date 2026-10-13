@@ -114,6 +114,7 @@
             {
                 case Tab.Live:
                     <LiveStream Conversations="MergedSessionConversations()" SelectedId="@_selectedConversationId" OnSelect="OpenPersistedSessionAsync" HistoryNotice="@PersistedSessionStore.HistoryNotice"
+                                TranscriptCaptureEnabled="PersistedSessionStore.TranscriptCaptureEnabled"
                                 ShowContentGate="true"
                                 ContentLocked="@(!ContentGrant.IsActive)"
                                 ShowEnrollmentHint="@(PasskeyStore.GateStatus is { Enrolled: false })"
@@ -321,28 +322,16 @@
     }
 
     /// <summary>
-    /// The Sessions tab's full conversation list: every live session plus every persisted session not
-    /// already present live, live winning for any session id in both - a session still in flight is more
-    /// current from the live stream (turns arrive incrementally), while a persisted-only session survived
-    /// a GUI restart and has nothing more current to prefer (docs/router/sessions-tab-training-data-plan.md
-    /// Phase 2). Deliberately not cached: both source lists are already cheap, already-materialized
-    /// snapshots (<see cref="LiveDataStore.Conversations"/>/<see cref="PersistedSessionStore.Sessions"/>
-    /// are replaced wholesale on change, not mutated in place), so recomputing this on every render is a
+    /// The Sessions tab's full conversation list: live and persisted history merged per turn
+    /// (<see cref="SessionMerger"/>, #176 §5.1) so a GUI restart no longer hides earlier persisted turns
+    /// of a session that has one new live turn. Deliberately not cached: both source lists are already
+    /// cheap, already-materialized snapshots
+    /// (<see cref="LiveDataStore.Conversations"/>/<see cref="PersistedSessionStore.Sessions"/> are
+    /// replaced wholesale on change, not mutated in place), so recomputing this on every render is a
     /// small, bounded cost rather than a stale-cache risk.
     /// </summary>
-    private IReadOnlyList<Conversation> MergedSessionConversations()
-    {
-        var live = LiveDataStore.Conversations;
-        if (PersistedSessionStore.Sessions.Count == 0)
-        {
-            return live;
-        }
-
-        var liveIds = new HashSet<string>(collection: live.Select(c => c.Id), comparer: StringComparer.Ordinal);
-        var merged = new List<Conversation>(live);
-        merged.AddRange(PersistedSessionStore.Sessions.Where(c => !liveIds.Contains(c.Id)));
-        return merged;
-    }
+    private IReadOnlyList<Conversation> MergedSessionConversations() =>
+        SessionMerger.Merge(LiveDataStore.Conversations, PersistedSessionStore.Sessions);
 
     /// <summary>Recomputes the budget-alert banner and re-renders when the provider list changes.</summary>
     private void HandleProvidersChanged()

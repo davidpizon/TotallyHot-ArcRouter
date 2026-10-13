@@ -75,12 +75,18 @@ public static class LiveConversationMapper
             TotalCompletionTokens: conversation.TotalCompletionTokens,
             HasFallbackTurns: conversation.HasFallbackTurns,
             Turns: [.. conversation.Turns.Select(ToModel)],
-            UnpricedTurns: conversation.UnpricedTurns);
+            UnpricedTurns: conversation.UnpricedTurns,
+            IsLive: true,
+            IsSessionSynthesized: conversation.IsSessionSynthesized);
     }
 
     /// <summary>Maps one <see cref="LiveConversationTurn"/> onto the dashboard's <see cref="ConversationTurn"/> view model.</summary>
     private static ConversationTurn ToModel(LiveConversationTurn turn)
     {
+        var prompt = turn.PromptTokens ?? 0;
+        var cacheCreate = turn.CacheCreationTokens ?? 0;
+        var cacheRead = turn.CacheReadTokens ?? 0;
+
         return new ConversationTurn(
             Id: $"{turn.SessionId}-t{turn.TurnNumber}",
             Agent: turn.Agent,
@@ -91,8 +97,8 @@ public static class LiveConversationMapper
             0m,
             TotalCost: turn.EstimatedCostUsd,
             0,
-            CacheHitRate: CostChartBuilder.CacheHitRate(promptTokens: turn.PromptTokens,
-                cacheCreationTokens: turn.CacheCreationTokens, cacheReadTokens: turn.CacheReadTokens),
+            CacheHitRate: CostChartBuilder.CacheHitRate(promptTokens: prompt,
+                cacheCreationTokens: cacheCreate, cacheReadTokens: cacheRead),
             TimeToFirstTokenMs: (int)Math.Clamp(value: turn.LatencyToHeadersMs, 0, max: int.MaxValue),
             0m,
             Timestamp: FormatTimestamp(turn.TimestampUtc),
@@ -105,7 +111,16 @@ public static class LiveConversationMapper
             RequestedModel: turn.RequestedModel,
             RoutedModel: turn.RoutedModel,
             SubstitutionReason: turn.SubstitutionReason,
-            SubagentSignal: turn.SubagentSignal);
+            SubagentSignal: turn.SubagentSignal,
+            IsLive: true,
+            Provider: turn.Provider,
+            IsStreaming: turn.IsStreaming,
+            TotalDurationMs: turn.TotalDurationMs,
+            StatusCode: turn.StatusCode,
+            CacheCreationTokens: turn.CacheCreationTokens,
+            CacheReadTokens: turn.CacheReadTokens,
+            RouterTokens: turn.RouterTokens,
+            RouterCostUsd: turn.RouterCostUsd);
     }
 
     /// <summary>

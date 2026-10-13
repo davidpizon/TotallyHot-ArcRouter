@@ -1,0 +1,173 @@
+@* Left pane of the Sessions three-pane layout: session search, listbox, and status footer (#176 §3). *@
+@inject SessionsViewState ViewState
+@inject TimeProvider Time
+
+<div class="ls-sessions-rail flex flex-col min-h-0 h-full">
+    <div class="shrink-0 p-2 space-y-2">
+        <div class="relative">
+            <Icon Name="search" Size="16" Class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500"/>
+            <input type="text"
+                   placeholder="Search sessions…"
+                   value="@ViewState.RailSearch"
+                   @oninput="OnSearchInput"
+                   class="w-full pl-8 pr-2 py-1.5 text-xs font-mono ds-input ds-input-secondary"
+                   aria-label="Search sessions"/>
+        </div>
+        @if (OnExportRequested.HasDelegate)
+        {
+            <button type="button" @onclick="OnExportRequested"
+                    data-testid="sessions-export"
+                    class="w-full flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-xs font-medium border border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200 transition-colors">
+                Export
+            </button>
+        }
+    </div>
+
+    <div role="listbox" aria-label="Sessions" class="flex-1 min-h-0 overflow-y-auto px-1">
+        @if (!Filtered.Any())
+        {
+            <p class="text-xs text-slate-500 px-2 py-3" role="status">No sessions match '@ViewState.RailSearch'.</p>
+        }
+        else
+        {
+            var staggerIndex = 0;
+            foreach (var conversation in Filtered)
+            {
+                <SessionRailItem @key="conversation.Id"
+                                 Conversation="conversation"
+                                 IsSelected="DisplayedId == conversation.Id"
+                                 StaggerIndex="_listHasRendered ? 0 : Math.Min(staggerIndex++, 8)"
+                                 OnSelect="SelectExplicitAsync"
+                                 OnNavigateKey="e => NavigateAsync(e, conversation.Id)"/>
+            }
+        }
+    </div>
+
+    <div class="ls-rail-footer shrink-0 text-xs text-slate-500">
+        <div>@(TranscriptCaptureEnabled ? "Transcript capture on" : "Transcript capture off")</div>
+        <div>@LiveCount live · last event @LastEventLabel</div>
+    </div>
+</div>
+
+@code {
+
+    /// <summary>All conversations available to the rail (already merged and newest-first from the host).</summary>
+    [Parameter]
+    [EditorRequired]
+    public IReadOnlyList<Conversation> Conversations { get; set; } = [];
+
+    /// <summary>
+    /// Dashboard's shared selection id. When set and still present it wins; otherwise the rail shows the
+    /// most recently active session without calling <see cref="OnSelect"/> (implicit selection).
+    /// </summary>
+    [Parameter]
+    [EditorRequired]
+    public string SelectedId { get; set; } = string.Empty;
+
+    /// <summary>Invoked only on explicit operator selection (click or keyboard), never on implicit fallback.</summary>
+    [Parameter]
+    public EventCallback<string> OnSelect { get; set; }
+
+    /// <summary>Whether transcript capture is enabled on the router (rail footer).</summary>
+    [Parameter]
+    public bool TranscriptCaptureEnabled { get; set; }
+
+    /// <summary>Optional export affordance; hidden when the host supplies no callback.</summary>
+    [Parameter]
+    public EventCallback OnExportRequested { get; set; }
+
+    private bool _listHasRendered;
+    private string? _implicitId;
+
+    /// <summary>The id currently highlighted: explicit <see cref="SelectedId"/> or the implicit newest.</summary>
+    private string DisplayedId
+    {
+        get
+        {
+            if (!string.IsNullOrEmpty(SelectedId) && Conversations.Any(c => c.Id == SelectedId))
+                return SelectedId;
+            return _implicitId ?? NewestId() ?? string.Empty;
+        }
+    }
+
+    /// <summary>Rail items matching the search box, most recently active first.</summary>
+    private IEnumerable<Conversation> Filtered =>
+        Conversations
+            .Where(c => string.IsNullOrEmpty(ViewState.RailSearch)
+                        || c.Title.Contains(ViewState.RailSearch, StringComparison.OrdinalIgnoreCase)
+                        || c.Id.Contains(ViewState.RailSearch, StringComparison.OrdinalIgnoreCase)
+                        || c.Turns.Any(t => t.Agent.Contains(ViewState.RailSearch, StringComparison.OrdinalIgnoreCase)
+                                            || t.Model.Contains(ViewState.RailSearch, StringComparison.OrdinalIgnoreCase)))
+            .OrderByDescending(NewestTurnUtc);
+
+    /// <summary>How many conversations are currently live.</summary>
+    private int LiveCount => Conversations.Count(c => c.IsLive);
+
+    /// <summary>Compact label for the newest live turn across all sessions.</summary>
+    private string LastEventLabel
+    {
+        get
+        {
+            var live = Conversations.Where(c => c.IsLive).SelectMany(c => c.Turns).ToList();
+            if (live.Count == 0) return "—";
+            var newest = live.Max(t => t.TimestampUtc).ToLocalTime();
+            return newest.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+        }
+    }
+
+    /// <inheritdoc/>
+    protected override void OnParametersSet()
+    {
+        if (string.IsNullOrEmpty(SelectedId) || Conversations.All(c => c.Id != SelectedId))
+        {
+            _implicitId = NewestId();
+        }
+    }
+
+    /// <inheritdoc/>
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (Conversations.Count > 0)
+            _listHasRendered = true;
+    }
+
+    private void OnSearchInput(ChangeEventArgs e) =>
+        ViewState.RailSearch = (string?)e.Value ?? string.Empty;
+
+    /// <summary>Explicit selection: updates Dashboard via <see cref="OnSelect"/>.</summary>
+    private async Task SelectExplicitAsync(string id)
+    {
+        _implicitId = null;
+        ViewState.ClearMessageSelection();
+        await OnSelect.InvokeAsync(id);
+    }
+
+    /// <summary>Moves the listbox selection with Up/Down/Home/End and invokes <see cref="OnSelect"/>.</summary>
+    private async Task NavigateAsync(KeyboardEventArgs e, string currentId)
+    {
+        var list = Filtered.ToList();
+        if (list.Count == 0) return;
+        var index = list.FindIndex(c => c.Id == currentId);
+        if (index < 0) index = 0;
+        var next = e.Key switch
+        {
+            "ArrowUp" => Math.Max(0, index - 1),
+            "ArrowDown" => Math.Min(list.Count - 1, index + 1),
+            "Home" => 0,
+            "End" => list.Count - 1,
+            _ => index
+        };
+        if (list[next].Id != DisplayedId)
+            await SelectExplicitAsync(list[next].Id);
+    }
+
+    private string? NewestId()
+    {
+        var newest = Conversations.OrderByDescending(NewestTurnUtc).FirstOrDefault();
+        return newest?.Id;
+    }
+
+    private static DateTimeOffset NewestTurnUtc(Conversation c) =>
+        c.Turns.Count == 0 ? DateTimeOffset.MinValue : c.Turns.Max(t => t.TimestampUtc);
+
+}

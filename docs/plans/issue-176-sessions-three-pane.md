@@ -1,13 +1,14 @@
 # Plan: Sessions tab three-pane chat layout (#176)
 
-**Status:** Proposed. Awaiting David's approval. No implementation in this change.
+**Status:** Approved (David, Cursor chat, 2026-10-12 — “I sign off”). Also recorded on [#176](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/176#issuecomment-6139245408). Implementation may begin; each implementation PR must link this plan.
 **Issue:** [#176](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/176) — "Sessions tab: three-pane chat layout (session rail · messages · details)".
 **Design reference:** [HTML/CSS implementation of HipChat redesign](https://codepen.io/CucuIonel/pen/yLaLGL) (CodePen; LESS, Font Awesome 4, jQuery jScrollPane). This plan borrows its **structure only**. No markup, CSS, fonts, icons, or scripts are copied. None of its three libraries may be loaded (`DESIGN.md` §4.3; `dashboard.md` §Stack).
 **Related:** [`dashboard.md`](../gui/dashboard.md) (the live Sessions-tab contract), [`DESIGN.md`](../gui/DESIGN.md), [`MOTION.md`](../gui/MOTION.md), [`telemetry.md`](../router/telemetry.md). [#165](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/165)'s conversation archive is a separate store. This plan does not read it.
+**Delivery:** Phase 1 first, then Phase 2 in a follow-up (ADR before any Phase 2 proto/router/GUI change). All §15 defaults accepted (2026-10-12).
 **ADR-0008 Amendment 1:** Binding. This plan is a feature, not a smell refactor. It does not touch `ProxyMiddleware`, `RequestInterceptor`, or `ManagementFacade`. The router changes are small, and Phase 2 starts with an ADR for them (§5.2):
 
-- two read-only RPCs on `TelemetryService`;
-- three read-only `ITranscriptStore` queries (`ListSessionTurnMetadataAsync`, `ListTurnTextsAsync`, `GetSessionAggregateAsync`) and one `ITaxonomyComparisonStore` overload (`LoadForSessionAsync`);
+- two read-only RPCs on `TelemetryService` — **`GetTurnTexts` already exists** (landed with #165 for content-gated previews). Phase 2 extends or reuses that RPC under this plan's size caps rather than inventing a second text RPC; `GetSessionTurnDetails` and the session aggregate remain new;
+- three read-only `ITranscriptStore` queries (`ListSessionTurnMetadataAsync`, `ListTurnTextsAsync` if not already covered by the existing text load path, `GetSessionAggregateAsync`) and one `ITaxonomyComparisonStore` overload (`LoadForSessionAsync`);
 - one DI registration in `ProxyServer`.
 
 Phase 1 also carries one small router prerequisite (§5.7): `PersistentConversationTurnTracker` seeds its counter from the transcripts as well as the usage ledger, through one more read-only `ITranscriptStore` member (`GetMaxTurnNumber`). Without it, the per-turn merge cannot trust turn numbers across a restart.
@@ -1078,7 +1079,7 @@ All unit and bUnit tests, each well under the 5-second ceiling. JS has no engine
 
 ## 15. Decisions for David at review
 
-Each has a default that this plan already assumes.
+**Accepted (David, 2026-10-12):** all ten defaults below.
 
 1. **Host file name.** Keep `LiveStream.razor` (default) to limit churn, or rename it to `SessionsTab.razor` in Phase 1.
 2. **Details tab labels.** Icon plus short label (default), or icon-only as in the CodePen.
@@ -1090,7 +1091,7 @@ Each has a default that this plan already assumes.
    - `GetTurnTexts` caps: 262,144 characters per side, 2 MiB per response, 50 ids per call.
 4. **Idle threshold.** 5 minutes.
 5. **ADR scope.** The ADR itself is required before Phase 2 (§5.2), so the only open question is its scope. Default: one ADR covering both RPCs and their size caps.
-6. **Full text** comes from the batched `GetTurnTexts` RPC (the deviation recorded above) rather than the session RPC.
+6. **Full text** comes from the batched `GetTurnTexts` RPC (the deviation recorded above) rather than the session RPC. (`GetTurnTexts` already exists from #165; Phase 2 reuses/extends it.)
 7. **Implicit selection** never calls `OnSelect`, which preserves Cost Analytics' All Sessions default. Explicit selection, by pointer or keyboard, always does.
 8. **History-only dot** is muted grey, not the CodePen's red.
 9. **Divider defaults.** 22% and 28%, clamped to 15–35% and 20–40%, and further to the effective pixel bounds that keep every pane at its minimum (§6.4).

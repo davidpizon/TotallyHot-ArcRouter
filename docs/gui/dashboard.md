@@ -49,7 +49,7 @@ sub-view.
 | App shell | Blazor WebAssembly (`src/TotallyHotArcRouter.Gui.Web`, cross-platform - any modern browser), served by the router over gRPC-Web on the same origin as the static files (ADR-0011); the router-hosted files are on the web port (`WebInterfaceOptions.Port`, default `47104`) |
 | UI framework | Razor components (`src/TotallyHotArcRouter.Gui.Components/Components/`), running client-side in the browser's WASM runtime rather than a `BlazorWebView` host process |
 | Styling | A static stylesheet (`wwwroot/css/app.css`) containing the dashboard's compiled Tailwind utility classes plus custom rules; state-driven colors are inline styles in the components |
-| Charts | [Apache ECharts](https://echarts.apache.org/) (`echarts.min.js` vendored under `wwwroot/lib/echarts`, Apache-2.0), driven by `wwwroot/js/echarts-interop.js` via the shared `<EChart>` host - the seven bespoke Cost Analytics charts plus Model Distribution's grouped bars and donut; plus a hand-rolled inline SVG sparkline (no chart library) for the Sessions summary card |
+| Charts | [Apache ECharts](https://echarts.apache.org/) (`echarts.min.js` vendored under `wwwroot/lib/echarts`, Apache-2.0), driven by `wwwroot/js/echarts-interop.js` via the shared `<EChart>` host - the seven bespoke Cost Analytics charts plus Model Distribution's grouped bars and donut; plus a hand-rolled inline SVG sparkline (no chart library) for the Sessions details Session tab |
 | Icons | Small inline SVG glyphs (`Components/Icon.razor`) |
 | Chart data logic | `src/TotallyHotArcRouter.Gui.Charts/` - a plain `net10.0` class library holding the pure data-transformation math behind the charts (cumulative token series, sparkline coordinate normalization). See `TotallyHotArcRouter.Gui.Charts.Tests/`. |
 | Console tab logic | `src/TotallyHotArcRouter.Gui.Console/` - same pattern as the chart data logic above: a plain `net10.0` class library holding `LogLevelColorMapper` and the bounded `LogBuffer`. See `TotallyHotArcRouter.Gui.Console.Tests/`. |
@@ -106,23 +106,20 @@ flowchart TD
 
 ### Tabs
 
-1. **Sessions** (`LiveStream.razor`, default tab, formerly "Live Stream") - a conversation-centric view
-   that starts as a **full-width, oldest-first list of session cards** and opens into a two-panel split
-   view (session detail left, chat reproduction right) only once a card is double-clicked; single-clicking
-   a card just selects it (shared with Cost Analytics' initial-session behavior below) without opening the
-   split view. The split view's divider can be dragged to resize (pointer handling in
-   `wwwroot/js/split-pane.js`; left panel defaults to 35% width, clamped 20-65%), and a "Back to Sessions"
-   button in the left panel collapses back to the full-width list.
-   - **Data sources, merged** (`Dashboard.razor`'s `MergedSessionConversations()`): the live gRPC stream
-     (`Services/LiveDataStore.cs`, empty until the proxy has forwarded at least one request this GUI
-     session; see [`../router/telemetry.md`](../router/telemetry.md)) plus **persisted history** from the
-     router's `request_transcripts` table (`Services/PersistedSessionStore.cs`, loaded once on tab
-     activation via the `TelemetryService.ListPersistedSessions` RPC - see
-     [`../router/sessions-tab-training-data-plan.md`](../router/sessions-tab-training-data-plan.md)), so a
-     session survives a GUI restart instead of existing only in the current connection's live buffer. Live
-     data wins for any session id present in both. Persisted history requires transcript capture to be on
-     (`TranscriptOptions.Enabled`, the System Settings window's Transcription Capture toggle); with it off,
-     the Sessions tab shows only the live stream, same as before this merge existed.
+1. **Sessions** (`LiveStream.razor`, default tab, formerly "Live Stream") — always-on **three-pane**
+   layout (#176): a left **session rail**, a middle **messages** pane (request + response row per turn),
+   and a right **details** pane (Message / Routing / Session tabs). There is no card grid and no
+   double-click split. Two draggable, keyboard-resizable dividers (`wwwroot/js/split-pane.js`) default
+   to 22% rail / 28% details (clamped with pixel minima; widths persist in `localStorage`). Below about
+   908 px viewport width the tab scrolls horizontally (`.ls-sessions-scroll`) so nothing is clipped.
+   Explicit rail click/keyboard selection updates Dashboard's shared session id (and Cost Analytics'
+   initial scope); implicit selection of the newest session when nothing is selected does **not**.
+   - **Data sources, merged** (`Dashboard.razor`'s `MergedSessionConversations()` →
+     `SessionMerger.Merge`): the live gRPC stream (`Services/LiveDataStore.cs`) plus **persisted history**
+     (`Services/PersistedSessionStore.cs` / `ListPersistedSessions`). Merge is **per turn** (keyed by
+     turn number), so a GUI restart that then sees one new live turn still shows earlier persisted turns
+     of that session. Persisted history requires transcript capture to be on
+     (`TranscriptOptions.Enabled`); with it off, the Sessions tab shows only the live stream.
      - **Persisted history is previews under a byte budget** ([#179](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/179),
        [ADR-0023](../adr/0023-send-display-previews-under-a-byte-budget-on-the-persisted-session-list.md)).
        Each persisted turn's prompt and response arrive as the same 2,000-character previews live turns
@@ -133,26 +130,19 @@ flowchart TD
        `.ls-history-notice`): a failed load, whether the router is unreachable or the read was rejected,
        shows "Persisted history couldn't be loaded: …" instead of silently showing live sessions only. A load
        that left older turns out shows "Showing the newest N persisted turns."
-   - Card list (`ConversationCard.razor`): a searchable, full-width list of session cards. Each card shows the
-     conversation title, first → last turn timestamps,
-     total session cost, total tokens (K/M notation), turn count, and color-dotted names of the first
-     two distinct agents; conversations containing fallback turns get an amber `⚠` badge and left
-     border, and a session with at least one turn folded into the router's live-learning corpus
-     (`memory_entries`, i.e. `Conversation.IsUsedForTraining`) gets a green 🎓 "used for live training"
-     badge. Search filters by title, session ID, agent name, or model name.
-   - Split view, left panel top (`ConversationSummary.razor`): a compact pinned summary card for the selected
-     conversation that stays visible while the turn list scrolls. A title row (title, fallback badge
-     when applicable, session ID + time range) above a one-line stat strip - Total Cost, Total Tokens,
-     Avg ROI, Turns, and a **Trend** sparkline (inline SVG polyline, per-turn total tokens, built from
-     `TotallyHot.ArcRouter.Gui.Charts.SparklineLayout` - only rendered when the conversation has turns) - each
-     stat with a tooltip explaining the metric.
-   - Split view, right panel (`SessionConversationPane.razor`): a chat-style, chronological reproduction
-     of the session's turns - a labeled separator per turn (turn number, agent chip, model, timestamp)
-     above a request bubble (left) and a response bubble (right), tinted with the turn's agent color
-     (`ColorUtils.GetColorForAgent`). This split view replaced `TurnCard.razor` (the compact two-line
-     card with the "ROI, Cost, Tok P/C, Steps, Cache, TTFT, Ctx, Model" stat strip and the
-     click-to-expand routing-decision drill-down); once nothing instantiated it, the component, its
-     tests, and its CSS were deleted.
+   - **Session rail** (`SessionRail.razor` / `SessionRailItem.razor`): newest-first listbox with status
+     dots (live active / live idle at 5 minutes / history only), title, ⚠ fallback and 🎓 training
+     badges, and a meta line (last-active time · turns · cost). Footer shows transcript capture on/off,
+     live session count, and last live event. Search filters by title, session id, agent, or model.
+   - **Messages pane** (`SessionMessagesPane.razor` / `SessionMessageRow.razor`): title bar (title, turns,
+     cost, in-session search over loaded messages), two selectable rows per turn (Client / routed model),
+     measured Show more clamp (`wwwroot/js/chat-scroll.js`), stick-to-bottom within 24 px with an
+     "N new ↓" pill when scrolled up, and "Show earlier turns" paging (200-turn windows).
+   - **Details pane** (`SessionDetailsPane.razor` + Message / Routing / Session tabs): per-side message
+     metadata, routing decision / overhead / steps (revived `.ds-step-warning` / `.ds-step-info`), and
+     session overview (totals over loaded turns, sparkline, models used). Live-only fields show "—" on
+     persisted turns. UI state that must survive tab switches lives in `SessionsViewState`
+     (singleton).
    - Tooltips: metric tooltips across the tab are floating tooltips driven by `data-tip` attributes
      (`wwwroot/js/tooltips.js`, a single body-level element) rather than native `title` attributes,
      so they render reliably and are never clipped by scroll containers.
@@ -400,9 +390,9 @@ of the Windows-only Gui project so it's unit-testable on any platform:
   by `ChartJsonTests`. `ChartPalette` provides the deterministic per-model colors; `ChartJson`
   serializes the models for interop.
 - `TokenCompoundingSeries.Build(turns)` - cumulative prompt/completion token series ordered by turn
-  number, feeding the `ConversationSummary` sparkline (and formerly the Cost Analytics token chart).
+  number, feeding the Sessions `SessionOverviewTab` sparkline (and formerly the Cost Analytics token chart).
 - `TokenCompoundingSeries.BuildSparkline(turns)` - compact per-turn (non-cumulative) total-token
-  series, feeding the `ConversationSummary` sparkline.
+  series, feeding the Sessions `SessionOverviewTab` sparkline.
 - `SparklineLayout.Normalize(values, width, height, padding)` - scales a value series into SVG
   polyline points (largest value at the smallest Y, since SVG's Y axis grows downward).
 

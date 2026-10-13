@@ -45,6 +45,9 @@ builder.Services.AddSingleton<IRouterChannelProvider>(sp =>
 // Live routing telemetry from the router (see Services/LiveDataStore.cs). A singleton so the gRPC-Web
 // stream and accumulated conversation state survive navigation between tabs.
 builder.Services.AddSingleton<LiveDataStore>();
+// Sessions-tab UI state that survives Dashboard's @key tab teardown (#176 §6.5).
+builder.Services.AddSingleton<SessionsViewState>();
+builder.Services.AddSingleton(TimeProvider.System);
 // Backs the Governance tab's provider/credential/model manager (see Services/ProviderAdminStore.cs). No
 // adminToken: this host authenticates via the ADR-0012 session cookie the browser sends automatically
 // on every same-origin call, not a management-token header - see ProviderAdminStore's remarks.

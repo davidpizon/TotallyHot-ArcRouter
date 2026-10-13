@@ -1,8 +1,9 @@
 using TotallyHot.ArcRouter.Telemetry;
+using TotallyHot.ArcRouter.Transcripts;
 
 namespace TotallyHot.ArcRouter.Tests.Telemetry;
 
-/// <summary>Covers <see cref="PersistentConversationTurnTracker"/>.</summary>
+/// <summary>Covers <see cref="PersistentConversationTurnTracker"/>, including the #176 §5.7 transcript seed.</summary>
 public class PersistentConversationTurnTrackerTests
 {
     [Theory]
@@ -114,6 +115,56 @@ public class PersistentConversationTurnTrackerTests
         Assert.Equal(expected: expected, actual: results);
     }
 
+    [Fact]
+    public void NextTurn_TranscriptAheadOfLedger_SeedsFromTranscript()
+    {
+        // Restart case: ledger max 4, transcript for turn 5 with no ledger row → first call returns 6.
+        var ledger = new StubLedger();
+        ledger.MaxTurnBySession["sess-1"] = 4;
+        var transcripts = new StubTranscriptStore();
+        transcripts.MaxTurnBySession["sess-1"] = 5;
+
+        var tracker = new PersistentConversationTurnTracker(ledger: ledger, transcripts: transcripts);
+
+        Assert.Equal(6, actual: tracker.NextTurn("sess-1"));
+    }
+
+    [Fact]
+    public void NextTurn_LedgerAheadOfTranscript_SeedsFromLedger()
+    {
+        var ledger = new StubLedger();
+        ledger.MaxTurnBySession["sess-1"] = 7;
+        var transcripts = new StubTranscriptStore();
+        transcripts.MaxTurnBySession["sess-1"] = 3;
+
+        var tracker = new PersistentConversationTurnTracker(ledger: ledger, transcripts: transcripts);
+
+        Assert.Equal(8, actual: tracker.NextTurn("sess-1"));
+    }
+
+    [Fact]
+    public void NextTurn_NullTranscriptStore_SeedsFromLedgerAlone()
+    {
+        var ledger = new StubLedger();
+        ledger.MaxTurnBySession["sess-1"] = 4;
+
+        var tracker = new PersistentConversationTurnTracker(ledger: ledger, transcripts: null);
+
+        Assert.Equal(5, actual: tracker.NextTurn("sess-1"));
+    }
+
+    [Fact]
+    public void NextTurn_TranscriptStoreReturningZero_SeedsFromLedgerAlone()
+    {
+        var ledger = new StubLedger();
+        ledger.MaxTurnBySession["sess-1"] = 4;
+        var transcripts = new StubTranscriptStore(); // empty → 0
+
+        var tracker = new PersistentConversationTurnTracker(ledger: ledger, transcripts: transcripts);
+
+        Assert.Equal(5, actual: tracker.NextTurn("sess-1"));
+    }
+
     private sealed class StubLedger : IUsageLedger
     {
         public Dictionary<string, int> MaxTurnBySession { get; } = new(StringComparer.Ordinal);
@@ -140,6 +191,61 @@ public class PersistentConversationTurnTrackerTests
         {
             throw new NotSupportedException("Not exercised by the turn tracker.");
         }
+    }
+
+    /// <summary>Minimal <see cref="ITranscriptStore"/> that only implements <see cref="ITranscriptStore.GetMaxTurnNumber"/>.</summary>
+    private sealed class StubTranscriptStore : ITranscriptStore
+    {
+        public Dictionary<string, int> MaxTurnBySession { get; } = new(StringComparer.Ordinal);
+
+        public Task<long?> InsertAsync(TranscriptRecord record, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task UpdateOutcomeAsync(string correlationId, double? score, bool isJudgeScored = false,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<long>> LoadUnembeddedScoredAsync(int limit,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<TranscriptRecord?> GetTranscriptAsync(long id, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task LinkMemoryEntryAsync(long transcriptId, long memoryEntryId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<long>> LoadPendingQualityRescanAsync(string scorerVersion, int limit,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task MarkQualityRescannedAsync(long transcriptId, string scorerVersion, double? score,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<int> GetRowCountAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<int> DeleteOldestAsync(int count, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<int> DeleteBeforeAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<int> DeleteAllAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyDictionary<long, string>> LoadPromptTextByMemoryEntryIdAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyDictionary<string, ModelTokenAverage>> LoadObservedTokenAveragesAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public int GetMaxTurnNumber(string sessionId) =>
+            MaxTurnBySession.GetValueOrDefault(key: sessionId, 0);
     }
 
     private sealed class FakeTimeProvider(DateTimeOffset start) : TimeProvider

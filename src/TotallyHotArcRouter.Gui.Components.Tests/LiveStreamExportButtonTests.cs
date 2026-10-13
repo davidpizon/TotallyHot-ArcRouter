@@ -30,15 +30,24 @@ public sealed class LiveStreamExportButtonTests
                 ResponseSummary: null, TimestampUtc: DateTimeOffset.MinValue)
         ]);
 
+    private static BunitContext NewContext()
+    {
+        var ctx = new BunitContext();
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        ctx.Services.AddSingleton<IClipboardService>(new FakeClipboardService());
+        ctx.Services.AddSingleton(new SessionsViewState());
+        ctx.Services.AddSingleton(TimeProvider.System);
+        return ctx;
+    }
+
     [Fact]
     public void Has_no_Export_button_when_the_host_supplies_no_callback()
     {
-        using var ctx = new BunitContext();
-        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        using var ctx = NewContext();
 
         var cut = ctx.Render<LiveStream>(p => p
-            .Add(parameterSelector: c => c.Conversations, value: [MakeConversation()])
-            .Add(parameterSelector: c => c.SelectedId, value: string.Empty));
+            .Add(c => c.Conversations, [MakeConversation()])
+            .Add(c => c.SelectedId, string.Empty));
 
         cut.FindAll("[data-testid='sessions-export']").Should().BeEmpty();
     }
@@ -46,8 +55,7 @@ public sealed class LiveStreamExportButtonTests
     [Fact]
     public async Task Pressing_Export_runs_the_callback()
     {
-        await using var ctx = new BunitContext();
-        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        await using var ctx = NewContext();
         var requested = 0;
 
         var cut = ctx.Render<LiveStream>(p => p
@@ -63,10 +71,7 @@ public sealed class LiveStreamExportButtonTests
     [Fact]
     public async Task Empty_list_still_shows_Export_when_a_callback_is_supplied()
     {
-        await using var ctx = new BunitContext();
-        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
-        // Empty state renders ClientDropInPanel, which injects the clipboard service.
-        ctx.Services.AddSingleton<IClipboardService>(new FakeClipboardService());
+        await using var ctx = NewContext();
         var requested = 0;
 
         var cut = ctx.Render<LiveStream>(p => p

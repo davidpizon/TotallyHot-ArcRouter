@@ -1,0 +1,183 @@
+@* Session tab of the Sessions details pane (#176 §7): identity, totals over loaded turns, models used. *@
+@inject IClipboardService Clipboard
+@inject TimeProvider Time
+
+<div class="space-y-3">
+    <section>
+        <div class="ls-stat-label mb-1">Identity</div>
+        <div class="ls-kv-grid">
+            <span>Title</span><span class="ls-truncate">@Conversation.Title</span>
+            <span>Session id</span>
+            <span class="flex items-center gap-1 min-w-0">
+                <span class="font-mono ls-truncate">@Conversation.Id</span>
+                <button type="button" class="shrink-0 text-slate-500 hover:text-slate-200" aria-label="Copy session id" @onclick="CopyIdAsync">
+                    <Icon Name="copy" Size="14"/>
+                </button>
+            </span>
+            <span>Status</span><span>@StatusLabel</span>
+            <span>Untracked</span><span>@UntrackedLabel</span>
+            <span>Used for training</span><span>@(Conversation.IsUsedForTraining ? "Yes" : "Not in the loaded history")</span>
+            <span>First → last</span>
+            <span class="font-mono" tabindex="0" aria-describedby="ls-tooltip"
+                  data-tip="First and last loaded turn (over @Conversation.Turns.Count loaded turns)">
+                @Conversation.FirstTimestamp → @Conversation.LastTimestamp
+            </span>
+        </div>
+    </section>
+
+    <section>
+        <div class="ls-stat-label mb-1">Totals <span class="normal-case tracking-normal text-slate-600">(over @Conversation.Turns.Count loaded turns)</span></div>
+        <div class="ls-kv-grid">
+            <span>Total cost</span>
+            <span class="font-mono metric-positive ls-tip" tabindex="0" aria-describedby="ls-tooltip" data-tip="@TotalCostTip">
+                @(Conversation.UnpricedTurns > 0 ? "≥ " : "")$@Conversation.TotalCost.ToString("F6", CultureInfo.InvariantCulture)
+                @if (Conversation.UnpricedTurns > 0)
+                {
+                    <span class="ds-badge-warning ml-1 rounded px-1 py-0.5 text-xs font-semibold">@Conversation.UnpricedTurns unpriced</span>
+                }
+            </span>
+            <span>Prompt tokens</span>
+            <span class="font-mono">@TokenTotal(Conversation.TotalPromptTokens, TurnsMissingPrompt)</span>
+            <span>Completion tokens</span>
+            <span class="font-mono">@TokenTotal(Conversation.TotalCompletionTokens, TurnsMissingCompletion)</span>
+            <span>Turns</span><span class="font-mono">@Conversation.Turns.Count</span>
+            <span>Fallback turns</span><span>@FallbackTurnsLabel</span>
+            @if (SparklinePoints.Length > 0)
+            {
+                <span>Trend</span>
+                <span class="ls-tip" tabindex="0" aria-describedby="ls-tooltip" data-tip="Total tokens per loaded turn">
+                    <svg width="@SparklineWidth" height="@SparklineHeight" viewBox="0 0 @SparklineWidth @SparklineHeight" aria-hidden="true">
+                        <polyline points="@SparklinePoints" fill="none" class="sparkline-line" stroke-width="1.5"/>
+                    </svg>
+                    <span class="text-slate-600 ml-1">loaded turns</span>
+                </span>
+            }
+        </div>
+    </section>
+
+    <section>
+        <div class="ls-stat-label mb-1">Models used <span class="normal-case tracking-normal text-slate-600">(loaded turns)</span></div>
+        @if (ModelsUsed.Count == 0)
+        {
+            <p class="text-xs text-slate-500">No models in loaded turns.</p>
+        }
+        else
+        {
+            <ul class="space-y-1">
+                @foreach (var m in ModelsUsed)
+                {
+                    <li class="flex items-center gap-2 text-xs">
+                        <span class="ls-msg-model-dot" style="--agent-color:@m.Color" aria-hidden="true"></span>
+                        <span class="ls-truncate flex-1">@m.Model</span>
+                        <span class="font-mono text-slate-500 shrink-0">@m.Turns · @m.CostShare · @m.LastUsed</span>
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+</div>
+
+@code {
+
+    /// <summary>The conversation whose session-level overview is shown.</summary>
+    [Parameter]
+    [EditorRequired]
+    public Conversation Conversation { get; set; } = null!;
+
+    private const double SparklineWidth = 48;
+    private const double SparklineHeight = 16;
+
+    private int TurnsMissingPrompt => Conversation.Turns.Count(t => t.PromptTokens is null);
+    private int TurnsMissingCompletion => Conversation.Turns.Count(t => t.CompletionTokens is null);
+
+    private string StatusLabel
+    {
+        get
+        {
+            if (!Conversation.IsLive) return "history";
+            var newest = Conversation.Turns.Count == 0
+                ? DateTimeOffset.MinValue
+                : Conversation.Turns.Max(t => t.TimestampUtc);
+            return Time.GetUtcNow() - newest < SessionsViewState.IdleThreshold ? "active" : "idle";
+        }
+    }
+
+    private string UntrackedLabel => Conversation.IsSessionSynthesized switch
+    {
+        true => "Yes",
+        false => "No",
+        null => "Unknown (not persisted)"
+    };
+
+    private string FallbackTurnsLabel
+    {
+        get
+        {
+            var live = Conversation.Turns.Where(t => t.IsLive).ToList();
+            if (live.Count == 0) return "—";
+            var n = live.Count(t => t.IsFallback);
+            return $"{n} of {live.Count} live turns";
+        }
+    }
+
+    private string TotalCostTip => Conversation.UnpricedTurns > 0
+        ? $"Sum of priced LLM API costs over loaded turns. {Conversation.UnpricedTurns} turn(s) had no known cost — the true total is at least this much."
+        : "Sum of LLM API costs over loaded turns";
+
+    private string SparklinePoints
+    {
+        get
+        {
+            var turns = Conversation.Turns
+                .Select(t => new TurnTokenPoint(t.TurnNumber, t.PromptTokens ?? 0, t.CompletionTokens ?? 0))
+                .ToList();
+            var values = TokenCompoundingSeries.BuildSparkline(turns);
+            if (values.Count == 0) return string.Empty;
+            var points = SparklineLayout.Normalize(values, SparklineWidth, SparklineHeight);
+            return string.Join(' ', points.Select(p =>
+                $"{p.X.ToString("F1", CultureInfo.InvariantCulture)},{p.Y.ToString("F1", CultureInfo.InvariantCulture)}"));
+        }
+    }
+
+    private IReadOnlyList<ModelUsageLine> ModelsUsed
+    {
+        get
+        {
+            var totalCost = Conversation.Turns.Sum(t => t.TotalCost ?? 0m);
+            return Conversation.Turns
+                .GroupBy(t => t.RoutedModel ?? t.Model)
+                .Select(g =>
+                {
+                    var cost = g.Sum(t => t.TotalCost ?? 0m);
+                    var share = totalCost > 0
+                        ? (cost / totalCost * 100m).ToString("F0", CultureInfo.InvariantCulture) + "%"
+                        : "—";
+                    var last = g.Max(t => t.TimestampUtc);
+                    return new ModelUsageLine(
+                        g.Key,
+                        ChartPalette.ColorFor(g.Key),
+                        g.Count(),
+                        share,
+                        last == default ? "—" : last.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture),
+                        last);
+                })
+                .OrderByDescending(m => m.LastUtc)
+                .ToList();
+        }
+    }
+
+    private static MarkupString TokenTotal(int sum, int missing)
+    {
+        if (missing == 0)
+            return new MarkupString(sum.ToString("N0", CultureInfo.InvariantCulture));
+        var tip = $"{missing} turn(s) without counts";
+        return new MarkupString(
+            $"≥ {sum.ToString("N0", CultureInfo.InvariantCulture)} <span class=\"text-slate-500\" tabindex=\"0\" aria-describedby=\"ls-tooltip\" data-tip=\"{tip}\">({missing} without counts)</span>");
+    }
+
+    private async Task CopyIdAsync() => await Clipboard.SetTextAsync(Conversation.Id);
+
+    private sealed record ModelUsageLine(
+        string Model, string Color, int Turns, string CostShare, string LastUsed, DateTimeOffset LastUtc);
+
+}
