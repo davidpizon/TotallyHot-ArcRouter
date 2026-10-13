@@ -1,4 +1,3 @@
-using System.Text;
 using TotallyHot.ArcRouter.Sessions.Export;
 
 namespace TotallyHot.ArcRouter.Tests.Sessions.Fixtures;
@@ -93,7 +92,7 @@ public sealed class ConversationZipReaderTests : IDisposable
     [Fact]
     public void ReadAll_NonAsciiRequest_RoundTripsExactly()
     {
-        var request = Encoding.UTF8.GetBytes("""{"messages":[{"role":"user","content":"café ⌘"}]}""");
+        var request = """{"messages":[{"role":"user","content":"café ⌘"}]}"""u8.ToArray();
         var zip = SyntheticConversationZip.Write(
             clientResponse: """{"choices":[{"message":{"content":"ok"}}]}"""u8.ToArray(),
             clientRequest: request,

@@ -50,9 +50,8 @@ internal static class ConversationZipReader
 
         var turns = new List<ConversationZipTurn>();
         using var reader = new StreamReader(new MemoryStream(turnsBytes), Encoding.UTF8);
-        string? line;
         var lineNumber = 0;
-        while ((line = reader.ReadLine()) is not null)
+        while (reader.ReadLine() is { } line)
         {
             lineNumber++;
             if (string.IsNullOrWhiteSpace(line)) continue;
@@ -295,7 +294,7 @@ internal static class ConversationZipReader
 
     private static bool TryGuid(JsonElement root, string name, out Guid value)
     {
-        value = default;
+        value = Guid.Empty;
         return root.TryGetProperty(name, out var element) &&
                element.ValueKind == JsonValueKind.String &&
                Guid.TryParse(element.GetString(), out value);

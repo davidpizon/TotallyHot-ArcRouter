@@ -38,8 +38,8 @@ public sealed class ConversationZipDemoTests : IDisposable
     public void Reader_FeedsResponseTextExtractor()
     {
         const string expected = "phase-5 reply text";
-        var response = Encoding.UTF8.GetBytes(
-            """{"id":"chatcmpl-demo","choices":[{"message":{"role":"assistant","content":"phase-5 reply text"}}]}""");
+        var response =
+            """{"id":"chatcmpl-demo","choices":[{"message":{"role":"assistant","content":"phase-5 reply text"}}]}"""u8.ToArray();
         var zip = SyntheticConversationZip.Write(response, directory: Path.Combine(_work, "text"));
 
         var turn = Assert.Single(ConversationZipReader.ReadAll(zip));

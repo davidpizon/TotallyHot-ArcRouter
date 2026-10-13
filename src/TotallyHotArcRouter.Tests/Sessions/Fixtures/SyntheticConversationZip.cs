@@ -129,14 +129,12 @@ internal static class SyntheticConversationZip
 
         var manifestBytes = Encoding.UTF8.GetBytes(manifest.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
 
-        using (var file = File.Create(zipPath))
-        using (var zip = new ZipArchive(file, ZipArchiveMode.Create))
-        {
-            WriteEntry(zip, "manifest.json", manifestBytes);
-            WriteEntry(zip, "turns.jsonl", turnsBytes);
-            WriteEntry(zip, requestPath, clientRequest);
-            WriteEntry(zip, responsePath, clientResponse);
-        }
+        using var file = File.Create(zipPath);
+        using var zip = new ZipArchive(file, ZipArchiveMode.Create);
+        WriteEntry(zip, "manifest.json", manifestBytes);
+        WriteEntry(zip, "turns.jsonl", turnsBytes);
+        WriteEntry(zip, requestPath, clientRequest);
+        WriteEntry(zip, responsePath, clientResponse);
 
         return zipPath;
     }
