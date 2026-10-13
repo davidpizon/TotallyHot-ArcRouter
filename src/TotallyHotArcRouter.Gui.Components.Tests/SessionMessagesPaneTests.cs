@@ -221,7 +221,7 @@ public sealed class SessionMessagesPaneTests
     public void Newly_appended_live_turns_receive_the_row_enter_append_class()
     {
         using var ctx = NewContext();
-        var first = MakeConversation(1);
+        var first = MakeConversation();
         var cut = ctx.Render<SessionMessagesPane>(p => p
             .Add(c => c.Conversation, first));
 
