@@ -110,6 +110,7 @@
     /// <summary>One grade-mix legend chip: letter, fill color, and mix percent.</summary>
     private sealed record GradeLegendItem(string Grade, string Color, decimal Percent);
 
+    /// <inheritdoc/>
     protected override async Task OnInitializedAsync()
     {
         await ReloadAsync();
