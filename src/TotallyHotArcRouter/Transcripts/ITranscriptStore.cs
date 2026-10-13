@@ -277,6 +277,23 @@ public interface ITranscriptStore
     {
         return Task.FromResult<IReadOnlyList<StoredTurnText>>([]);
     }
+
+    /// <summary>
+    /// Returns the highest turn number recorded for <paramref name="sessionId"/> in
+    /// <c>request_transcripts</c>, or 0 when none exist. Used by
+    /// <see cref="Telemetry.PersistentConversationTurnTracker"/> so a restart never reissues a turn number
+    /// that already has a transcript row (#176 §5.7).
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not gated on <see cref="TranscriptOptions.Enabled"/>: capture can be off at restart
+    /// while earlier transcripts still sit in the database, and a gated read would return 0 and let the
+    /// tracker reissue the last transcribed turn's number. Reads an already-existing database only; never
+    /// creates a file, directory, or schema. A missing database file, or a file with no
+    /// <c>request_transcripts</c> table, returns 0 without modifying the file.
+    /// </remarks>
+    /// <param name="sessionId">The session id whose highest turn number is needed.</param>
+    /// <returns>The highest turn suffix found for the session, or 0.</returns>
+    int GetMaxTurnNumber(string sessionId) => 0;
 }
 
 /// <summary>

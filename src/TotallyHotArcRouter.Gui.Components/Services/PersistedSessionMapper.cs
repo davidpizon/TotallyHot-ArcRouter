@@ -29,17 +29,33 @@ public static class PersistedSessionMapper
     {
         ArgumentNullException.ThrowIfNull(conversation);
 
+        var turns = conversation.Turns.Select(ToModel).ToList();
+        // Re-total from the now-nullable per-turn values so the totals, UnpricedTurns and a later per-turn
+        // merge all agree; the aggregator's own totals are only used for a conversation with no turns (#176 §5.1).
+        var totalCost = turns.Count == 0
+            ? conversation.TotalCostUsd
+            : turns.Sum(t => t.TotalCost ?? 0m);
+        var totalPrompt = turns.Count == 0
+            ? conversation.TotalInputTokens
+            : turns.Sum(t => t.PromptTokens ?? 0);
+        var totalCompletion = turns.Count == 0
+            ? conversation.TotalOutputTokens
+            : turns.Sum(t => t.CompletionTokens ?? 0);
+
         return new Conversation(
             Id: conversation.SessionId,
             Title: BuildTitle(conversation),
             FirstTimestamp: FormatTimestamp(conversation.FirstTimestampUtc),
             LastTimestamp: FormatTimestamp(conversation.LastTimestampUtc),
-            TotalCost: conversation.TotalCostUsd,
-            TotalPromptTokens: conversation.TotalInputTokens,
-            TotalCompletionTokens: conversation.TotalOutputTokens,
+            TotalCost: totalCost,
+            TotalPromptTokens: totalPrompt,
+            TotalCompletionTokens: totalCompletion,
             false,
-            Turns: [.. conversation.Turns.Select(ToModel)],
-            IsUsedForTraining: conversation.IsUsedForTraining);
+            Turns: turns,
+            UnpricedTurns: turns.Count(t => t.TotalCost is null),
+            IsUsedForTraining: conversation.IsUsedForTraining,
+            IsLive: false,
+            IsSessionSynthesized: null);
     }
 
     /// <summary>
@@ -53,10 +69,10 @@ public static class PersistedSessionMapper
             Agent: turn.RoutedModel,
             Model: turn.RoutedModel,
             TurnNumber: turn.TurnNumber,
-            PromptTokens: turn.InputTokens ?? 0,
-            CompletionTokens: turn.OutputTokens ?? 0,
+            PromptTokens: turn.InputTokens,
+            CompletionTokens: turn.OutputTokens,
             0m,
-            TotalCost: turn.CostUsd ?? 0m,
+            TotalCost: turn.CostUsd,
             0,
             0m,
             0,
@@ -68,7 +84,8 @@ public static class PersistedSessionMapper
             TimestampUtc: turn.TimestampUtc,
             RequestedModel: turn.RequestedModel,
             RoutedModel: turn.RoutedModel,
-            TranscriptId: turn.TranscriptId);
+            TranscriptId: turn.TranscriptId,
+            IsLive: false);
     }
 
     /// <summary>Builds the conversation card's display title for a persisted session.</summary>

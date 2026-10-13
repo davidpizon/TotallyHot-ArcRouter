@@ -36,15 +36,10 @@
    --------------------------------------------------------------------------- */
 
 /* Left panel default width; dragging the divider overrides this inline. */
-.ls-left {
-  width: 35%;
-  min-width: 220px;
-}
-
-/* Full-height drag handle between the panels (wired up by js/split-pane.js). */
+/* Full-height drag handle between Sessions panes (wired up by js/split-pane.js). */
 .ls-divider {
-  flex: 0 0 8px;
-  margin: 0 2px;
+  flex: 0 0 12px;
+  margin: 0;
   cursor: col-resize;
   border-radius: 4px;
   position: relative;
@@ -53,8 +48,10 @@
 }
 
 .ls-divider:hover,
-.ls-divider.dragging {
+.ls-divider.dragging,
+.ls-divider:focus-visible {
   background: var(--border-button);
+  outline: none;
 }
 
 .ls-divider::after {
@@ -579,27 +576,6 @@ input[type="number"]:focus {
   color: var(--text-muted);
 }
 
-/* 3. Card Selection State Classes */
-.card-selected {
-  background: var(--surface-elevated-a);
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-card);
-}
-
-.card-unselected {
-  background: var(--surface-card);
-  border: 1px solid var(--border-button);
-  border-radius: var(--radius-card);
-}
-
-.card-fallback {
-  border-left: 3px solid var(--color-warning);
-}
-
-.card-selected.card-fallback {
-  border-left-color: var(--color-warning);
-}
-
 /* 4. Toggle/Indicator State Classes */
 .indicator-active {
   background: var(--color-success);
@@ -1012,6 +988,19 @@ input[type="number"]:focus {
   color: #fca5a5;
 }
 
+/* Revived for the Sessions Routing tab step log (#176 §4.4; DESIGN.md §2 recorded values). */
+.ds-step-warning {
+  background: rgba(245, 158, 11, 0.12);
+  border-left: 2px solid #f59e0b;
+  color: #fcd34d;
+}
+
+.ds-step-info {
+  background: rgba(56, 189, 248, 0.1);
+  border-left: 2px solid #38bdf8;
+  color: #7dd3fc;
+}
+
 /* ---- Error/alert boxes — prefer these over inline `background:...; border: ...; color: ...` ---- */
 .ds-alert-critical {
   background: #ef444411;
@@ -1270,6 +1259,17 @@ input[type="number"] {
   animation-delay: calc(var(--i, 0) * 30ms);
 }
 
+/* Message rows append at the bottom, so they rise into place (#176 §9; MOTION.md §6). */
+@keyframes row-enter-append {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.row-enter-append {
+  animation: row-enter-append var(--dur-default) var(--ease-out-expo);
+  animation-fill-mode: backwards;
+}
+
 /* Error-toast stack (ToastHost), fixed to the top-center of the app window, above every tab/modal. z-index
    500 is the toast layer reserved in aspirational-design.md #369 - higher than .overlay-backdrop's 50, so a
    toast stays visible even while a modal is open. */
@@ -1364,61 +1364,301 @@ input[type="number"] {
   grid-template-columns: 1fr 1fr 1fr auto;
 }
 
-.ls-livestream-right-panel {
-  min-width: 0;
-}
-
 .ls-model-distribution-panel {
   width: 42%;
 }
 
-/* ---------------------------------------------------------------------------
-   Sessions tab (formerly Live Stream): full-width card list before a session is opened via
-   double-click on a card, split view (session detail + chat reproduction) after.
-   --------------------------------------------------------------------------- */
-.ls-sessions-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.ls-sessions-detail-pane {
-  min-width: 0;
-}
-
-.ls-sessions-back-btn {
-  align-self: flex-start;
-}
-
-/* Chat-style reproduction of a session's turns (SessionConversationPane.razor). Request bubbles
-   sit left, response bubbles sit right (mirroring the ROI/cost read direction the rest of the
-   dashboard uses), tinted with the turn's agent color so scanning the thread still shows which
-   agent produced which reply. */
-.ls-chat-turn-separator {
-  font-size: 10px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-/* Subagent/side-task marker chip on a turn separator (ADR-0021): informational, so neutral rather than a
-   success/warning tint. */
+/* Subagent/side-task marker chip (ADR-0021): informational, so neutral rather than a success/warning tint. */
 .ls-signal-badge {
   border: 1px solid var(--text-muted);
   color: var(--text-muted);
 }
 
-.ls-chat-bubble-user {
-  max-width: 85%;
-  background: var(--surface-elevated-a);
-  border-left: 3px solid var(--border-button);
+/* ---------------------------------------------------------------------------
+   Sessions tab (three-pane): session rail · messages · details (#176 §4.5).
+   --------------------------------------------------------------------------- */
+.ls-sessions-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  min-height: 0;
+  height: 100%;
 }
 
-.ls-chat-bubble-model {
-  max-width: 85%;
-  margin-left: auto;
+.ls-sessions-layout {
+  display: flex;
+  height: 100%;
+  min-width: 884px;
+  min-height: 0;
+}
+
+.ls-sessions-rail-host {
+  width: 22%;
+  min-width: 220px;
   background: var(--surface-card);
+  border-right: 1px solid var(--border-button);
+}
+
+.ls-chat-host {
+  min-width: 360px;
+  background: var(--surface-base);
+}
+
+.ls-details-host {
+  width: 28%;
+  min-width: 280px;
+  background: var(--surface-card);
+  border-left: 1px solid var(--border-button);
+}
+
+.ls-sessions-rail {
+  background: var(--surface-card);
+}
+
+.ls-rail-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem 0.625rem;
+  border: 0;
+  border-bottom: 1px solid var(--border-button);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-standard);
+}
+
+.ls-rail-item:hover {
+  background: var(--surface-elevated-a);
+}
+
+.ls-rail-item-selected {
+  background: var(--surface-elevated-a);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.ls-rail-item-history {
+  opacity: 0.85;
+}
+
+.ls-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-muted);
+}
+
+.ls-status-dot.ls-status-live {
+  background: var(--color-success);
+}
+
+.ls-status-dot.ls-status-idle {
+  background: var(--color-warning);
+}
+
+.ls-status-dot.ls-status-history {
+  background: var(--text-muted);
+}
+
+.ls-rail-footer {
+  border-top: 1px solid var(--border-button);
+  padding: 0.5rem 0.625rem;
+  background: var(--surface-interactive);
+}
+
+.ls-chat-pane {
+  background: var(--surface-base);
+}
+
+.ls-chat-title {
+  border-bottom: 1px solid var(--border-button);
+  padding: 0.5rem 0.75rem;
+  background: var(--surface-card);
+}
+
+.ls-chat-list {
+  padding: 0;
+}
+
+.ls-show-earlier {
+  display: block;
+  width: 100%;
+  padding: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border-button);
+  cursor: pointer;
+}
+
+.ls-show-earlier:hover {
+  color: var(--text-bright-secondary);
+}
+
+.ls-msg {
+  position: relative;
+  border-bottom: 1px solid var(--surface-elevated-a);
+}
+
+.ls-msg-request {
+  background: var(--surface-card);
+}
+
+.ls-msg-selected {
+  background: var(--surface-elevated-b);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.ls-msg-select {
+  display: grid;
+  grid-template-columns: 120px 1fr auto;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.ls-msg-sender {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #94a3b8; /* slate-400 */
+  text-align: right;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.ls-msg-model-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--agent-color, var(--accent));
+}
+
+.ls-msg-body {
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  color: #e2e8f0; /* slate-200 */
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-left: 1px solid var(--border-button);
+  padding-left: 0.5rem;
+  min-width: 0;
+}
+
+.ls-msg-clamp,
+.ls-msg-measure {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  overflow: hidden;
+}
+
+.ls-msg-time {
+  font-size: 10px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--text-muted);
+  white-space: nowrap;
+  align-self: start;
+}
+
+.ls-msg-chip {
+  display: inline-block;
+  margin-right: 0.375rem;
+  margin-bottom: 0.125rem;
+  border-radius: 0.25rem;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  vertical-align: baseline;
+}
+
+.ls-msg-chip-muted {
   border: 1px solid var(--border-button);
+  color: var(--text-muted);
+}
+
+.ls-msg-more {
+  display: block;
+  margin: 0 0.75rem 0.5rem 132px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.ls-jump-latest {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  border: 1px solid var(--border-button);
+  border-radius: 999px;
+  background: var(--surface-elevated-b);
+  color: var(--text-bright-secondary);
+  font-size: 0.7rem;
+  padding: 0.25rem 0.75rem;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.ls-details-pane {
+  background: var(--surface-card);
+}
+
+.ls-details-tabs {
+  border-bottom: 1px solid var(--border-button);
+}
+
+.ls-details-tab {
+  flex: 1 1 33.333%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.5rem 0.25rem;
+  font-size: 0.65rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: var(--surface-interactive);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-standard),
+              background-color var(--dur-fast) var(--ease-standard),
+              border-color var(--dur-fast) var(--ease-standard);
+}
+
+.ls-details-tab.active {
+  background: var(--surface-card);
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.ls-details-tab.inactive:hover {
+  color: var(--text-bright-secondary);
+}
+
+.ls-kv-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+  color: #e2e8f0;
+}
+
+.ls-kv-grid > span:nth-child(odd) {
+  color: var(--text-muted);
 }
 
 /* ---------------------------------------------------------------------------

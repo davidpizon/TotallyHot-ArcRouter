@@ -178,8 +178,9 @@ public class ConversationAggregatorTests
     }
 
     [Fact]
-    public void Aggregate_NullTokenAndCostFields_TreatedAsZeroInTotalsAndTurns()
+    public void Aggregate_NullTokenAndCostFields_StayNullOnTurns_ZeroInTotals()
     {
+        // #176 §5.1: unknown stays unknown per turn; aggregates coalesce with ?? 0 only when summing.
         var events = new[]
         {
             CreateEvent(sessionId: "session-1", promptTokens: null, completionTokens: null, estimatedCostUsd: null)
@@ -191,10 +192,11 @@ public class ConversationAggregatorTests
         Assert.Equal(0, actual: conversation.TotalPromptTokens);
         Assert.Equal(0, actual: conversation.TotalCompletionTokens);
         Assert.Equal(0m, actual: conversation.TotalCost);
+        Assert.Equal(1, actual: conversation.UnpricedTurns);
         var turn = Assert.Single(conversation.Turns);
-        Assert.Equal(0, actual: turn.PromptTokens);
-        Assert.Equal(0, actual: turn.CompletionTokens);
-        Assert.Equal(0m, actual: turn.EstimatedCostUsd);
+        Assert.Null(turn.PromptTokens);
+        Assert.Null(turn.CompletionTokens);
+        Assert.Null(turn.EstimatedCostUsd);
     }
 
     [Fact]
@@ -275,7 +277,7 @@ public class ConversationAggregatorTests
     }
 
     [Fact]
-    public void Aggregate_NullCacheTokenFields_TreatedAsZeroInTotalsAndTurns()
+    public void Aggregate_NullCacheTokenFields_StayNullOnTurns_ZeroInTotals()
     {
         var events = new[]
         {
@@ -288,8 +290,8 @@ public class ConversationAggregatorTests
         Assert.Equal(0, actual: conversation.TotalCacheCreationTokens);
         Assert.Equal(0, actual: conversation.TotalCacheReadTokens);
         var turn = Assert.Single(conversation.Turns);
-        Assert.Equal(0, actual: turn.CacheCreationTokens);
-        Assert.Equal(0, actual: turn.CacheReadTokens);
+        Assert.Null(turn.CacheCreationTokens);
+        Assert.Null(turn.CacheReadTokens);
     }
 
     [Fact]

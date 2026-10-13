@@ -1,0 +1,328 @@
+@using Microsoft.JSInterop
+@* Middle pane: title bar, in-session search, message rows, stick-to-bottom follow (#176 §6.2 / §6.3). *@
+@implements IAsyncDisposable
+@inject IJSRuntime Js
+@inject SessionsViewState ViewState
+
+<div class="ls-chat-pane flex flex-col min-h-0 h-full panel-enter" @key="Conversation.Id">
+    <div class="ls-chat-title shrink-0">
+        <div class="flex items-center gap-2 min-w-0">
+            <span class="text-xs font-semibold text-slate-200 ls-truncate">@Conversation.Title</span>
+            <span class="text-xs font-mono text-slate-500 shrink-0">
+                @Conversation.Turns.Count @(Conversation.Turns.Count == 1 ? "turn" : "turns") ·
+                @(Conversation.UnpricedTurns > 0 ? "≥ " : "")$@Conversation.TotalCost.ToString("F6", CultureInfo.InvariantCulture)
+            </span>
+            <button type="button"
+                    class="ml-auto shrink-0 text-slate-400 hover:text-slate-200 transition-colors"
+                    aria-label="@(ViewState.InSessionSearchOpen ? "Close in-session search" : "Search loaded messages")"
+                    @onclick="ToggleSearch">
+                <Icon Name="search" Size="16"/>
+            </button>
+        </div>
+        @if (ViewState.InSessionSearchOpen)
+        {
+            <div class="mt-1.5 space-y-1">
+                <input type="text"
+                       placeholder="Search loaded messages"
+                       value="@ViewState.InSessionFilter"
+                       @oninput="OnFilterInput"
+                       @onkeydown="OnSearchKey"
+                       class="w-full px-2 py-1.5 text-xs font-mono ds-input ds-input-secondary"
+                       aria-label="Search loaded messages"/>
+                <p class="text-xs text-slate-500" role="status">
+                    @VisibleRowCount matches in @AllRows.Count() loaded messages.
+                    @if (HasEarlierTurns)
+                    {
+                        <span> Earlier turns aren't searched. Show earlier turns to include them.</span>
+                    }
+                </p>
+            </div>
+        }
+    </div>
+
+    <div class="relative flex-1 min-h-0">
+        <div @ref="_list" role="list" class="ls-chat-list h-full overflow-y-auto">
+            @if (HasEarlierTurns)
+            {
+                <button type="button" class="ls-show-earlier" @onclick="ShowEarlier">Show earlier turns</button>
+            }
+            @foreach (var row in VisibleRows)
+            {
+                var key = RowKey(row.Turn, row.IsRequest);
+                <SessionMessageRow @key="key"
+                                   Turn="row.Turn"
+                                   IsRequest="row.IsRequest"
+                                   IsSelected="IsRowSelected(row)"
+                                   Overflows="_overflowKeys.Contains(key)"
+                                   Expanded="_expandedKeys.Contains(key)"
+                                   IsLiveArrival="row.Turn.TurnNumber > _arrivedAfterTurn"
+                                   ContentLocked="ContentLocked"
+                                   OnSelect="() => SelectRow(row)"
+                                   OnNavigateKey="e => NavigateRows(e, row)"
+                                   OnExpandedChanged="exp => SetExpanded(key, exp)"/>
+            }
+        </div>
+        @if (_pendingNew > 0 && !_atBottom)
+        {
+            <button type="button" class="ls-jump-latest" @onclick="JumpToLatestAsync">
+                @_pendingNew new ↓
+            </button>
+        }
+    </div>
+</div>
+
+@code {
+
+    private const int WindowSize = 200;
+
+    /// <summary>The conversation whose turns are shown as request/response rows.</summary>
+    [Parameter]
+    [EditorRequired]
+    public Conversation Conversation { get; set; } = null!;
+
+    /// <summary>Whether conversation text is locked behind a passkey (ADR-0020).</summary>
+    [Parameter]
+    public bool ContentLocked { get; set; }
+
+    /// <summary>
+    /// Raised whenever the operator explicitly selects a message row (or the implicit newest response
+    /// changes) so the details pane can refresh.
+    /// </summary>
+    [Parameter]
+    public EventCallback OnSelectionChanged { get; set; }
+
+    private ElementReference _list;
+    private IReadOnlyList<ConversationTurn> _orderedTurns = [];
+    private HashSet<int> _turnNumbers = [];
+    private DotNetObjectReference<SessionMessagesPane>? _dotNetRef;
+    private readonly HashSet<string> _overflowKeys = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _expandedKeys = new(StringComparer.Ordinal);
+    private int _windowTurns = WindowSize;
+    private bool _atBottom = true;
+    private int _pendingNew;
+    private int _lastTurnCount;
+
+    // Highest turn number that was already present before the latest live append; rows above it get the
+    // row-enter-append animation. int.MaxValue means "nothing has arrived since this session was bound".
+    private int _arrivedAfterTurn = int.MaxValue;
+    private string? _boundSessionId;
+    private bool _disposed;
+
+    /// <summary>
+    /// Turns in ascending order, windowed to the newest <see cref="_windowTurns"/>. Sorted once per parameter
+    /// change in <see cref="RebuildOrderedTurns"/> rather than on every access, since the row list, the
+    /// selection check on every row, and the search status line all read it during one render.
+    /// </summary>
+    private IEnumerable<ConversationTurn> WindowedTurns =>
+        _orderedTurns.Count <= _windowTurns ? _orderedTurns : _orderedTurns.Skip(_orderedTurns.Count - _windowTurns);
+
+    private bool HasEarlierTurns => Conversation.Turns.Count > _windowTurns;
+
+    private IEnumerable<(ConversationTurn Turn, bool IsRequest)> AllRows =>
+        WindowedTurns.SelectMany(t => new[] { (t, true), (t, false) });
+
+    private IEnumerable<(ConversationTurn Turn, bool IsRequest)> VisibleRows
+    {
+        get
+        {
+            var filter = ViewState.InSessionFilter;
+            if (string.IsNullOrEmpty(filter)) return AllRows;
+            return AllRows.Where(r =>
+            {
+                var body = r.IsRequest ? r.Turn.RequestSummary : r.Turn.ResponseSummary;
+                var model = r.Turn.RoutedModel ?? r.Turn.Model;
+                return (!string.IsNullOrEmpty(body) && body.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                       || model.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                       || (r.IsRequest && "Client".Contains(filter, StringComparison.OrdinalIgnoreCase));
+            });
+        }
+    }
+
+    private int VisibleRowCount => VisibleRows.Count();
+
+    private MessageSelection EffectiveSelection
+    {
+        get
+        {
+            var sel = ViewState.MessageSelection;
+            if (sel is not null && sel.SessionId == Conversation.Id && _turnNumbers.Contains(sel.TurnNumber))
+                return sel;
+
+            return new MessageSelection(
+                Conversation.Id, _orderedTurns.Count == 0 ? 0 : _orderedTurns[^1].TurnNumber, MessageSide.Response);
+        }
+    }
+
+    /// <inheritdoc/>
+    protected override void OnParametersSet()
+    {
+        RebuildOrderedTurns();
+        if (_boundSessionId != Conversation.Id)
+        {
+            _boundSessionId = Conversation.Id;
+            _windowTurns = WindowSize;
+            _overflowKeys.Clear();
+            _expandedKeys.Clear();
+            _pendingNew = 0;
+            _lastTurnCount = Conversation.Turns.Count;
+            _arrivedAfterTurn = int.MaxValue;
+            _atBottom = true;
+            // A fresh pane (tab switch remount) starts unbound; keep a saved selection that still belongs to
+            // this session and drop only one left over from a different session.
+            if (ViewState.MessageSelection?.SessionId != Conversation.Id)
+                ViewState.ClearMessageSelection();
+            return;
+        }
+
+        if (Conversation.Turns.Count > _lastTurnCount)
+        {
+            var added = Conversation.Turns.Count - _lastTurnCount;
+            _arrivedAfterTurn = _orderedTurns.Count > added ? _orderedTurns[^(added + 1)].TurnNumber : 0;
+            _lastTurnCount = Conversation.Turns.Count;
+            // An implicit selection (null) already follows the newest response; an explicit one is the
+            // operator's choice and must survive a live arrival, pinned to the bottom or not.
+            if (!_atBottom) _pendingNew += added;
+        }
+    }
+
+    /// <summary>Refreshes the cached ascending turn order and turn-number lookup from <see cref="Conversation"/>.</summary>
+    private void RebuildOrderedTurns()
+    {
+        _orderedTurns = [.. Conversation.Turns.OrderBy(t => t.TurnNumber)];
+        _turnNumbers = [.. _orderedTurns.Select(t => t.TurnNumber)];
+    }
+
+    /// <inheritdoc/>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_disposed) return;
+        try
+        {
+            _dotNetRef ??= DotNetObjectReference.Create(this);
+            await Js.InvokeVoidAsync("chatScroll.observeOverflow", _list, _dotNetRef);
+            if (_atBottom)
+                await Js.InvokeVoidAsync("chatScroll.scrollToBottom", _list);
+        }
+        catch (JSDisconnectedException) { /* circuit gone */ }
+        catch (ObjectDisposedException) { /* runtime disposed */ }
+        catch (JSException)
+        {
+            // Loose / missing interop in tests — fail open: leave bodies unclamped (§4.3).
+        }
+    }
+
+    /// <summary>JS callback: whether the list is within 24 px of the bottom.</summary>
+    [JSInvokable]
+    public void OnAtBottomChanged(bool atBottom)
+    {
+        _atBottom = atBottom;
+        if (atBottom) _pendingNew = 0;
+        StateHasChanged();
+    }
+
+    /// <summary>JS callback: row keys whose bodies overflow the 6-line clamp when measured.</summary>
+    [JSInvokable]
+    public void OnOverflowKeysChanged(string[] keys)
+    {
+        _overflowKeys.Clear();
+        foreach (var k in keys)
+            _overflowKeys.Add(k);
+        StateHasChanged();
+    }
+
+    private bool IsRowSelected((ConversationTurn Turn, bool IsRequest) row)
+    {
+        var sel = EffectiveSelection;
+        return sel.TurnNumber == row.Turn.TurnNumber
+               && sel.Side == (row.IsRequest ? MessageSide.Request : MessageSide.Response);
+    }
+
+    private async Task SelectRow((ConversationTurn Turn, bool IsRequest) row)
+    {
+        ViewState.MessageSelection = new MessageSelection(
+            Conversation.Id, row.Turn.TurnNumber,
+            row.IsRequest ? MessageSide.Request : MessageSide.Response);
+        await OnSelectionChanged.InvokeAsync();
+    }
+
+    private async Task NavigateRows(KeyboardEventArgs e, (ConversationTurn Turn, bool IsRequest) current)
+    {
+        var rows = VisibleRows.ToList();
+        var index = rows.FindIndex(r => r.Turn.TurnNumber == current.Turn.TurnNumber && r.IsRequest == current.IsRequest);
+        if (index < 0) return;
+        var next = e.Key == "ArrowUp" ? index - 1 : index + 1;
+        if (next < 0 || next >= rows.Count) return;
+        await SelectRow(rows[next]);
+        try
+        {
+            // The roving focus has to follow the selection: otherwise the next arrow press fires from the
+            // old row again and the operator can only ever move one step.
+            await Js.InvokeVoidAsync("chatScroll.focusByAttribute", "data-msg-select",
+                RowKey(rows[next].Turn, rows[next].IsRequest));
+        }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) { }
+        catch (JSException) { }
+    }
+
+    private void SetExpanded(string key, bool expanded)
+    {
+        if (expanded) _expandedKeys.Add(key);
+        else _expandedKeys.Remove(key);
+    }
+
+    private void ShowEarlier() => _windowTurns += WindowSize;
+
+    private void ToggleSearch()
+    {
+        ViewState.InSessionSearchOpen = !ViewState.InSessionSearchOpen;
+        if (!ViewState.InSessionSearchOpen)
+            ViewState.InSessionFilter = string.Empty;
+    }
+
+    private void OnFilterInput(ChangeEventArgs e) =>
+        ViewState.InSessionFilter = (string?)e.Value ?? string.Empty;
+
+    private void OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            ViewState.InSessionSearchOpen = false;
+            ViewState.InSessionFilter = string.Empty;
+        }
+    }
+
+    private async Task JumpToLatestAsync()
+    {
+        _pendingNew = 0;
+        _atBottom = true;
+        ViewState.ClearMessageSelection();
+        try
+        {
+            await Js.InvokeVoidAsync("chatScroll.scrollToBottom", _list);
+        }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) { }
+        catch (JSException) { }
+        await OnSelectionChanged.InvokeAsync();
+    }
+
+    private static string RowKey(ConversationTurn turn, bool isRequest) =>
+        $"{turn.TurnNumber}:{(isRequest ? "req" : "res")}";
+
+    /// <inheritdoc/>
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        try
+        {
+            await Js.InvokeVoidAsync("chatScroll.dispose", _list);
+        }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) { }
+        catch (JSException) { }
+        _dotNetRef?.Dispose();
+        _dotNetRef = null;
+    }
+
+}

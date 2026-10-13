@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -770,6 +771,53 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
             _logger.LogWarning(ex, "Could not read extracts for session {ArchiveSessionId}.", archiveSessionId);
             return new Dictionary<Guid, SessionExtracts>();
         }
+    }
+
+    /// <inheritdoc/>
+    public int GetMaxTurnNumber(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+
+        // Never create a database or schema: a default install with capture off must stay file-free, and a
+        // restart with capture off must still see turns written earlier (#176 §5.7).
+        if (!File.Exists(_database.DatabasePath)) return 0;
+
+        using var connection = _database.OpenConnection();
+        using (var tableCheck = connection.CreateCommand())
+        {
+            tableCheck.CommandText =
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'request_transcripts';";
+            if ((long)tableCheck.ExecuteScalar()! == 0) return 0;
+        }
+
+        // A database written before the session_id migration has the table but no such column, and with
+        // capture off startup skips the migration, so this read must not assume it (and must not add it).
+        bool hasSessionColumn;
+        using (var columnCheck = connection.CreateCommand())
+        {
+            columnCheck.CommandText =
+                "SELECT COUNT(*) FROM pragma_table_info('request_transcripts') WHERE name = 'session_id';";
+            hasSessionColumn = (long)columnCheck.ExecuteScalar()! > 0;
+        }
+
+        using var command = connection.CreateCommand();
+        // correlation_id is "{sessionId}:{turnNumber}". A non-numeric suffix casts to 0 in SQLite, so it
+        // cannot inflate the max. With the session_id column the index is used; without it the session is
+        // recovered from the correlation id's prefix.
+        var sessionFilter = hasSessionColumn
+            ? "session_id = $sessionId"
+            : "substr(correlation_id, 1, length($sessionId) + 1) = $sessionId || ':'";
+        command.CommandText = $"""
+                              SELECT MAX(CAST(substr(correlation_id, length($sessionId) + 2, 10) AS INTEGER))
+                              FROM request_transcripts
+                              WHERE {sessionFilter};
+                              """;
+        command.Parameters.AddWithValue("$sessionId", sessionId);
+
+        var result = command.ExecuteScalar();
+        return result is null or DBNull
+            ? 0
+            : Convert.ToInt32(value: result, provider: CultureInfo.InvariantCulture);
     }
 
     /// <inheritdoc/>

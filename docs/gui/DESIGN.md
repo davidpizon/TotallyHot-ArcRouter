@@ -20,13 +20,10 @@ is historical and not runtime.
 
 ## 1. Design Principles
 
-- **Data density without claustrophobia** — `ConversationSummary`'s pinned aggregate strip (Total
-  Cost, Total Tokens, Avg ROI, Turns, Trend) and `ConversationCard`'s per-session summary pack several
-  stats into a compact card, and every stat gets consistent `gap-*`/`px-*`/`py-*` spacing and a
-  `.ls-stat-label` (10px, uppercase, muted `#64748b`) so the strip scans instead of blurring together.
-  (`TurnCard`'s denser 8-stat strip — ROI, Cost, Tok P/C, Steps, Cache, TTFT, Ctx, Model — demonstrated
-  this most aggressively, but the component was deleted after the Sessions-tab rebuild orphaned it:
-  see the Progressive disclosure bullet below.)
+- **Data density without claustrophobia** — the Sessions details Session tab (`SessionOverviewTab`) packs
+  identity, totals (over loaded turns), a Trend sparkline, and a models-used list into a scrollable
+  key/value grid with `.ls-stat-label` (10px, uppercase, muted `#64748b`) so the pane scans instead of
+  blurring together. The left rail packs status, title, badges, and a meta line per session the same way.
 - **Hierarchy through weight and color tier, not decoration** — text hierarchy comes from the
   `font-bold` / `font-semibold` / `font-medium` steps and the five-tier slate text-color ladder
   (§3), never from box shadows, gradients, or size alone. Agent identity comes from a deterministic
@@ -39,13 +36,11 @@ is historical and not runtime.
 - **Trust through restraint** — one accent (Dark Green `#1ed760`) plus three semantic colors (`emerald`/
   `amber`/`red`) on a near-black base is the entire palette. No additional brand hues; no gradients
   anywhere in `app.css`.
-- **Progressive disclosure** — `ConversationSummary` shows one pinned stat strip; double-clicking a
-  `ConversationCard` opens the Sessions tab's split view, replacing the full-width session list with
-  session details (left) and `SessionConversationPane`'s chat-style reproduction of the conversation
-  (right). Cost Analytics shows one chart at a time behind a ranked metric-picker pill row, not seven
-  charts at once. (`TurnCard`'s in-place click-to-expand routing-decision log was the previous
-  disclosure mechanism for turn detail; once this double-click split view replaced it, nothing
-  referenced it, and the component and its CSS were deleted.)
+- **Progressive disclosure** — the Sessions tab is always three panes: rail → messages → details tabs
+  (Message / Routing / Session). Message rows clamp to six lines with a measured Show more; the details
+  pane holds the rest. Cost Analytics shows one chart at a time behind a ranked metric-picker pill row,
+  not seven charts at once. (The former card list + double-click split, and `TurnCard` before that, were
+  deleted once this layout shipped — #176.)
 
 ## 2. Visual Theme
 
@@ -119,14 +114,12 @@ one shade lighter (`-300`) for contrast against that tint. The pattern is always
 | Context | Background | Border | Text |
 | --- | --- | --- | --- |
 | Error banners, failed pulls (`.ds-step-critical`, live: `ProviderEditDialog`, `ProvidersAdmin`) | `#ef444411` | `#ef444444` | `#fca5a5` red-300 |
-| Routing step — Warn (`.ds-step-warning`) *retired* | `rgba(245,158,11,0.12)` | `#f59e0b` (left, 2px) | `#fcd34d` amber-300 |
-| Routing step — Info (`.ds-step-info`) *retired* | `rgba(56,189,248,0.1)` | `#38bdf8` (left, 2px) | `#7dd3fc` sky-300 |
+| Routing step — Warn (`.ds-step-warning`) | `rgba(245,158,11,0.12)` | `#f59e0b` (left, 2px) | `#fcd34d` amber-300 |
+| Routing step — Info (`.ds-step-info`) | `rgba(56,189,248,0.1)` | `#38bdf8` (left, 2px) | `#7dd3fc` sky-300 |
 | Routing step — OK (`.ds-step-success`) *retired* | `rgba(16,185,129,0.08)` | `#10b981` (left, 2px) | `#6ee7b7` emerald-300 |
 
-The three "Routing step" rows were `TurnCard`'s routing-decision log tones. Their `.ds-step-success`,
-`.ds-step-warning` and `.ds-step-info` rules were deleted with `TurnCard` (§1); only
-`.ds-step-critical` remains in `app.css`, kept alive by the error banners. The values are recorded
-here in case a routing-decision view returns.
+`.ds-step-warning` and `.ds-step-info` are revived for the Sessions Routing tab's step log (#176 §4.4).
+`.ds-step-critical` still backs error banners. `.ds-step-success` remains retired (no consumer).
 
 Fonts: `var(--font-ds)` (`"Century Gothic", "Avenir Next", "Poppins", Inter, system-ui, sans-serif`) for
 all UI text, **JetBrains Mono** for every numeric/monospace value (token counts, costs, timestamps,
@@ -379,6 +372,9 @@ site uses; only the glyph inside changed):
 | `refresh` | `arrow-path` | |
 | `sliders` | `adjustments-horizontal` | "Config" glyph on a provider card |
 | `cpu-chip` | `cpu-chip` | routing/voter model row icon (fixed the former undefined `bot` reference) |
+| `chat-bubble-left-right` | `chat-bubble-left-right` | Sessions details Message tab (#176) |
+| `arrows-right-left` | `arrows-right-left` | Sessions details Routing tab (#176) |
+| `queue-list` | `queue-list` | Sessions details Session tab (#176) |
 
 ### 4.4 Toasts
 
@@ -407,10 +403,11 @@ a toast is visible regardless of which Governance sub-tab is active.
 - **Spacing scale**: Tailwind's default rem scale as used in `app.css` — `0`, `0.125rem` (0.5),
   `0.25rem` (1), `0.375rem` (1.5), `0.5rem` (2), `0.625rem` (2.5), `0.75rem` (3), `1rem` (4),
   `1.25rem` (5), `1.5rem` (6).
-- **Sessions split pane** — draggable divider between the conversation list and turn detail
-  panels (`wwwroot/js/split-pane.js`); left panel defaults to 35% width (`.ls-left{width:35%}`),
-  clamped 20–65% while dragging. The divider itself (`.ls-divider`) is 8px wide with a 4px `rounded`
-  hit target and a 2px `rounded` grip mark.
+- **Sessions three-pane dividers** — two draggable, keyboard-resizable separators
+  (`wwwroot/js/split-pane.js`) between rail · messages · details. Defaults 22% / 28%; effective bounds
+  fold in CSS minima (220 / 360 / 280 px) so `aria-valuenow` matches the rendered width. Widths persist
+  in `localStorage`. Below ~908 px viewport the tab scrolls horizontally (`.ls-sessions-scroll` +
+  `.ls-sessions-layout{min-width:884px}`); there is still no responsive breakpoint that collapses panes.
 - **Scrollbars**: thin (4px) custom scrollbar, `var(--border-button)` (`#4d4d4d`) thumb on
   `var(--surface-base)` (`#121212`) track, `var(--border-light)` (`#7c7c7c`) on hover.
 - **`<main>`'s padding (`Dashboard.razor`) is the app's single content inset, shared by every tab** —
@@ -748,7 +745,7 @@ much the card can grow — recompute both together.
 **Core Principle:** ALL styling belongs in CSS, not inline. Even conditional and animation styling must be in `.css` files via class binding or CSS variables—never `style="..."` attributes in markup.
 
 **Inline styles are NEVER permitted**, except for:
-1. **Data-driven values from the backend** — when a value comes from a database/API and changes per-item (e.g., `style="background:@(agent.Color)"`). Even then, consider CSS variables (`--agent-color: @(agent.Color)`) as the preferred path if the value is used in multiple rules.
+1. **Data-driven values from the backend** — when a value comes from a database/API and changes per-item (e.g., `style="background:@(agent.Color)"`). Even then, consider CSS variables (`--agent-color: @(agent.Color)`) as the preferred path if the value is used in multiple rules. The Sessions tab uses this for model dots (`--agent-color`) and Row Enter stagger (`--i`) only (#176 §4.5).
 
 **Conditional and animation styling — use CSS classes, not inline conditionals:**
 - ✅ **DO:** `class="@(isActive ? "button-active" : "button-inactive")"` → Define `.button-active` and `.button-inactive` in `app.css`

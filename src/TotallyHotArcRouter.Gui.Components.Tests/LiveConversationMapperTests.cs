@@ -85,9 +85,9 @@ public sealed class LiveConversationMapperTests
             false,
             FirstTimestampUtc: turn.TimestampUtc,
             LastTimestampUtc: turn.TimestampUtc,
-            TotalCost: turn.EstimatedCostUsd,
-            TotalPromptTokens: turn.PromptTokens,
-            TotalCompletionTokens: turn.CompletionTokens,
+            TotalCost: turn.EstimatedCostUsd ?? 0m,
+            TotalPromptTokens: turn.PromptTokens ?? 0,
+            TotalCompletionTokens: turn.CompletionTokens ?? 0,
             false,
             Turns: [turn]);
 
@@ -140,9 +140,9 @@ public sealed class LiveConversationMapperTests
             false,
             FirstTimestampUtc: turn.TimestampUtc,
             LastTimestampUtc: turn.TimestampUtc,
-            TotalCost: turn.EstimatedCostUsd,
-            TotalPromptTokens: turn.PromptTokens,
-            TotalCompletionTokens: turn.CompletionTokens,
+            TotalCost: turn.EstimatedCostUsd ?? 0m,
+            TotalPromptTokens: turn.PromptTokens ?? 0,
+            TotalCompletionTokens: turn.CompletionTokens ?? 0,
             false,
             Turns: [turn]);
 
@@ -217,9 +217,9 @@ public sealed class LiveConversationMapperTests
             false,
             FirstTimestampUtc: turn.TimestampUtc,
             LastTimestampUtc: turn.TimestampUtc,
-            TotalCost: turn.EstimatedCostUsd,
-            TotalPromptTokens: turn.PromptTokens,
-            TotalCompletionTokens: turn.CompletionTokens,
+            TotalCost: turn.EstimatedCostUsd ?? 0m,
+            TotalPromptTokens: turn.PromptTokens ?? 0,
+            TotalCompletionTokens: turn.CompletionTokens ?? 0,
             false,
             Turns: [turn]);
 
@@ -261,9 +261,9 @@ public sealed class LiveConversationMapperTests
             false,
             FirstTimestampUtc: turn.TimestampUtc,
             LastTimestampUtc: turn.TimestampUtc,
-            TotalCost: turn.EstimatedCostUsd,
-            TotalPromptTokens: turn.PromptTokens,
-            TotalCompletionTokens: turn.CompletionTokens,
+            TotalCost: turn.EstimatedCostUsd ?? 0m,
+            TotalPromptTokens: turn.PromptTokens ?? 0,
+            TotalCompletionTokens: turn.CompletionTokens ?? 0,
             false,
             Turns: [turn]);
 
@@ -297,9 +297,9 @@ public sealed class LiveConversationMapperTests
             false,
             FirstTimestampUtc: turn.TimestampUtc,
             LastTimestampUtc: turn.TimestampUtc,
-            TotalCost: turn.EstimatedCostUsd,
-            TotalPromptTokens: turn.PromptTokens,
-            TotalCompletionTokens: turn.CompletionTokens,
+            TotalCost: turn.EstimatedCostUsd ?? 0m,
+            TotalPromptTokens: turn.PromptTokens ?? 0,
+            TotalCompletionTokens: turn.CompletionTokens ?? 0,
             false,
             Turns: [turn]);
 

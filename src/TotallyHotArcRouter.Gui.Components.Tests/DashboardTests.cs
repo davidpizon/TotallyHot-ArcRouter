@@ -42,6 +42,8 @@ public sealed class DashboardTests
         ctx.Services.AddSingleton(new ConversationExportStore(new FakeConversationAdminClient()));
         ctx.Services.AddSingleton(new ToastService());
         ctx.Services.AddSingleton<IClipboardService>(new FakeClipboardService());
+        ctx.Services.AddSingleton(new SessionsViewState());
+        ctx.Services.AddSingleton(TimeProvider.System);
         return ctx;
     }
 
@@ -389,8 +391,9 @@ public sealed class DashboardTests
         var cut = ctx.Render<Dashboard>();
         await cut.WaitForAssertionAsync(() => cut.Find("[data-testid='content-unlock']"));
 
+        // Three-pane Sessions tab (#176): a single click selects the rail item (no double-click open).
         await cut.InvokeAsync(() => cut.FindAll("button")
-            .First(b => b.TextContent.Contains("Session persist", StringComparison.Ordinal)).DoubleClick());
+            .First(b => b.TextContent.Contains("Session persist", StringComparison.Ordinal)).Click());
 
         cut.Markup.Should().Contain("Locked - unlock with a passkey to view");
         cut.Markup.Should().NotContain("No request captured");
@@ -423,9 +426,10 @@ public sealed class DashboardTests
         var cut = ctx.Render<Dashboard>();
         await cut.WaitForAssertionAsync(() => cut.Find("[data-testid='content-unlocked']"));
 
+        // Three-pane Sessions tab (#176): a single click selects the rail item (no double-click open).
         await cut.InvokeAsync(() => cut.FindAll("button")
             .First(button => button.TextContent.Contains("Session persist", StringComparison.Ordinal))
-            .DoubleClick());
+            .Click());
 
         await cut.WaitForAssertionAsync(() => cut.Markup.Should().Contain("opened words"));
 

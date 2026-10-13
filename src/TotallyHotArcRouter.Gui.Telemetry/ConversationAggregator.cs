@@ -11,21 +11,27 @@ public sealed record LiveConversationTurn(
     int TurnNumber,
     string Agent,
     string Model,
-    int PromptTokens,
-    int CompletionTokens,
-    decimal EstimatedCostUsd,
+    int? PromptTokens,
+    int? CompletionTokens,
+    decimal? EstimatedCostUsd,
     bool IsFallback,
     long LatencyToHeadersMs,
     DateTimeOffset TimestampUtc,
-    int CacheCreationTokens = 0,
-    int CacheReadTokens = 0,
+    int? CacheCreationTokens = null,
+    int? CacheReadTokens = null,
     string? RequestSummary = null,
     string? ResponseSummary = null,
     string? CostConfidence = null,
     string? RequestedModel = null,
     string? RoutedModel = null,
     string? SubstitutionReason = null,
-    string? SubagentSignal = null);
+    string? SubagentSignal = null,
+    string? Provider = null,
+    bool IsStreaming = false,
+    long TotalDurationMs = 0,
+    int StatusCode = 0,
+    int RouterTokens = 0,
+    decimal RouterCostUsd = 0m);
 
 /// <summary>A conversation (session) reconstructed from the live telemetry stream.</summary>
 /// <param name="SessionId">The session id every turn in <paramref name="Turns"/> shares.</param>
@@ -111,21 +117,27 @@ public static class ConversationAggregator
                 TurnNumber: e.TurnNumber,
                 Agent: e.ResolvedModel,
                 Model: e.ResolvedModel,
-                PromptTokens: e.PromptTokens ?? 0,
-                CompletionTokens: e.CompletionTokens ?? 0,
-                EstimatedCostUsd: e.EstimatedCostUsd ?? 0m,
+                PromptTokens: e.PromptTokens,
+                CompletionTokens: e.CompletionTokens,
+                EstimatedCostUsd: e.EstimatedCostUsd,
                 IsFallback: e.IsFallback,
                 LatencyToHeadersMs: e.LatencyToHeadersMs,
                 TimestampUtc: e.TimestampUtc,
-                CacheCreationTokens: e.CacheCreationTokens ?? 0,
-                CacheReadTokens: e.CacheReadTokens ?? 0,
+                CacheCreationTokens: e.CacheCreationTokens,
+                CacheReadTokens: e.CacheReadTokens,
                 RequestSummary: e.RequestSummary,
                 ResponseSummary: e.ResponseSummary,
                 CostConfidence: e.CostConfidence,
                 RequestedModel: e.RequestedModel,
                 RoutedModel: e.RoutedModel,
                 SubstitutionReason: e.SubstitutionReason,
-                SubagentSignal: e.SubagentSignal))
+                SubagentSignal: e.SubagentSignal,
+                Provider: e.Provider,
+                IsStreaming: e.IsStreaming,
+                TotalDurationMs: e.TotalDurationMs,
+                StatusCode: e.StatusCode,
+                RouterTokens: e.RouterTokens,
+                RouterCostUsd: e.RouterCostUsd))
             .ToList();
 
         return new LiveConversation(
@@ -133,13 +145,13 @@ public static class ConversationAggregator
             IsSessionSynthesized: orderedEvents[0].IsSessionSynthesized,
             FirstTimestampUtc: orderedEvents[0].TimestampUtc,
             LastTimestampUtc: orderedEvents[^1].TimestampUtc,
-            TotalCost: turns.Sum(t => t.EstimatedCostUsd),
-            TotalPromptTokens: turns.Sum(t => t.PromptTokens),
-            TotalCompletionTokens: turns.Sum(t => t.CompletionTokens),
+            TotalCost: turns.Sum(t => t.EstimatedCostUsd ?? 0m),
+            TotalPromptTokens: turns.Sum(t => t.PromptTokens ?? 0),
+            TotalCompletionTokens: turns.Sum(t => t.CompletionTokens ?? 0),
             HasFallbackTurns: turns.Any(t => t.IsFallback),
             Turns: turns,
-            TotalCacheCreationTokens: turns.Sum(t => t.CacheCreationTokens),
-            TotalCacheReadTokens: turns.Sum(t => t.CacheReadTokens),
-            UnpricedTurns: orderedEvents.Count(e => e.EstimatedCostUsd is null));
+            TotalCacheCreationTokens: turns.Sum(t => t.CacheCreationTokens ?? 0),
+            TotalCacheReadTokens: turns.Sum(t => t.CacheReadTokens ?? 0),
+            UnpricedTurns: turns.Count(t => t.EstimatedCostUsd is null));
     }
 }

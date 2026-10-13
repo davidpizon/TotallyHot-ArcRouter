@@ -1,0 +1,121 @@
+@* Right pane of the Sessions three-pane layout: Message / Routing / Session tabs (#176 §4.4 / §7). *@
+@using Microsoft.JSInterop
+@inject SessionsViewState ViewState
+@inject IJSRuntime Js
+
+<div class="ls-details-pane flex flex-col min-h-0 h-full panel-enter" @key="Conversation?.Id">
+    <div role="tablist" aria-label="Session details" class="ls-details-tabs shrink-0 flex">
+        @foreach (var tab in Tabs)
+        {
+            var active = ViewState.DetailsTab == tab.Id;
+            <button type="button"
+                    role="tab"
+                    id="@($"ls-details-tab-{tab.Id}")"
+                    aria-selected="@(active ? "true" : "false")"
+                    aria-controls="@($"ls-details-panel-{tab.Id}")"
+                    tabindex="@(active ? 0 : -1)"
+                    class="ls-details-tab @(active ? "active" : "inactive")"
+                    @onclick="() => SelectTab(tab.Id)"
+                    @onkeydown="e => OnTabKey(e, tab.Id)">
+                <Icon Name="@tab.Icon" Size="20"/>
+                <span>@tab.Label</span>
+            </button>
+        }
+    </div>
+
+    <div class="flex-1 min-h-0 overflow-y-auto p-3"
+         role="tabpanel"
+         id="@($"ls-details-panel-{ViewState.DetailsTab}")"
+         aria-labelledby="@($"ls-details-tab-{ViewState.DetailsTab}")">
+        @if (Conversation is null)
+        {
+            <p class="text-xs text-slate-500">Select a session.</p>
+        }
+        else if (ViewState.DetailsTab == SessionsDetailsTab.Session)
+        {
+            <SessionOverviewTab Conversation="Conversation"/>
+        }
+        else if (SelectedTurn is null)
+        {
+            <p class="text-xs text-slate-500">No turns in this session.</p>
+        }
+        else if (ViewState.DetailsTab == SessionsDetailsTab.Message)
+        {
+            <MessageDetailsTab Turn="SelectedTurn"
+                               SessionId="Conversation.Id"
+                               IsRequest="SelectedSide == MessageSide.Request"
+                               TurnCount="Conversation.Turns.Count"/>
+        }
+        else
+        {
+            <RoutingDetailsTab Turn="SelectedTurn" TurnCount="Conversation.Turns.Count"/>
+        }
+    </div>
+</div>
+
+@code {
+
+    /// <summary>The conversation shown in the Session tab and whose turns feed Message/Routing.</summary>
+    [Parameter]
+    public Conversation? Conversation { get; set; }
+
+    /// <summary>
+    /// The message selection driving Message/Routing tabs. When null, the newest response row is assumed
+    /// (matching <see cref="SessionMessagesPane"/>'s implicit selection).
+    /// </summary>
+    [Parameter]
+    public MessageSelection? Selection { get; set; }
+
+    private static readonly (SessionsDetailsTab Id, string Icon, string Label)[] Tabs =
+    [
+        (SessionsDetailsTab.Message, "chat-bubble-left-right", "Message"),
+        (SessionsDetailsTab.Routing, "arrows-right-left", "Routing"),
+        (SessionsDetailsTab.Session, "queue-list", "Session")
+    ];
+
+    private ConversationTurn? SelectedTurn
+    {
+        get
+        {
+            if (Conversation is null || Conversation.Turns.Count == 0) return null;
+            var sel = Selection;
+            // A selection left over from another session (the messages pane clears it during the same render
+            // pass, after this pane's parameters were captured) must not pick a same-numbered turn here.
+            if (sel is not null && sel.SessionId == Conversation.Id)
+            {
+                var match = Conversation.Turns.FirstOrDefault(t => t.TurnNumber == sel.TurnNumber);
+                if (match is not null) return match;
+            }
+            return Conversation.Turns.OrderBy(t => t.TurnNumber).Last();
+        }
+    }
+
+    private MessageSide SelectedSide =>
+        Selection is not null && Selection.SessionId == Conversation?.Id ? Selection.Side : MessageSide.Response;
+
+    private void SelectTab(SessionsDetailsTab tab) => ViewState.DetailsTab = tab;
+
+    private async Task OnTabKey(KeyboardEventArgs e, SessionsDetailsTab current)
+    {
+        var index = Array.FindIndex(Tabs, t => t.Id == current);
+        if (index < 0) return;
+        SessionsDetailsTab next;
+        if (e.Key == "ArrowRight")
+            next = Tabs[(index + 1) % Tabs.Length].Id;
+        else if (e.Key == "ArrowLeft")
+            next = Tabs[(index - 1 + Tabs.Length) % Tabs.Length].Id;
+        else
+            return;
+
+        ViewState.DetailsTab = next;
+        try
+        {
+            // Roving tabindex: move focus with the selection so repeated arrow presses keep advancing.
+            await Js.InvokeVoidAsync("chatScroll.focusByAttribute", "id", $"ls-details-tab-{next}");
+        }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) { }
+        catch (JSException) { }
+    }
+
+}

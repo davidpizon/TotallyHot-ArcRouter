@@ -34,10 +34,10 @@ public sealed record ConversationTurn(
     string Agent,
     string Model,
     int TurnNumber,
-    int PromptTokens,
-    int CompletionTokens,
+    int? PromptTokens,
+    int? CompletionTokens,
     decimal RoutingRoi,
-    decimal TotalCost,
+    decimal? TotalCost,
     int ToolExecutionSteps,
     decimal CacheHitRate,
     int TimeToFirstTokenMs,
@@ -66,7 +66,18 @@ public sealed record ConversationTurn(
     string? SubstitutionReason = null,
     string? SubagentSignal = null,
     // request_transcripts.id for a persisted turn, so opening the chat can load its text. Zero for a live turn.
-    long TranscriptId = 0);
+    long TranscriptId = 0,
+    // Whether this turn's metrics came from the live stream (true) or persisted history (false). Gates
+    // live-only fields in the Sessions details pane after a per-turn merge (#176 §5.1).
+    bool IsLive = false,
+    string? Provider = null,
+    bool? IsStreaming = null,
+    long? TotalDurationMs = null,
+    int? StatusCode = null,
+    int? CacheCreationTokens = null,
+    int? CacheReadTokens = null,
+    int? RouterTokens = null,
+    decimal? RouterCostUsd = null);
 
 /// <summary>A conversation (session) whose turns are shown in the Live Stream tab.</summary>
 /// <param name="Id">The session id.</param>
@@ -89,6 +100,14 @@ public sealed record ConversationTurn(
 /// (<see cref="TotallyHot.ArcRouter.Gui.Services.LiveConversationMapper"/>), since the linkage this flag
 /// reports is only known once a transcript has been persisted and its embedding backfilled.
 /// </param>
+/// <param name="IsLive">
+/// Whether any turn in this conversation is currently present in the live telemetry buffer. Drives the
+/// Sessions rail status dot (#176).
+/// </param>
+/// <param name="IsSessionSynthesized">
+/// Whether the session id was synthesized rather than client-supplied. <see langword="null"/> for a
+/// persisted-only session, where the flag was never stored (#176 §5.1).
+/// </param>
 public sealed record Conversation(
     string Id,
     string Title,
@@ -100,7 +119,9 @@ public sealed record Conversation(
     bool HasFallbackTurns,
     IReadOnlyList<ConversationTurn> Turns,
     int UnpricedTurns = 0,
-    bool IsUsedForTraining = false);
+    bool IsUsedForTraining = false,
+    bool IsLive = false,
+    bool? IsSessionSynthesized = null);
 
 /// <summary>
 /// Offline fallback fixtures for dashboard tabs that still need a corpus when the proxy has sent no

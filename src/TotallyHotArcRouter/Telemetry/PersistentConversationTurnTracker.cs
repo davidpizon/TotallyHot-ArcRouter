@@ -1,24 +1,30 @@
+using TotallyHot.ArcRouter.Transcripts;
+
 namespace TotallyHot.ArcRouter.Telemetry;
 
 /// <summary>
-/// <see cref="IConversationTurnTracker"/> backed by <see cref="IUsageLedger"/>
-/// (<c>docs/router/token-tracking-implementation-plan.md</c> Phase 2, §5.5). On first sight of a session
-/// this process hasn't tracked yet, seeds the in-memory counter from the ledger's highest recorded turn
-/// number for that session, then counts purely in memory from there - so a turn number keeps advancing
-/// across a proxy restart instead of resetting to 1, without a ledger round-trip on every call.
+/// <see cref="IConversationTurnTracker"/> backed by <see cref="IUsageLedger"/> and, when available,
+/// <see cref="ITranscriptStore"/> (<c>docs/router/token-tracking-implementation-plan.md</c> Phase 2, §5.5;
+/// #176 §5.7). On first sight of a session this process hasn't tracked yet, seeds the in-memory counter from
+/// the higher of the ledger's and the transcript store's highest recorded turn number for that session, then
+/// counts purely in memory from there - so a turn number keeps advancing across a proxy restart instead of
+/// resetting to 1, without a ledger or transcript round-trip on every call.
 /// </summary>
 /// <remarks>
 /// Idle sessions are evicted after <see cref="IdleEviction"/> to keep memory bounded on a long-running
 /// process, exactly like <see cref="ConversationTurnTracker"/>'s in-memory counterpart and
 /// <see cref="MessageHistoryContinuityMatcher"/>'s tracked-conversation list. Eviction is safe here
 /// specifically because of the seeding: a session that goes idle long enough to be evicted and then
-/// resumes simply re-seeds from the ledger on its next call, picking up where the ledger left off rather
-/// than restarting at 1.
+/// resumes simply re-seeds from both stores on its next call, picking up where the durable records left
+/// off rather than restarting at 1. Seeding from transcripts as well as the ledger closes the gap where a
+/// turn left a <c>request_transcripts</c> row but no ledger row (usage extraction failed or was skipped),
+/// which would otherwise reissue that turn number after a restart and break the Sessions tab's per-turn merge.
 /// </remarks>
 public sealed class PersistentConversationTurnTracker : IConversationTurnTracker
 {
     private static readonly TimeSpan IdleEviction = TimeSpan.FromHours(12);
     private readonly IUsageLedger _ledger;
+    private readonly ITranscriptStore? _transcripts;
 
     private readonly Lock _lock = new();
     private readonly Dictionary<string, TrackedSession> _sessions = new(StringComparer.Ordinal);
@@ -28,14 +34,23 @@ public sealed class PersistentConversationTurnTracker : IConversationTurnTracker
     /// Initializes a new instance of the <see cref="PersistentConversationTurnTracker"/> class.
     /// </summary>
     /// <param name="ledger">The durable ledger seeding each session's counter on first sight.</param>
+    /// <param name="transcripts">
+    /// Optional transcript store whose highest turn number is also considered when seeding. Null keeps the
+    /// pre-#176 ledger-only seed so hand-built trackers in tests need no transcript double. The singleton
+    /// registration resolves this when an <see cref="ITranscriptStore"/> is present.
+    /// </param>
     /// <param name="timeProvider">
     /// Optional; defaults to <see cref="TimeProvider.System"/>. Overridable in tests to control
     /// idle eviction.
     /// </param>
-    public PersistentConversationTurnTracker(IUsageLedger ledger, TimeProvider? timeProvider = null)
+    public PersistentConversationTurnTracker(
+        IUsageLedger ledger,
+        ITranscriptStore? transcripts = null,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(ledger);
         _ledger = ledger;
+        _transcripts = transcripts;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -49,10 +64,9 @@ public sealed class PersistentConversationTurnTracker : IConversationTurnTracker
         var now = _timeProvider.GetUtcNow();
 
         // Fast path: an already-tracked, still-fresh session skips both the O(n) eviction scan and any
-        // ledger round-trip - the common case on this hot path (ProxyMiddleware calls NextTurn for every
-        // routed request), since most requests are turn >1 of an already-seen session. An idle-expired
-        // entry falls through to the slow path below, which evicts it and re-seeds from the ledger exactly
-        // as the single-path version did.
+        // ledger/transcript round-trip - the common case on this hot path (ProxyMiddleware calls NextTurn for
+        // every routed request), since most requests are turn >1 of an already-seen session. An idle-expired
+        // entry falls through to the slow path below, which evicts it and re-seeds exactly as before.
         lock (_lock)
         {
             if (_sessions.TryGetValue(key: sessionId, value: out var tracked) &&
@@ -64,16 +78,18 @@ public sealed class PersistentConversationTurnTracker : IConversationTurnTracker
             }
         }
 
-        // Not tracked (or idle-expired): GetMaxTurnNumber is a synchronous SQLite query, so it runs outside
-        // _lock rather than serializing every other session's NextTurn call behind this one's I/O.
-        var seed = _ledger.GetMaxTurnNumber(sessionId);
+        // Not tracked (or idle-expired): both GetMaxTurnNumber calls are synchronous SQLite queries, so they
+        // run outside _lock rather than serializing every other session's NextTurn call behind this one's I/O.
+        var seed = Math.Max(
+            _ledger.GetMaxTurnNumber(sessionId),
+            _transcripts?.GetMaxTurnNumber(sessionId) ?? 0);
 
         lock (_lock)
         {
             EvictIdle(now);
 
             // Re-check under the lock: another thread may have raced this one and already tracked/advanced
-            // this session while the ledger query above was in flight - use its counter rather than
+            // this session while the queries above were in flight - use its counter rather than
             // silently reissuing an already-issued turn number.
             var counter = _sessions.TryGetValue(key: sessionId, value: out var tracked) ? tracked.Counter : seed;
             var next = counter + 1;

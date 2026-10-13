@@ -1,0 +1,146 @@
+@* One request or response row in the Sessions messages pane (#176 §4.3). *@
+<div class="ls-msg @(IsRequest ? "ls-msg-request" : "ls-msg-response") @(IsSelected ? "ls-msg-selected" : "") @(IsLiveArrival ? "row-enter-append" : "")"
+     role="listitem"
+     id="@RowDomId">
+    <button type="button"
+            class="ls-msg-select"
+            data-msg-select="@RowKey"
+            aria-pressed="@(IsSelected ? "true" : "false")"
+            aria-label="@SelectAriaLabel"
+            @onclick="() => OnSelect.InvokeAsync()"
+            @onkeydown="OnKeyDown">
+        <span class="ls-msg-sender ls-truncate" data-tip="@SenderTip">
+            @if (!IsRequest)
+            {
+                <span class="ls-msg-model-dot" style="--agent-color:@AgentColor" aria-hidden="true"></span>
+            }
+            @SenderLabel
+        </span>
+        <span class="ls-msg-body @(IsClamped ? "ls-msg-clamp" : "")" data-msg-key="@RowKey">
+            @foreach (var chip in Chips)
+            {
+                <span class="ls-msg-chip @chip.Css">@chip.Text</span>
+            }
+            @if (string.IsNullOrWhiteSpace(BodyText))
+            {
+                <span class="text-slate-500">@(IsRequest ? EmptyRequestText : EmptyResponseText)</span>
+            }
+            else
+            {
+                @BodyText
+            }
+        </span>
+        <span class="ls-msg-time">
+            @if (IsRequest)
+            {
+                <span>#@Turn.TurnNumber · </span>
+            }
+            @Turn.Timestamp
+        </span>
+    </button>
+    @if (ShowToggle)
+    {
+        <button type="button"
+                class="ls-msg-more"
+                aria-expanded="@(!IsClamped)"
+                @onclick="ToggleExpand"
+                @onclick:stopPropagation="true">
+            @(IsClamped ? "Show more" : "Show less")
+        </button>
+    }
+</div>
+
+@code {
+
+    /// <summary>The turn this row belongs to.</summary>
+    [Parameter]
+    [EditorRequired]
+    public ConversationTurn Turn { get; set; } = null!;
+
+    /// <summary>Whether this is the request (Client) side; otherwise the response side.</summary>
+    [Parameter]
+    public bool IsRequest { get; set; }
+
+    /// <summary>Whether this row is the currently selected message.</summary>
+    [Parameter]
+    public bool IsSelected { get; set; }
+
+    /// <summary>Whether the overflow probe reported this body needs a clamp toggle.</summary>
+    [Parameter]
+    public bool Overflows { get; set; }
+
+    /// <summary>Whether the operator has expanded this row past the 6-line clamp.</summary>
+    [Parameter]
+    public bool Expanded { get; set; }
+
+    /// <summary>Whether conversation text is locked behind a passkey (ADR-0020).</summary>
+    [Parameter]
+    public bool ContentLocked { get; set; }
+
+    /// <summary>Whether this row just arrived live (triggers <c>.row-enter-append</c>).</summary>
+    [Parameter]
+    public bool IsLiveArrival { get; set; }
+
+    /// <summary>Invoked when the operator selects this row.</summary>
+    [Parameter]
+    public EventCallback OnSelect { get; set; }
+
+    /// <summary>Invoked when Up/Down should move to an adjacent row.</summary>
+    [Parameter]
+    public EventCallback<KeyboardEventArgs> OnNavigateKey { get; set; }
+
+    /// <summary>Invoked when the operator toggles Show more / Show less.</summary>
+    [Parameter]
+    public EventCallback<bool> OnExpandedChanged { get; set; }
+
+    /// <summary>Stable key used by chat-scroll.js's overflow probe (<c>data-msg-key</c>).</summary>
+    private string RowKey => $"{Turn.TurnNumber}:{(IsRequest ? "req" : "res")}";
+
+    /// <summary>DOM id for keyboard scroll-into-view.</summary>
+    private string RowDomId => $"ls-msg-{Turn.TurnNumber}-{(IsRequest ? "req" : "res")}";
+
+    private bool IsClamped => Overflows && !Expanded;
+    private bool ShowToggle => Overflows;
+
+    private string EmptyRequestText => ContentLocked ? "Locked - unlock with a passkey to view" : "No request captured";
+    private string EmptyResponseText => ContentLocked ? "Locked - unlock with a passkey to view" : "No response captured";
+
+    private string? BodyText => ContentLocked
+        ? null
+        : (IsRequest ? Turn.RequestSummary : Turn.ResponseSummary);
+
+    private string SenderLabel => IsRequest ? "Client" : (Turn.RoutedModel ?? Turn.Model);
+    private string AgentColor => ChartPalette.ColorFor(Turn.Agent);
+    private string SenderTip => IsRequest
+        ? $"Requested model: {Turn.RequestedModel ?? "—"}"
+        : (Turn.RoutedModel ?? Turn.Model);
+
+    private string SelectAriaLabel =>
+        $"{SenderLabel}, turn {Turn.TurnNumber}, {Turn.Timestamp}" +
+        (IsRequest ? $", requested model {Turn.RequestedModel ?? "unknown"}" : string.Empty);
+
+    private IEnumerable<(string Text, string Css)> Chips
+    {
+        get
+        {
+            if (IsRequest) yield break;
+            if (Turn is { IsLive: true, IsFallback: true })
+                yield return ("⚠ fallback", "ds-badge-warning");
+            if (Turn.SubstitutionReason is not (null or "" or "None" or "AutoSelect"))
+                yield return ("⇄ substituted", "ds-badge-warning");
+            if (!string.IsNullOrEmpty(Turn.SubagentSignal))
+                yield return (Turn.SubagentSignal, "ls-signal-badge");
+            if (Turn.IsLive && SessionMerger.IsTruncatedLiveSummary(Turn.ResponseSummary))
+                yield return ("truncated", "ls-msg-chip-muted");
+        }
+    }
+
+    private async Task ToggleExpand() => await OnExpandedChanged.InvokeAsync(!Expanded);
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key is "ArrowUp" or "ArrowDown")
+            await OnNavigateKey.InvokeAsync(e);
+    }
+
+}
