@@ -1,6 +1,6 @@
 # 0025. Serve persisted turn details and a session aggregate on a metadata-only RPC
 
-**Status:** proposed
+**Status:** accepted (accepted by David Pizon on 2026-10-13)
 **Date:** 2026-10-13
 **Deciders:** David Pizon
 
@@ -99,3 +99,34 @@ paging rule are specified in [`docs/plans/issue-176-phase2-persisted-turn-detail
 - Plan: [`docs/plans/issue-176-phase2-persisted-turn-details.md`](../plans/issue-176-phase2-persisted-turn-details.md)
 - Approved parent plan: [`docs/plans/issue-176-sessions-three-pane.md`](../plans/issue-176-sessions-three-pane.md) §5.2–§5.4
 - Issue: [#176](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/176)
+
+## Amendment 1 (2026-10-13): record whether a reply carried tool calls
+
+**Status:** proposed
+
+The Sessions details pane cannot tell a tool-call-only reply from an unreadable row. A stored
+`response_text_length` of `0` covers both, and nothing on the `request_transcripts` row flags tool calls. Showing
+"—" for both hides a common, legitimate case (agent turns that only call tools). David chose on 2026-10-13 to
+record it.
+
+**Decision.** Add a nullable `has_tool_calls INTEGER` column to `request_transcripts` (migrated with
+`AddColumnIfMissing`, no backfill), write it when the response is captured, and carry it on
+`SessionTurnDetail` as `optional bool has_tool_calls`. NULL means unknown: rows captured before this change,
+imported turns, providers with no `ProviderRegistration`, and bodies that could not be parsed. It is never
+guessed as `false`.
+
+**Detection.** `RequestTelemetryPublisher.PersistTranscriptAsync` receives the flag from the response parsers
+that already read the buffered body (`OpenAiResponseTextParser`, `AnthropicResponseTextParser`). Every translated
+provider (`gemini`, `ollama`, the Bedrock providers) reaches the OpenAI-shaped parser because its translator
+converts the response before capture, and native `anthropic` reaches the Anthropic parser, so two parsers
+cover all registered providers.
+
+**Consequences.**
+
+- Good, because the details pane can label "Tool call (no text)" accurately.
+- Bad, because this is a write on the request path next to `ProxyMiddleware`, so it needs the golden-path smoke
+  and static Serilog templates (AGENTS.md safety rules).
+- Bad, because rows captured earlier stay unknown for good: the response body is not in SQLite.
+- Neutral, because it adds one column and one optional proto field, both additive.
+
+The plan's §4.2 and §4.4 specify the files and labels.
