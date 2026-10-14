@@ -41,7 +41,8 @@ It implements phase 4 of [`router-evaluator-and-live-pricing.md`](../plans/route
 - **Bounded exposure**: how much of the user's conversation reaches a grader must be limited, and the grader must
   be no new destination.
 - **Auditable and reproducible**: each grade must say which rules produced it.
-- **Reversible**: no step may destroy existing data.
+- **A trustworthy start**: learning written under the old rule, and tallies that cannot be separated by row, must not
+  sit beside grades that saw the question.
 
 ## Considered Options
 
@@ -74,8 +75,9 @@ The rules, in short (full design in the plan):
 5. A `grade_receipts` table stores the status, an HMAC-SHA-256 of the question keyed by an install-local secret,
    size facts, the rule versions, and a nullable fingerprint reference reserved for
    [#294](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/294). It stores no question text.
-6. `JudgeRowPolicy` defaults to `Include`. Existing structure-only live rows are stamped `legacy` and excluded,
-   not deleted.
+6. `JudgeRowPolicy` defaults to `Include`. Existing live learning (rows and `live:` tallies) is deleted once on
+   upgrade, finally, per ADR-0024. Benchmark data is kept. David chose this on 2026-10-14 over quarantining the
+   rows.
 
 ### Consequences
 
@@ -91,8 +93,8 @@ The rules, in short (full design in the plan):
 - Bad, because the judge becomes the dominant signal (0.60), which makes the router's learning depend on one
   model's opinion and on the judge's known self-preference bias. The calibration analysis in
   `judge_shadow_scores` has not yet been run on the new rubric.
-- Bad, because pre-change running `live:` tallies mix old and new grades and cannot be separated; the plan leaves
-  them in place (open question 1 in the plan).
+- Bad, because the one-time purge is irreversible: the router loses what it learned from live traffic and runs on
+  benchmark priors until new `Complete` grades arrive, and the upgrade notes must say to copy the database first.
 - Neutral, because `ScorerVersion` moves to 3.0 and the rescan re-grades history, which spends judge quota.
 - Neutral, because `fingerprint_ref` stays NULL until #294, so similar-question comparison is exact-match only
   until then.
@@ -106,7 +108,7 @@ The rules, in short (full design in the plan):
 - Good, because abstentions are recorded as such rather than hidden in a smaller denominator.
 - Good, because the receipt links to the question without putting text in SQLite.
 - Bad, because live learning pauses whenever no judge is available.
-- Bad, because it needs a schema change, a startup validation, and a legacy stamp.
+- Bad, because it needs a schema change, a startup validation, and a one-time purge migration.
 
 ### B. Keep renormalizing and down-weight rows lacking a judge
 

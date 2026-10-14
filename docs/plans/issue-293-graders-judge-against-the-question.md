@@ -40,7 +40,7 @@
 | D2 | Grading-input budget is **16,384 characters** for question plus context. The newest user message keeps up to 12,288 of them, cut head-and-tail with a visible marker. | The instruction is often at the end of a long paste, so cutting only the tail would lose it. All three are `JudgeOptions` settings. |
 | D3 | A heuristic syntax verdict (Python, shell) keeps its **fixed weight** and is flagged `SyntaxAuthoritative=false` on the receipt. Today's weight-halving goes away. | Halving the weight makes the effective weights vary, which Eq. 8 forbids. Inventing a neutral score for it would add signal that was never measured. |
 | D4 | The question hash is an **HMAC-SHA-256** keyed with an install-local key from the secret store, over the whitespace-normalized newest user message. | A plain hash of a short prompt can be guessed by dictionary, which leaks text from a table ADR-0019 wants text-free. |
-| D5 | Existing live rows are **kept but quarantined**, not deleted (§6). | Deletion is irreversible. A stamp is reversible. |
+| D5 | **Settled by David on 2026-10-14: start fresh.** Existing live learning is deleted on upgrade, not quarantined (§6). | The old rows and tallies mix grades that never saw the question, and the running tallies cannot be split. A clean start is simpler than a permanent `legacy` state. |
 | D6 | `ScorerVersion` goes from `2.0` to `3.0`, so the rescan re-grades history with the question. | The score for the same response changes, which is exactly what that field is for. |
 
 ## 2. Design
@@ -148,7 +148,7 @@ Each phase leaves the build warning-free, all tests green, and coverage at or ab
 | 2 | Judge rubric and dimension hints keyed on `RouterDimension`; `PromptVersion` bump. Tests: prompt contains all three criteria, every one of the nine dimensions resolves a hint, a different-question fixture scores low against a recorded judge double. | Prompt tests pass; no dimension falls to the default silently. |
 | 3 | `GradeStatus`, fixed-weight `QualityScorer`, startup weight validation, removal of renormalization and syntax halving, `weights_version`. Tests: weights that do not sum to 1 fail startup; each abstention maps to the right status; a `Complete` score equals the plain weighted sum; no code path divides by remaining weight. | Scorer and aggregator tests pass. |
 | 4 | `grade_receipts`, `grader_scores` columns, HMAC key in the secret store, retention. Tests: migration on an old database, round-trip, no question text in any column (assert by scanning the row), retention purge. | Migration test passes on a database created by the current schema. |
-| 5 | Learning gate in both observers, `JudgeRowPolicy` default change, legacy quarantine (§6). Tests: `StructureOnly` and `Incomplete` never reach memory; `Complete` does; voters and trainers ignore quarantined rows. | Gate tests pass; golden-path smoke (ADR-0008 §5) passes since the hot path is touched. |
+| 5 | Learning gate in both observers, `JudgeRowPolicy` default change, one-time purge of pre-change live learning (§6). Tests: `StructureOnly` and `Incomplete` never reach memory; `Complete` does; the purge removes live rows and tallies and leaves benchmark rows untouched, and runs once. | Gate tests pass; golden-path smoke (ADR-0008 §5) passes since the hot path is touched. |
 | 6 | `ScorerVersion` 3.0 and rescan with window from the session file, `QualitySignalEvent.GradeStatus`, dashboard "structure only / learning paused" label, `docs/how-it-learns.md` correction, `docs/router/geval-shadow-scoring-plan.md` and `src/PLAN.md` updates, parent plan §14 and §15 marked done. | Docs match code; the rescan re-grades a fixture corpus. |
 
 ## 4. Privacy and size limits (the definitions the issue asks for)
@@ -168,13 +168,16 @@ Each phase leaves the build warning-free, all tests green, and coverage at or ab
 - **Hash as a leak.** A plain hash of "fix the bug" is guessable. D4 uses a keyed hash.
 - **A reversed default left behind.** `JudgeRowPolicy.DownWeight` would half-weight the only good rows. Phase 5 changes it, and its XML docs, together.
 
-## 6. Legacy data
+## 6. Starting fresh (David, 2026-10-14)
 
-Live rows written before this change were mostly graded with the old rule. Their treatment:
+Live learning written before this change is deleted, not stamped. It was graded under the old rule, and the per-dimension `live:` tallies mix old and new grades with no way to separate them, so a clean start is the only state that is fully trustworthy.
 
-- `memory_entries` gains `grade_status TEXT NOT NULL DEFAULT 'legacy'` (`ALTER TABLE`, guarded). New rows write `Complete`.
-- A `legacy` row with `is_judge_scored = 1` was graded by a judge that required the question (since PR #117, merged 2026-09-20). It keeps counting. A `legacy` row with `is_judge_scored = 0` is a structure-only grade and is excluded by the voters and trainers. It is **not deleted**.
-- Running per-dimension `live:` tallies (`RouterMemory.AddScoreAsync`) cannot be split by row. Whether to reset them is an open question (§8, item 1).
+- **What is deleted:** every live-traffic learning row in `memory_entries` (including judge-scored ones, so the router starts from one consistent rule), the persisted `live:` per-dimension tallies behind `RouterMemory.AddScoreAsync`, and the matching pre-change rows in `grader_scores` and `judge_shadow_scores`.
+- **What is kept:** benchmark data (CodeRouterBench, RouterBench priors, `dim_best`), transcripts and sessions, and the new `grade_receipts`. Phase 5 identifies live rows by how they are written today (the `live:` namespace and rows created from live requests) and the test asserts benchmark rows survive.
+- **How:** a one-time migration that runs on the first start of the new version, guarded by a `schema_meta` marker so it never runs twice. The router writes a log line with row counts per table, and the migration is its own commit so it can be reviewed apart from the schema change.
+- **Final, not soft:** deletion follows [ADR-0024](../adr/0024-protect-the-machine-shared-data-directory-and-make-deletion-final.md): `secure_delete` on, then the WAL truncated and a `VACUUM`, so deleted rows are not left readable in free pages.
+- **Consequence:** the router loses what it learned from live traffic and falls back to its benchmark priors until new `Complete` grades arrive. With no judge available that is indefinitely (decision 5). The `grade_status` column is not added to `memory_entries`, because every surviving live row is `Complete` by construction.
+- **Before the purge:** the migration is not reversible. Take a copy of `router_embedding_memory.db` first if you want one; the upgrade notes will say so.
 
 ## 7. Test and validation plan
 
@@ -186,7 +189,7 @@ Live rows written before this change were mostly graded with the old rule. Their
 
 ## 8. Open questions
 
-1. **Reset the `live:` tallies?** They mix pre- and post-change grades and cannot be separated. Options: leave them and let new `Complete` rows dilute them; zero them on upgrade; or stop reading `live:` tallies older than the upgrade. This plan assumes "leave them", which is reversible. Say if you want a reset.
+1. **Resolved: start fresh.** Old live rows and `live:` tallies are deleted on upgrade (§6). Remaining question: does "live" include the judge-scored rows too? The plan says yes, so the router starts from one rule; say if you want to keep them.
 2. **Per-criterion scores.** One call returns one number. Recording relevance, correctness and completeness separately would cost three calls or a structured reply, and would make an audit far clearer. Not planned; say if you want it.
 3. **Calibrating the weights.** 0.60/0.25/0.15 is a starting value. The plan proposes no change to it until the `judge_shadow_scores` calibration analysis (still not run, per `docs/how-it-learns.md`) has data on the new rubric.
 4. **Heuristic syntax at full weight (D3).** Python and shell get a language-aware scan, not a compiler. Keeping its weight fixed means a wrong heuristic moves the grade as much as a right parser would. The alternative is to drop heuristic syntax from the weighted axes for those languages, which changes the weights per language.
