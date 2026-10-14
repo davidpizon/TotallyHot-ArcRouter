@@ -56,7 +56,7 @@ public class AnthropicResponseTextParserTests
     }
 
     [Fact]
-    public void TryExtractFromNonStreamingBody_StringContent_ReturnsTextWithHasToolCallsNull()
+    public void TryExtractFromNonStreamingBody_StringContent_ReturnsTextWithHasToolCallsFalse()
     {
         const string json = """{"id":"msg_1","content":"Hi there"}""";
 
@@ -65,7 +65,7 @@ public class AnthropicResponseTextParserTests
 
         Assert.True(result);
         Assert.Equal(expected: "Hi there", actual: text);
-        Assert.Null(hasToolCalls);
+        Assert.False(hasToolCalls);
     }
 
     [Fact]

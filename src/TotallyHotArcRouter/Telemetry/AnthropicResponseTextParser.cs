@@ -17,7 +17,7 @@ public static class AnthropicResponseTextParser
     /// them, so the same reply is stored identically however it arrived (#189 decision D2). Returns
     /// <see langword="false"/> when the reply has no non-blank text (for example, a tool-only response).
     /// <paramref name="hasToolCalls"/> is <see langword="true"/> when any content block has
-    /// <c>type: "tool_use"</c>, <see langword="false"/> when <c>content</c> is a present array without one, and
+    /// <c>type: "tool_use"</c>, <see langword="false"/> when <c>content</c> is a present array without one or a bare string, and
     /// <see langword="null"/> when the body cannot be read as that shape.
     /// </summary>
     public static bool TryExtractFromNonStreamingBody(string json, out string text, out bool? hasToolCalls)
@@ -37,10 +37,11 @@ public static class AnthropicResponseTextParser
 
         if (node is not JsonObject obj) return false;
 
-        // A bare-string content (a non-spec but tolerated shape) still yields text; only an array can carry a
-        // tool_use block, so the flag stays null for a string or a missing content.
+        // A bare-string content (a non-spec but tolerated shape) still yields text and cannot carry a tool_use
+        // block, so it reports false; a missing or otherwise unreadable content leaves the flag null.
         var content = obj["content"];
         if (content is JsonArray blocks) hasToolCalls = blocks.Any(IsToolUseBlock);
+        else if (content is JsonValue value && value.TryGetValue<string>(out _)) hasToolCalls = false;
 
         var extracted = MessageContentTextExtractor.ExtractVerbatimText(content);
         if (!MessageContentTextExtractor.HasReplyText(extracted)) return false;
