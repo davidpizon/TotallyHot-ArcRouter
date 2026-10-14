@@ -424,6 +424,89 @@ public class SqliteTranscriptStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task InsertAsync_ThenGetTranscriptAsync_RoundTripsHasToolCalls()
+    {
+        var (_, store) = CreateEnabledStore();
+
+        var id = await store.InsertAsync(
+            record: MakeRecord("corr-tool-calls") with { HasToolCalls = true },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var row = await store.GetTranscriptAsync(id: id!.Value,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(row!.HasToolCalls);
+    }
+
+    [Fact]
+    public async Task InsertAsync_OmittingHasToolCalls_ReadsBackNull()
+    {
+        var (_, store) = CreateEnabledStore();
+
+        var id = await store.InsertAsync(record: MakeRecord("corr-tool-calls-null"),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var row = await store.GetTranscriptAsync(id: id!.Value,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Null(row!.HasToolCalls);
+    }
+
+    [Fact]
+    public async Task EnsureCreated_DatabasePredatingHasToolCalls_GainsTheColumnAndReadsPreexistingRowsAsNull()
+    {
+        Directory.CreateDirectory(_tempDirectory);
+        await using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            connection.Open();
+            await using var create = connection.CreateCommand();
+            create.CommandText = """
+                                 CREATE TABLE request_transcripts (
+                                     id INTEGER PRIMARY KEY AUTOINCREMENT, correlation_id TEXT NOT NULL,
+                                     created_at_utc TEXT NOT NULL, requested_model TEXT NOT NULL, routed_model TEXT NOT NULL,
+                                     dimension TEXT NULL, difficulty TEXT NULL, language TEXT NULL, is_utility INTEGER NOT NULL,
+                                     prompt_text TEXT NULL, response_text TEXT NULL, score REAL NULL, cost REAL NULL,
+                                     is_exploratory INTEGER NOT NULL, propensity REAL NOT NULL, input_tokens INTEGER NULL,
+                                     output_tokens INTEGER NULL, memory_entry_id INTEGER NULL,
+                                     session_id TEXT NOT NULL DEFAULT '',
+                                     archive_session_id TEXT NULL, archive_turn_id TEXT NULL,
+                                     prompt_text_length INTEGER NULL, response_text_length INTEGER NULL,
+                                     origin TEXT NOT NULL DEFAULT 'captured');
+                                 INSERT INTO request_transcripts (
+                                     correlation_id, created_at_utc, requested_model, routed_model, is_utility,
+                                     is_exploratory, propensity, session_id)
+                                 VALUES (
+                                     'corr-pre-tool-calls', '2026-01-01T00:00:00+00:00', 'gpt-5.4', 'kimi-k2.5', 0,
+                                     0, 1.0, 'pre');
+                                 """;
+            create.ExecuteNonQuery();
+        }
+
+        var database = CreateDatabase();
+        database.EnsureCreated();
+        var store = new SqliteTranscriptStore(database: database,
+            options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions { Enabled = true }));
+
+        long preexistingId;
+        await using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            connection.Open();
+            await using var select = connection.CreateCommand();
+            select.CommandText = "SELECT id FROM request_transcripts WHERE correlation_id = 'corr-pre-tool-calls';";
+            preexistingId = (long)select.ExecuteScalar()!;
+        }
+
+        var preexisting = await store.GetTranscriptAsync(id: preexistingId,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Null(preexisting!.HasToolCalls);
+
+        var id = await store.InsertAsync(
+            record: MakeRecord("corr-post-tool-calls") with { HasToolCalls = false },
+            cancellationToken: TestContext.Current.CancellationToken);
+        var written = await store.GetTranscriptAsync(id: id!.Value,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.False(written!.HasToolCalls);
+    }
+
+    [Fact]
     public async Task LoadPendingQualityRescanAsync_ReturnsRowsThatWereNeverScanned()
     {
         // The load-bearing case for the query's `IS NOT` operator. SQL's three-valued logic evaluates

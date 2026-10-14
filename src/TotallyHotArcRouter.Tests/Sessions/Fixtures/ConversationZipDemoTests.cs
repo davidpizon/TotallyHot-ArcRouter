@@ -47,7 +47,8 @@ public sealed class ConversationZipDemoTests : IDisposable
 
         var extractor = new ResponseTextExtractor();
         var ok = extractor.TryExtractText(
-            provider: "openai", isStreaming: false, bufferedResponseBody: turn.ClientResponse, text: out var text);
+            provider: "openai", isStreaming: false, bufferedResponseBody: turn.ClientResponse, text: out var text,
+            hasToolCalls: out _);
 
         Assert.True(ok);
         Assert.Equal(expected, text);

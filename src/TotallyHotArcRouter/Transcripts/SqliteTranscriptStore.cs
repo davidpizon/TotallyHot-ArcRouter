@@ -84,16 +84,20 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
                                   difficulty, language, is_utility, prompt_text, response_text, score, cost, is_exploratory,
                                   propensity, input_tokens, output_tokens, memory_entry_id, dim_best_model,
                                   untrained_baseline_model, untrained_baseline_predicted_score,
-                                  archive_session_id, archive_turn_id, prompt_text_length, response_text_length, origin)
+                                  archive_session_id, archive_turn_id, prompt_text_length, response_text_length, origin,
+                                  has_tool_calls)
                               VALUES (
                                   $correlationId, $sessionId, $createdAtUtc, $requestedModel, $routedModel, $dimension,
                                   $difficulty, $language, $isUtility, NULL, NULL, $score, $cost,
                                   $isExploratory, $propensity, $inputTokens, $outputTokens, $memoryEntryId, $dimBestModel,
                                   $untrainedBaselineModel, $untrainedBaselinePredictedScore,
-                                  $archiveSessionId, $archiveTurnId, $promptTextLength, $responseTextLength, $origin);
+                                  $archiveSessionId, $archiveTurnId, $promptTextLength, $responseTextLength, $origin,
+                                  $hasToolCalls);
                               SELECT last_insert_rowid();
                               """;
         command.Parameters.AddWithValue(parameterName: "$origin", value: record.Origin);
+        command.Parameters.AddWithValue(parameterName: "$hasToolCalls",
+            value: record.HasToolCalls is { } flag ? flag ? 1 : 0 : DBNull.Value);
         command.Parameters.AddWithValue(parameterName: "$correlationId", value: record.CorrelationId);
         command.Parameters.AddWithValue(parameterName: "$sessionId",
             value: CorrelationIdParser.SessionIdOf(record.CorrelationId));
@@ -265,7 +269,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
                                   language, is_utility, prompt_text, response_text, score, cost, is_exploratory, propensity,
                                   input_tokens, output_tokens, memory_entry_id, dim_best_model, untrained_baseline_model,
                                   untrained_baseline_predicted_score, is_judge_scored,
-                                  archive_session_id, archive_turn_id, origin
+                                  archive_session_id, archive_turn_id, origin, has_tool_calls
                               FROM request_transcripts
                               WHERE id = $id;
                               """;
@@ -584,7 +588,8 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
             ArchiveTurnId: reader.FieldCount > 23 && !reader.IsDBNull(23) && Guid.TryParse(reader.GetString(23), out var turnId)
                 ? turnId
                 : null,
-            Origin: reader.FieldCount > 24 && !reader.IsDBNull(24) ? reader.GetString(24) : SessionTurnOrigin.Captured);
+            Origin: reader.FieldCount > 24 && !reader.IsDBNull(24) ? reader.GetString(24) : SessionTurnOrigin.Captured,
+            HasToolCalls: reader.FieldCount > 25 && !reader.IsDBNull(25) ? reader.GetInt32(25) != 0 : null);
     }
 
     /// <inheritdoc/>

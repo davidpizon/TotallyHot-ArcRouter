@@ -83,6 +83,12 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// <see cref="Sessions.SessionTurnOrigin.Imported"/> for one a conversation import created (#165 phase 4). An
 /// imported row feeds learning but never spend, savings or ROI totals, because the router did not serve it.
 /// </param>
+/// <param name="HasToolCalls">
+/// Whether the captured response body contained a tool-call block (#176 Phase 2).
+/// <see langword="true"/> / <see langword="false"/> when the response parsers could decide;
+/// <see langword="null"/> for rows captured before this column, imported turns, unregistered providers, or
+/// unreadable bodies. Trailing and defaulted so existing positional constructions keep compiling.
+/// </param>
 public sealed record TranscriptRecord(
     long Id,
     string CorrelationId,
@@ -108,7 +114,8 @@ public sealed record TranscriptRecord(
     bool IsJudgeScored = false,
     Guid? ArchiveSessionId = null,
     Guid? ArchiveTurnId = null,
-    string Origin = Sessions.SessionTurnOrigin.Captured)
+    string Origin = Sessions.SessionTurnOrigin.Captured,
+    bool? HasToolCalls = null)
 {
     /// <summary>
     /// How long after a row is inserted a missing session-file extract is still treated as in flight. The row is

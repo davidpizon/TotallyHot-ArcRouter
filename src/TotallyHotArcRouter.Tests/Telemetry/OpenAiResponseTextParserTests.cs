@@ -13,7 +13,7 @@ public class OpenAiResponseTextParserTests
         const string json =
             """{"id":"chatcmpl-1","choices":[{"message":{"role":"assistant","content":"Hi there!"}}]}""";
 
-        var result = OpenAiResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out var text);
+        var result = OpenAiResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out var text, hasToolCalls: out _);
 
         Assert.True(result);
         Assert.Equal(expected: "Hi there!", actual: text);
@@ -24,7 +24,7 @@ public class OpenAiResponseTextParserTests
     {
         const string json = """{"id":"chatcmpl-1","choices":[]}""";
 
-        var result = OpenAiResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out _);
+        var result = OpenAiResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out _, hasToolCalls: out _);
 
         Assert.False(result);
     }
@@ -34,17 +34,19 @@ public class OpenAiResponseTextParserTests
     {
         const string json = """{"choices":[{}]}""";
 
-        var result = OpenAiResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out _);
+        var result = OpenAiResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out _, hasToolCalls: out _);
 
         Assert.False(result);
     }
 
     [Fact]
-    public void TryExtractFromNonStreamingBody_MalformedJson_ReturnsFalse()
+    public void TryExtractFromNonStreamingBody_MalformedJson_ReturnsFalseWithHasToolCallsNull()
     {
-        var result = OpenAiResponseTextParser.TryExtractFromNonStreamingBody(json: "{ not json", text: out _);
+        var result = OpenAiResponseTextParser.TryExtractFromNonStreamingBody(json: "{ not json", text: out _,
+            hasToolCalls: out var hasToolCalls);
 
         Assert.False(result);
+        Assert.Null(hasToolCalls);
     }
 
     [Fact]
@@ -57,7 +59,7 @@ public class OpenAiResponseTextParserTests
             "data: {\"choices\":[{\"delta\":{\"content\":\"!\"}}]}\n\n" +
             "data: [DONE]\n\n";
 
-        var result = OpenAiResponseTextParser.TryExtractFromStreamingBuffer(sseText: sse, text: out var text);
+        var result = OpenAiResponseTextParser.TryExtractFromStreamingBuffer(sseText: sse, text: out var text, hasToolCalls: out _);
 
         Assert.True(result);
         Assert.Equal(expected: "Hi there!", actual: text);
@@ -70,7 +72,7 @@ public class OpenAiResponseTextParserTests
             "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n" +
             "data: [DONE]\n\n";
 
-        var result = OpenAiResponseTextParser.TryExtractFromStreamingBuffer(sseText: sse, text: out _);
+        var result = OpenAiResponseTextParser.TryExtractFromStreamingBuffer(sseText: sse, text: out _, hasToolCalls: out _);
 
         Assert.False(result);
     }
@@ -78,7 +80,7 @@ public class OpenAiResponseTextParserTests
     [Fact]
     public void TryExtractFromStreamingBuffer_EmptyBuffer_ReturnsFalse()
     {
-        var result = OpenAiResponseTextParser.TryExtractFromStreamingBuffer(sseText: string.Empty, text: out _);
+        var result = OpenAiResponseTextParser.TryExtractFromStreamingBuffer(sseText: string.Empty, text: out _, hasToolCalls: out _);
 
         Assert.False(result);
     }
@@ -104,7 +106,7 @@ public class OpenAiResponseTextParserTests
     [MemberData(nameof(WhitespaceDeltaSequences))]
     public void TryExtractFromStreamingBuffer_WhitespaceOnlyDeltas_RoundTripExactly(string[] deltas, string expected)
     {
-        var result = OpenAiResponseTextParser.TryExtractFromStreamingBuffer(sseText: BuildSse(deltas), text: out var text);
+        var result = OpenAiResponseTextParser.TryExtractFromStreamingBuffer(sseText: BuildSse(deltas), text: out var text, hasToolCalls: out _);
 
         Assert.True(result);
         Assert.Equal(expected: expected, actual: text);
@@ -115,7 +117,7 @@ public class OpenAiResponseTextParserTests
     {
         // A blank whole reply (e.g. a "\n" streamed ahead of a tool call) is still "no text" (#189 D1).
         var result = OpenAiResponseTextParser.TryExtractFromStreamingBuffer(sseText: BuildSse("\n", "  ", "\n\n"),
-            text: out _);
+            text: out _, hasToolCalls: out _);
 
         Assert.False(result);
     }
@@ -128,7 +130,7 @@ public class OpenAiResponseTextParserTests
         const string json =
             """{"choices":[{"message":{"role":"assistant","content":[{"type":"text","text":"Line one"},{"type":"text","text":"\n\n"},{"type":"text","text":"Line two"}]}}]}""";
 
-        var result = OpenAiResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out var text);
+        var result = OpenAiResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out var text, hasToolCalls: out _);
 
         Assert.True(result);
         Assert.Equal(expected: "Line one\n\nLine two", actual: text);
@@ -140,7 +142,7 @@ public class OpenAiResponseTextParserTests
         const string json =
             """{"choices":[{"message":{"role":"assistant","content":"Hello\n\nWorld\n    x = 1"}}]}""";
 
-        var result = OpenAiResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out var text);
+        var result = OpenAiResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out var text, hasToolCalls: out _);
 
         Assert.True(result);
         Assert.Equal(expected: "Hello\n\nWorld\n    x = 1", actual: text);
@@ -151,9 +153,51 @@ public class OpenAiResponseTextParserTests
     {
         const string json = """{"choices":[{"message":{"role":"assistant","content":" \n "}}]}""";
 
-        var result = OpenAiResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out _);
+        var result = OpenAiResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out _, hasToolCalls: out _);
 
         Assert.False(result);
+    }
+
+    [Fact]
+    public void TryExtractFromNonStreamingBody_ToolCallsOnly_ReturnsFalseWithHasToolCallsTrue()
+    {
+        const string json =
+            """{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"search","arguments":"{}"}}]}}]}""";
+
+        var result = OpenAiResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out _,
+            hasToolCalls: out var hasToolCalls);
+
+        Assert.False(result);
+        Assert.True(hasToolCalls);
+    }
+
+    [Fact]
+    public void TryExtractFromNonStreamingBody_TextWithoutToolCalls_HasToolCallsFalse()
+    {
+        const string json =
+            """{"choices":[{"message":{"role":"assistant","content":"Hi"}}]}""";
+
+        var result = OpenAiResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out _,
+            hasToolCalls: out var hasToolCalls);
+
+        Assert.True(result);
+        Assert.False(hasToolCalls);
+    }
+
+    [Fact]
+    public void TryExtractFromStreamingBuffer_ToolCallDeltas_HasToolCallsTrueWithoutText()
+    {
+        var sse =
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n" +
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"search\",\"arguments\":\"\"}}]}}]}\n\n" +
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{}\"}}]}}]}\n\n" +
+            "data: [DONE]\n\n";
+
+        var result = OpenAiResponseTextParser.TryExtractFromStreamingBuffer(sseText: sse, text: out _,
+            hasToolCalls: out var hasToolCalls);
+
+        Assert.False(result);
+        Assert.True(hasToolCalls);
     }
 
     /// <summary>

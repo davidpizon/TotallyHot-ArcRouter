@@ -189,7 +189,7 @@ internal sealed class RequestTelemetryPublisher
             isStreaming: isStreaming,
             tailScanner: tailScanner);
 
-        var (newestUserMessage, requestSummary, responseSummary, responseText, correlationId) =
+        var (newestUserMessage, requestSummary, responseSummary, responseText, hasToolCalls, correlationId) =
             ExtractResponseTextAndCachePending(
                 requestBody: requestBody,
                 usageShapeProvider: usageShapeProvider,
@@ -256,6 +256,7 @@ internal sealed class RequestTelemetryPublisher
                 classification: classification,
                 taskText: taskText,
                 responseText: responseText,
+                hasToolCalls: hasToolCalls,
                 estimatedCostUsd: estimatedCostUsd,
                 isExploratory: isExploratory,
                 propensity: propensity,
@@ -637,8 +638,8 @@ internal sealed class RequestTelemetryPublisher
     /// request's correlation id, and seeds every pending-cache lookup a later-arriving background job
     /// (embedding memory scoring, the judge shadow-scorer) keys off that same correlation id.
     /// </summary>
-    private (string? NewestUserMessage, string? RequestSummary, string? ResponseSummary, string? ResponseText, string
-        CorrelationId) ExtractResponseTextAndCachePending(
+    private (string? NewestUserMessage, string? RequestSummary, string? ResponseSummary, string? ResponseText,
+        bool? HasToolCalls, string CorrelationId) ExtractResponseTextAndCachePending(
             JsonObject? requestBody,
             string usageShapeProvider,
             byte[] usageShapeBytes,
@@ -656,8 +657,11 @@ internal sealed class RequestTelemetryPublisher
         // would just repeat the first.
         var newestUserMessage = RequestTextExtractor.ExtractNewestUserMessage(requestBody);
         var requestSummary = TextTruncator.Truncate(newestUserMessage);
+        // hasToolCalls is filled on the same parse as the text: a tool-only reply returns false for text
+        // but still reports true here so PersistTranscriptAsync can label the zero-length response (#176).
         var responseSummary = _responseTextExtractor.TryExtractText(provider: usageShapeProvider,
-            isStreaming: isStreaming, bufferedResponseBody: usageShapeBytes, text: out var responseText)
+            isStreaming: isStreaming, bufferedResponseBody: usageShapeBytes, text: out var responseText,
+            hasToolCalls: out var hasToolCalls)
             ? TextTruncator.Truncate(responseText)
             : null;
 
@@ -713,7 +717,7 @@ internal sealed class RequestTelemetryPublisher
         if (GraderQuestionText.IsPresent(newestUserMessage) && AnyLlmGraderEnabled())
             _pendingPromptCache?.Set(correlationId: correlationId, prompt: newestUserMessage);
 
-        return (newestUserMessage, requestSummary, responseSummary, responseText, correlationId);
+        return (newestUserMessage, requestSummary, responseSummary, responseText, hasToolCalls, correlationId);
     }
 
     /// <summary>
@@ -741,6 +745,7 @@ internal sealed class RequestTelemetryPublisher
         RequestClassification? classification,
         string? taskText,
         string? responseText,
+        bool? hasToolCalls,
         decimal? estimatedCostUsd,
         bool isExploratory,
         double propensity,
@@ -787,7 +792,8 @@ internal sealed class RequestTelemetryPublisher
                         UntrainedBaselineModel: untrainedBaselineModel,
                         UntrainedBaselinePredictedScore: untrainedBaselinePredictedScore,
                         ArchiveSessionId: archive?.ArchiveSessionId,
-                        ArchiveTurnId: archive?.ArchiveTurnId),
+                        ArchiveTurnId: archive?.ArchiveTurnId,
+                        HasToolCalls: hasToolCalls),
                     cancellationToken: CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

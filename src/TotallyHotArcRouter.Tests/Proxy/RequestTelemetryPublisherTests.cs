@@ -293,6 +293,125 @@ public class RequestTelemetryPublisherTests
         Assert.Equal(0.62, actual: transcriptStore.LastInserted.UntrainedBaselinePredictedScore);
     }
 
+    [Fact]
+    public async Task PublishAsync_OpenAiToolCallsOnly_PersistsHasToolCallsTrue()
+    {
+        var transcriptStore = new CapturingTranscriptStore();
+        var publisher = CreatePublisher(
+            telemetryPublisher: new FakeTelemetryPublisher(),
+            transcriptStore: transcriptStore,
+            routingOptionsMonitor: new StaticOptionsMonitor<RoutingOptions>(
+                new RoutingOptions { EnableAdaptiveRouting = true }));
+
+        var clientShapeBytes =
+            """{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"search","arguments":"{}"}}]}}]}"""u8
+                .ToArray();
+
+        await publisher.PublishAsync(
+            context: CreateContext(sessionId: "session-tool-calls"),
+            route: CreateRoute(provider: "openai", true),
+            requestedModelName: "primary",
+            isFallback: false,
+            telemetryShapeProvider: "openai",
+            rewrittenRequestBody: "{}"u8.ToArray(),
+            capturedResponseBytes: clientShapeBytes,
+            nativeResponseBytes: null,
+            isStreaming: false,
+            latencyToHeadersMs: 10,
+            totalDurationMs: 20,
+            statusCode: 200,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(transcriptStore.LastInserted?.HasToolCalls);
+    }
+
+    [Fact]
+    public async Task PublishAsync_AnthropicToolUseOnly_PersistsHasToolCallsTrue()
+    {
+        var transcriptStore = new CapturingTranscriptStore();
+        var publisher = CreatePublisher(
+            telemetryPublisher: new FakeTelemetryPublisher(),
+            transcriptStore: transcriptStore,
+            routingOptionsMonitor: new StaticOptionsMonitor<RoutingOptions>(
+                new RoutingOptions { EnableAdaptiveRouting = true }));
+
+        var nativeBytes = """{"content":[{"type":"tool_use","id":"t1","name":"search"}],"usage":{"input_tokens":1,"output_tokens":2}}"""u8
+            .ToArray();
+
+        await publisher.PublishAsync(
+            context: CreateContext(sessionId: "session-tool-use"),
+            route: CreateRoute(provider: "anthropic", true),
+            requestedModelName: "primary",
+            isFallback: false,
+            telemetryShapeProvider: "openai",
+            rewrittenRequestBody: "{}"u8.ToArray(),
+            capturedResponseBytes: """{"choices":[]}"""u8.ToArray(),
+            nativeResponseBytes: nativeBytes,
+            isStreaming: false,
+            latencyToHeadersMs: 10,
+            totalDurationMs: 20,
+            statusCode: 200,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(transcriptStore.LastInserted?.HasToolCalls);
+    }
+
+    [Fact]
+    public async Task PublishAsync_TextWithoutToolCalls_PersistsHasToolCallsFalse()
+    {
+        var transcriptStore = new CapturingTranscriptStore();
+        var publisher = CreatePublisher(
+            telemetryPublisher: new FakeTelemetryPublisher(),
+            transcriptStore: transcriptStore,
+            routingOptionsMonitor: new StaticOptionsMonitor<RoutingOptions>(
+                new RoutingOptions { EnableAdaptiveRouting = true }));
+
+        await publisher.PublishAsync(
+            context: CreateContext(sessionId: "session-text-only"),
+            route: CreateRoute(provider: "openai", true),
+            requestedModelName: "primary",
+            isFallback: false,
+            telemetryShapeProvider: "openai",
+            rewrittenRequestBody: "{}"u8.ToArray(),
+            capturedResponseBytes: """{"choices":[{"message":{"role":"assistant","content":"Hi"}}]}"""u8.ToArray(),
+            nativeResponseBytes: null,
+            isStreaming: false,
+            latencyToHeadersMs: 10,
+            totalDurationMs: 20,
+            statusCode: 200,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(transcriptStore.LastInserted?.HasToolCalls);
+    }
+
+    [Fact]
+    public async Task PublishAsync_UnreadableResponse_PersistsHasToolCallsNull()
+    {
+        var transcriptStore = new CapturingTranscriptStore();
+        var publisher = CreatePublisher(
+            telemetryPublisher: new FakeTelemetryPublisher(),
+            transcriptStore: transcriptStore,
+            routingOptionsMonitor: new StaticOptionsMonitor<RoutingOptions>(
+                new RoutingOptions { EnableAdaptiveRouting = true }));
+
+        await publisher.PublishAsync(
+            context: CreateContext(sessionId: "session-unreadable"),
+            route: CreateRoute(provider: "openai", true),
+            requestedModelName: "primary",
+            isFallback: false,
+            telemetryShapeProvider: "openai",
+            rewrittenRequestBody: "{}"u8.ToArray(),
+            capturedResponseBytes: "{ not json"u8.ToArray(),
+            nativeResponseBytes: null,
+            isStreaming: false,
+            latencyToHeadersMs: 10,
+            totalDurationMs: 20,
+            statusCode: 200,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Null(transcriptStore.LastInserted?.HasToolCalls);
+    }
+
     /// <summary>
     /// #165 phase 2: the transcript row follows capture, not Adaptive Routing, and stores the archive ids the
     /// capture minted.
