@@ -1,7 +1,8 @@
 # Plan: Evaluator, dynamic buckets, and live prices
 
-**Status:** Draft, 2026-10-14. Not approved. No coding until David signs off on this file, per the [standing rule](../router/standing-rules.md#approved-plan-before-coding). A comment on this pull request or on one of the issues below is that sign-off.
+**Status:** Draft, 2026-10-14. Not approved. No coding until David signs off on this file, per the [standing rule](../router/standing-rules.md#approved-plan-before-coding). A comment on this pull request, or on [#290](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/290), [#291](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/291), [#292](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/292), [#293](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/293), or [#294](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/294), is that sign-off.
 **Issues:** [#290](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/290) actual cost, [#291](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/291) cost in every normal decision, [#292](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/292) the training epoch, [#293](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/293) grades against the question, [#294](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/294) the meaning fingerprint and dynamic buckets.
+**Package review:** [#301](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/301) is the NuGet keep-or-replace note cited in [§21](#21-package-choices). It is not one of the five issues above, and this plan does not implement it.
 **Why one file:** David asked for a single plan covering those five issues. This path is that plan. Implementation pull requests link here.
 **Research:** [fast-trainable-evaluators.md](../research/fast-trainable-evaluators.md) (abstract shortlist, 2026-10-13), [zhou-2606.22902-deviation-audit.md](../research/zhou-2606.22902-deviation-audit.md), and the paper files indexed in [papers/README.md](../research/papers/README.md).
 **Source paper, unchanged:** Zhou et al., Agent-as-a-Router, arXiv:2606.22902. The system in that paper is ACRouter. Reward \(r = \varepsilon_1 s + \varepsilon_2 \kappa\) with \((\varepsilon_1, \varepsilon_2) = (1, -0.1)\) in their evaluation.
@@ -383,9 +384,8 @@ An epoch must not start a Python process, import a Python module, or shell out t
 
 Quality heads, token heads, the utility head, and k-means stay small.
 
-- Prefer the trainers already in the tree: `EmbeddingLogRegTrainer` (ridge linear head per model, batch gradient descent) and `SphericalKMeansTrainer` (spherical k-means, silhouette sweep). New heads follow that pattern: plain C#, no new native runtime.
-- `Microsoft.ML` is allowed if a later change needs a trainer that would be worse to reimplement, such as a coordinate-descent logistic fit. It is a .NET library. It is not required for the first epoch, and it is not a reason to add Python.
-- These models are coefficients. They are not ONNX graphs. Do not export them to ONNX.
+- Keep the trainers already in the tree: `EmbeddingLogRegTrainer` (ridge linear head per model, batch gradient descent) and `SphericalKMeansTrainer` (spherical k-means, silhouette sweep). They stay for the reasons in [§21](#21-package-choices). New prediction heads, and the Platt and isotonic calibrators, use `Microsoft.ML` 5.0.0, pinned in that section. It is a .NET library. It is not a reason to add Python.
+- These models are coefficients, or a Microsoft.ML model for a new head. They are not ONNX graphs. Do not export them to ONNX. Do not replace `EmbeddingLogRegModelArtifact` or `LogRegModelArtifact` with a Microsoft.ML save.
 
 `LogRegTrainer`'s TF-IDF baseline stays the TF-IDF voter. It is not the fingerprint head.
 
@@ -397,7 +397,7 @@ Quality heads, token heads, the utility head, and k-means stay small.
 
 Contrastive fine-tuning of the embedder is not the default. It is considered only after the C# heads and the existing kNN have been compared on the metrics in [§18](#18-success-metrics) and the heads have failed to beat kNN.
 
-If that happens, training uses TorchSharp from C#. The result is served with TorchSharp, or exported to ONNX and served with the existing ONNX Runtime session if an export of that fine-tune actually loads and matches TorchSharp's outputs on a fixed set of prompts. Until that match is shown, there is no export. A second native runtime beside ONNX Runtime is a cost, and it is why this stays behind the gate.
+If that happens, training uses `TorchSharp-cpu` 0.107.0 from C# ([§21](#21-package-choices)). The result is served with TorchSharp, or exported to ONNX and served with the existing ONNX Runtime session if an export of that fine-tune actually loads and matches TorchSharp's outputs on a fixed set of prompts. Until that match is shown, there is no export. A second native runtime beside ONNX Runtime is a cost, and it is why this stays behind the gate. The build does not reference the package until the gate opens.
 
 The training pairs are data-derived ([§6](#6-meaning-fingerprint-294)). There is no fixed label list.
 
@@ -451,7 +451,7 @@ Do not assign numbers here. Write each ADR when its phase is about to start, fro
 | Training epoch and the significance bar | Phase 7 | Readiness test, accept/reject rule, clamps, versioning, rollback. |
 | Fingerprint and bucket versions | Phase 2 for the vector, phase 7 for buckets | What is in the text block, what is in the pre-routing tool block, the separate versions, what happens when the embedder changes, how a bucket version is stored, and that post-response tool labels are not inputs. The pre-routing fields are this ADR's. The tool-loop ADR does not decide them again. |
 | Tool-loop recording beyond `has_tool_calls` | Phase 2 | Post-response counts, outcomes, the tool-result chain, and loop tokens and loop cost in [§6.2](#62-recording-beyond-the-yesno-flag). Phase 1 only labels each request's own cost. Loop cost uses those source labels and the weakest-source rule. ADR-0025 Amendment 1 already decided the boolean. This ADR does not reopen the boolean's NULL rule, and it does not decide the pre-routing feature list. |
-| Native training stack | Phase 3 | C# heads and the existing trainers. TorchSharp only behind the phase 8 gate. ONNX Runtime training rejected on the evidence in [§13.5](#135-onnx-runtime-on-device-training-is-not-the-path). |
+| Native training stack | Phase 3 | C# heads. `Microsoft.ML` 5.0.0 for new prediction and calibration heads. Existing trainers stay ([§21](#21-package-choices)). `Meta.Numerics` 4.2.0 for the epoch's significance tests. `TorchSharp-cpu` 0.107.0 only behind the phase 8 gate. Conformal calibration stays hand-rolled. ONNX Runtime training rejected on the evidence in [§13.5](#135-onnx-runtime-on-device-training-is-not-the-path). No Python. |
 | Grades include the question | Phase 4 | Owned by [#293](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/293). This plan depends on it and does not replace it. |
 
 [ADR-0009](../adr/0009-per-request-counterfactual-token-estimation.md) stays the rule for counterfactual token estimates. This plan uses that estimate as the low-confidence token prior for a new agent. It does not reopen the tokenizer decision.
@@ -524,3 +524,36 @@ These have a recommended default above. David can override them without rewritin
 - [fast-trainable-evaluators.md](../research/fast-trainable-evaluators.md) and [papers/README.md](../research/papers/README.md).
 - [how-it-learns.md](../how-it-learns.md), [model-price-catalog.md](../router/model-price-catalog.md), [telemetry.md](../router/telemetry.md#pricing), [ADR-0009](../adr/0009-per-request-counterfactual-token-estimation.md).
 - ONNX Runtime training: [TrainingSession](https://onnxruntime.ai/docs/api/csharp/api/Microsoft.ML.OnnxRuntime.TrainingSession.html), [TrainingSession.shared.cs](https://github.com/microsoft/onnxruntime/blob/main/csharp/src/Microsoft.ML.OnnxRuntime/Training/TrainingSession.shared.cs), NuGet index `https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime.training/index.json` retrieved 2026-10-14.
+- Package pins in [§21](#21-package-choices), NuGet registration retrieved 2026-10-14: `Microsoft.ML` 5.0.0 (MIT, published 2025-11-11), `Meta.Numerics` 4.2.0 (MS-PL, published 2025-07-14), `MathNet.Numerics` 5.0.0 (published 2022-04-03, the last stable), `TorchSharp-cpu` 0.107.0 (published 2026-05-07). `Lodestar.Conformal` 0.2.0 was the only conformal-prediction hit and is not adopted.
+- [#301](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/301), the NuGet keep-or-replace note. This plan cites it and does not implement it.
+
+## 21. Package choices
+
+Checked against NuGet on 2026-10-14. This is the dependency list for the work in this plan. It adds no package reference. [#301](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/301) is the same review's other item, and it is cited at the end of this section.
+
+Versions below are the stable packages this plan will take when the phase that needs them starts.
+
+- **`Microsoft.ML` 5.0.0** (MIT, published 2025-11-11) for new prediction heads and for calibration heads. Platt scaling is `PlattCalibrator`. Isotonic regression is `IsotonicCalibrator`. Both types are in that package. The first calibration fit is still the one-parameter Platt scale in [§9](#9-calibration-and-abstention). Isotonic regression is the same package, available when a later comparison asks for it, and it is not the first fit. The package also contains native `LdaNative` binaries for latent Dirichlet allocation. This plan does not train LDA and does not call that library. The existing ridge and logistic trainers stay on their own artifacts; see Kept custom.
+- **Conformal calibration is hand-rolled.** Split conformal is a quantile of the calibration scores, about twenty lines, in C#. There is no mature NuGet package for it. The only hit on the 2026-10-14 check was `Lodestar.Conformal` 0.2.0, with 149 downloads. That package is not a dependency this plan takes. The quantile, the widened child-bucket quantile, and the versioned artifact stay as [§13.4](#134-calibration-and-weights-are-versioned-c-settings) describes.
+- **`Meta.Numerics` 4.2.0** (MS-PL, published 2025-07-14) for the training epoch's significance tests ([§11](#11-the-training-epoch-292)). `MathNet.Numerics` 5.0.0, published 2022-04-03, is the last stable MathNet release. The NuGet index lists no stable version after it.
+- **`TorchSharp-cpu` 0.107.0** (MIT, published 2026-05-07) only if the gated embedder fine-tune in [§13.3](#133-setfit-only-through-torchsharp-and-only-if-the-default-path-loses) happens. The pin is the CPU package. The build does not reference it until that gate opens.
+- **No Python.** An epoch does not start a Python process, import a Python module, or shell out to a notebook ([§13](#13-no-python-training-stays-in-c)). None of the packages above is a Python runtime.
+
+### Kept custom
+
+Each of these stays, with one reason.
+
+| Code | Why it stays |
+|---|---|
+| `SphericalKMeansTrainer` | ML.NET `KMeansTrainer` scores squared Euclidean distance and does not sweep \(k\) by silhouette. |
+| `CircuitBreaker` | It is per model and per provider, the cooldown doubles on each consecutive trip, and that state is what `RoutingCandidateBuilder` ranks fallbacks from. |
+| `SemanticResponseCache` | Lookup is cosine similarity inside a compatibility scope. `HybridCache` is exact-key only. |
+| `PendingValueCache<T>` | `TryTake` is an atomic take-and-remove, and capacity eviction is oldest-first. The pending-text, prompt, and backbone caches sit on this type. |
+| SQLite stores | The existing `Microsoft.Data.Sqlite` stores stay. Rewriting them is the risk. Dapper is acceptable for a new store. This plan does not add Dapper, and it does not migrate the current stores. |
+| `EmbeddingLogRegTrainer`, `LogRegTrainer` | Both already persist a coefficient artifact (`EmbeddingLogRegModelArtifact`, `LogRegModelArtifact`). A Microsoft.ML model file would be a second saved format. New prediction heads may use `Microsoft.ML`. These two trainers are not moved. |
+| TF-IDF in `LogRegTrainer` | It is the paper-faithful logreg baseline. An ML.NET text featurizer would be a different voter. |
+| `LinUcbBaseline`, `LinThompsonSamplingBaseline` | Vowpal Wabbit needs a native binary. These LinUCB and LinTS baselines stay plain C#. |
+| `RankCorrelation.Spearman` | The two judge analyzers share average-tie ranks and a null result when a sample has zero variance. `Meta.Numerics` exposes `SpearmanRhoTest`, a significance test with a different result. Epoch tests use Meta.Numerics. The judge correlation stays this method. |
+| `SseEventReader` | It scans an already-buffered body for `data:` JSON and skips malformed lines. It is not a live SSE client. |
+
+[#301](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/301) records the other decision from that review: replace `CostReconciliationRetryPolicy` with `Microsoft.Extensions.Http.Resilience` when that code is next touched. It is low priority, it cites no observed cost yet, and it needs its own approved plan before any code. This section does not approve that replacement. The optional `TensorPrimitives.CosineSimilarity` follow-up on that issue is also outside this plan.
