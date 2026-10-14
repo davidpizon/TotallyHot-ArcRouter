@@ -62,13 +62,13 @@
          dependency isn't implicit - matches TotallyHotArcRouter.Gui.csproj's explicit Grpc.Tools reference. -->
     <!-- Backs Program.cs's UseWindowsService() call (auto-update plan Phase 1) so the host can run
          under the Windows Service Control Manager; a no-op when launched any other way. -->
-    <PackageReference Include="Fido2" Version="4.2.0" />
+    <PackageReference Include="Fido2" Version="4.3.0" />
     <PackageReference Include="Google.Protobuf" Version="3.36.2" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.13" />
     <!-- Backs Program.cs's UseSystemd() call (web GUI migration plan Phase P10) so the host can run
          under systemd (sd_notify readiness/stop signaling, journal-formatted console logging); a no-op
          when launched any other way, mirroring Microsoft.Extensions.Hosting.WindowsServices above. -->
-    <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.13" />
     <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.10" />
     <PackageReference Include="Grpc.AspNetCore" Version="2.84.0" />
     <PackageReference Include="Grpc.Tools" Version="2.84.0">
@@ -84,7 +84,7 @@
     <!-- First database dependency in the repo: the model price catalog's SQLite store
          (docs/router/model-price-catalog.md). Nothing used a database before - router memory is a
          plain JSON file. -->
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" />
     <!-- Local, in-process BGE-large embedding inference for PLAN.md Phase J's task-embedding-keyed
          memory - no network hop inline with routing, no dependency on an operator having configured
          an embeddings-capable provider. -->
@@ -95,7 +95,7 @@
     <!-- Autoregressive generation (KV-cache, greedy sampling, tokenization) for the llm_router voter's
          local ONNX-hosted small instruct model (PLAN.md Phase L) - owns exactly the generation-loop
          complexity the plain Microsoft.ML.OnnxRuntime session above would otherwise require hand-rolling. -->
-    <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.17.1" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.18.0" />
     <!-- Local tiktoken encodings for the counterfactual token estimator (ADR-0009). Encoding data is
          embedded in the .Data.* packages, so unlike the ONNX artifacts there is no first-run download.
          cl100k_base covers the GPT-4/3.5 family, o200k_base the GPT-4o family; Claude models are counted
@@ -108,7 +108,7 @@
          10.0.4. Same technique - and same reason - as the SQLitePCLRaw pin below: a direct reference wins
          over the transitive one and clears the NuGet audit (NU1903). 10.0.11 matches the version every
          other Microsoft.* package here is pinned to. -->
-    <PackageReference Include="Microsoft.Bcl.Memory" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Bcl.Memory" Version="10.0.13" />
     <PackageReference Include="ModelContextProtocol" Version="2.2.0" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
     <!-- Pin the native SQLite bundle above the version Microsoft.Data.Sqlite pulls transitively:
@@ -121,7 +121,7 @@
     <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.1" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.12" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.13" />
   </ItemGroup>
 
   <ItemGroup>
