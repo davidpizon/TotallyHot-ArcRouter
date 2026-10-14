@@ -198,3 +198,11 @@ This repository consumes it; it does not publish or relicense it.
 `docs/research/technical-reference.md` is a reading aid summarizing that paper for implementation
 purposes. The paper itself remains the copyright of its authors and is distributed under arXiv's
 own license terms.
+
+`docs/research/papers/` also redistributes third-party paper text. Eight files are Markdown
+adaptations of arXiv HTML the authors licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+Those adaptations stay under CC BY 4.0; they are not relicensed under the AGPL. Each file names the
+authors, the arXiv source, and the conversion. The other eight files are original summaries, because
+the arXiv non-exclusive license does not grant republication, or, for Hybrid LLM
+(arXiv:2404.14618), because CC BY-NC-ND 4.0 does not allow a derivative and this project is not
+limited to non-commercial use. The index is [`docs/research/papers/README.md`](docs/research/papers/README.md).

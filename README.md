@@ -348,5 +348,51 @@ one model family is real and is not yet measured. See
 §G2 for the self-preference probe that is meant to quantify it.
 
 Agent-readable digests of both papers live in
-[`docs/research/`](docs/research/), alongside the original PDFs.
+[`docs/research/`](docs/research/), alongside the original PDFs. The index of
+that folder is [`docs/research/README.md`](docs/research/README.md).
+
+## Related research
+
+The papers below are reference material for a draft plan. They are not
+features this repository implements. The source paper remains Zhou et al.,
+above. The plan that uses them is
+[`docs/plans/router-evaluator-and-live-pricing.md`](docs/plans/router-evaluator-and-live-pricing.md)
+(not approved; no coding until it is). The shortlist and the license notes
+are in [`docs/research/README.md`](docs/research/README.md).
+
+### Routing methods
+
+| Paper | Year | arXiv | Local notes |
+|---|---|---|---|
+| Li, Rethinking Predictive Modeling for LLM Routing | 2025 | [2505.12601](https://arxiv.org/abs/2505.12601) | [full conversion](docs/research/papers/2505.12601-knn-beats-learned-routers.md) |
+| Ong et al., RouteLLM | 2024 | [2406.18665](https://arxiv.org/abs/2406.18665) | [summary](docs/research/papers/2406.18665-routellm.md) |
+| Wang et al., MixLLM | 2025 | [2502.18482](https://arxiv.org/abs/2502.18482) | [full conversion](docs/research/papers/2502.18482-mixllm.md) |
+| Song et al., IRT-Router | 2025 | [2506.01048](https://arxiv.org/abs/2506.01048) | [summary](docs/research/papers/2506.01048-irt-router.md) |
+| Ding et al., Hybrid LLM | 2024 | [2404.14618](https://arxiv.org/abs/2404.14618) | [summary](docs/research/papers/2404.14618-hybrid-llm.md) |
+| Chen et al., RouterDC | 2024 | [2409.19886](https://arxiv.org/abs/2409.19886) | [summary](docs/research/papers/2409.19886-routerdc.md) |
+| Tran et al., Arch-Router | 2025 | [2506.16655](https://arxiv.org/abs/2506.16655) | [full conversion](docs/research/papers/2506.16655-arch-router.md) |
+| Chen, Zaharia, and Zou, FrugalGPT | 2023 | [2305.05176](https://arxiv.org/abs/2305.05176) | [summary](docs/research/papers/2305.05176-frugalgpt.md) |
+| Aggarwal, Madaan, et al., AutoMix | 2023 | [2310.12963](https://arxiv.org/abs/2310.12963) | [full conversion](docs/research/papers/2310.12963-automix.md) |
+| Feng, Shen, and You, GraphRouter | 2024 | [2410.03834](https://arxiv.org/abs/2410.03834) | [full conversion](docs/research/papers/2410.03834-graphrouter.md) |
+
+### Calibration
+
+| Paper | Year | arXiv | Local notes |
+|---|---|---|---|
+| Guo et al., On Calibration of Modern Neural Networks | 2017 | [1706.04599](https://arxiv.org/abs/1706.04599) | [summary](docs/research/papers/1706.04599-temperature-scaling.md) |
+| Angelopoulos and Bates, A Gentle Introduction to Conformal Prediction | 2021 | [2107.07511](https://arxiv.org/abs/2107.07511) | [summary](docs/research/papers/2107.07511-conformal-prediction.md) |
+
+### Embeddings and classification
+
+| Paper | Year | arXiv | Local notes |
+|---|---|---|---|
+| Tunstall et al., Efficient Few-Shot Learning Without Prompts (SetFit) | 2022 | [2209.11055](https://arxiv.org/abs/2209.11055) | [full conversion](docs/research/papers/2209.11055-setfit.md) |
+| Zhuang et al., EmbedLLM | 2024 | [2410.02223](https://arxiv.org/abs/2410.02223) | [full conversion](docs/research/papers/2410.02223-embedllm.md) |
+| Warner et al., ModernBERT | 2024 | [2412.13663](https://arxiv.org/abs/2412.13663) | [full conversion](docs/research/papers/2412.13663-modernbert.md) |
+
+### Benchmarks and data
+
+| Paper | Year | arXiv | Local notes |
+|---|---|---|---|
+| Hu et al., RouterBench | 2024 | [2403.12031](https://arxiv.org/abs/2403.12031) | [summary](docs/research/papers/2403.12031-routerbench.md) |
 
