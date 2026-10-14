@@ -136,6 +136,7 @@ public class TelemetryPublisherTests
             0.8,
             0.87,
             null,
+            GradeStatus: TotallyHot.ArcRouter.Quality.GradeStatus.Complete,
             TimestampUtc: DateTimeOffset.UtcNow);
     }
 

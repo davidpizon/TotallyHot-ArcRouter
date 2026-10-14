@@ -30,7 +30,9 @@ The Verifier is static analysis + the G-Eval judge; **code execution was removed
 `Process` in `TotallyHotArcRouter.Quality`). Roslyn (C#) and Acornima (JS/TS) give authoritative
 syntax verdicts; Python and shell use language-aware heuristics marked non-authoritative and weighted at
 half. Every LLM-grader prompt carries the user's question as a required section, and a missing question
-fails closed (GitHub issue #114). Full design:
+fails closed (GitHub issue #114). Issue **#293** (ADR-0026): three-criterion judge rubric, fixed grader
+weights (`ScorerVersion` 3.0), explicit `GradeStatus`, `grade_receipts` audit rows (keyed question HMAC),
+and a learning gate that admits only `Complete` grades into live memory. Full design:
 [`quality-verifier-architecture.md`](../docs/router/quality-verifier-architecture.md).
 
 ## Remaining work

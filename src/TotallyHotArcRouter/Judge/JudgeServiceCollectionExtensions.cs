@@ -41,6 +41,8 @@ internal static class JudgeServiceCollectionExtensions
         services.AddHttpClient(GEvalJudgeClient.HttpClientName);
         services.AddSingleton<PendingResponseTextCache>();
         services.AddSingleton<PendingPromptCache>();
+        services.AddSingleton<PendingConversationWindowCache>();
+        services.AddSingleton<QuestionHmacHasher>();
         services.AddSingleton<IGraderQueue, GraderQueue>();
         services.AddSingleton<JudgeModelSelector>();
         services.AddSingleton<IJudgeClient, GEvalJudgeClient>();
@@ -56,7 +58,9 @@ internal static class JudgeServiceCollectionExtensions
         services.AddSingleton(sp => new PendingValueCache<int>(sp.GetRequiredService<IOptions<JudgeOptions>>()));
         services.AddSingleton<PendingGraderBackboneCache>();
         services.AddSingleton<IGraderScoreStore, SqliteGraderScoreStore>();
+        services.AddSingleton<IGradeReceiptStore, SqliteGradeReceiptStore>();
         services.AddSingleton<GraderScoreRecordObserver>();
+        services.AddSingleton<GradeReceiptRecordObserver>();
         services.AddSingleton<IGraderReliabilityAnalyzer, GraderReliabilityAnalyzer>();
 
         // docs/router/geval-shadow-scoring-plan.md Phase G2: judge-vs-static calibration over the shadow

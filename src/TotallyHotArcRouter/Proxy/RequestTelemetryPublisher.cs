@@ -29,6 +29,7 @@ internal sealed class RequestTelemetryPublisher
     private readonly IOptionsMonitor<JudgeOptions>? _judgeOptionsMonitor;
     private readonly IOptionsMonitor<PortfolioGraderOptions>? _portfolioGraderOptionsMonitor;
     private readonly ILogger _logger;
+    private readonly PendingConversationWindowCache? _pendingConversationWindowCache;
     private readonly PendingPromptCache? _pendingPromptCache;
     private readonly PendingValueCache<decimal>? _pendingRequestCostCache;
     private readonly PendingValueCache<PendingRequestProvenance>? _pendingRequestProvenanceCache;
@@ -77,6 +78,7 @@ internal sealed class RequestTelemetryPublisher
         IOptionsMonitor<JudgeOptions>? judgeOptionsMonitor,
         decimal selfHostedRouterPricePerMillionTokens,
         PendingPromptCache? pendingPromptCache = null,
+        PendingConversationWindowCache? pendingConversationWindowCache = null,
         IOptionsMonitor<PortfolioGraderOptions>? portfolioGraderOptionsMonitor = null,
         PendingValueCache<int>? pendingResponseLengthCache = null,
         IOptionsMonitor<BodyExcerptOptions>? bodyExcerptOptions = null)
@@ -99,6 +101,7 @@ internal sealed class RequestTelemetryPublisher
         _pendingResponseTextCache = pendingResponseTextCache;
         _pendingResponseLengthCache = pendingResponseLengthCache;
         _pendingPromptCache = pendingPromptCache;
+        _pendingConversationWindowCache = pendingConversationWindowCache;
         _transcriptStore = transcriptStore;
         _routingOptionsMonitor = routingOptionsMonitor;
         _judgeOptionsMonitor = judgeOptionsMonitor;
@@ -652,9 +655,8 @@ internal sealed class RequestTelemetryPublisher
             double propensity,
             RequestClassification? classification)
     {
-        // Extracted once and reused below for the quality-ingress prompt - both read the same newest-user-
-        // message text off the same already-parsed requestBody, so a second walk of its messages array
-        // would just repeat the first.
+        // Newest-user-message alone still drives the request summary and quality-ingress dimension
+        // inference. LLM graders get the broader ConversationWindow (issue #293) cached separately below.
         var newestUserMessage = RequestTextExtractor.ExtractNewestUserMessage(requestBody);
         var requestSummary = TextTruncator.Truncate(newestUserMessage);
         // hasToolCalls is filled on the same parse as the text: a tool-only reply returns false for text
@@ -713,9 +715,20 @@ internal sealed class RequestTelemetryPublisher
 
         // Mirrors the response-text retention immediately above, for the other half of the pair every LLM
         // grader needs to grade against a requirement rather than in isolation
-        // (docs/research/code-quality-metrics-assessment.md §1). Gated the same way.
-        if (GraderQuestionText.IsPresent(newestUserMessage) && AnyLlmGraderEnabled())
-            _pendingPromptCache?.Set(correlationId: correlationId, prompt: newestUserMessage);
+        // (docs/research/code-quality-metrics-assessment.md §1). Gated the same way. Issue #293: cache the
+        // bounded conversation window (newest turn + earlier text turns, secrets obscured) rather than the
+        // newest message alone, so follow-ups like "no, the other one" remain gradeable.
+        if (AnyLlmGraderEnabled())
+        {
+            var windowOptions = (_judgeOptionsMonitor?.CurrentValue ?? new JudgeOptions())
+                .ToConversationWindowOptions();
+            var window = ConversationWindow.Extract(requestBody: requestBody, options: windowOptions);
+            if (window is not null && GraderQuestionText.IsPresent(window.NewestUserMessage))
+            {
+                _pendingPromptCache?.Set(correlationId: correlationId, prompt: window.FormattedText);
+                _pendingConversationWindowCache?.Set(correlationId: correlationId, window: window);
+            }
+        }
 
         return (newestUserMessage, requestSummary, responseSummary, responseText, hasToolCalls, correlationId);
     }

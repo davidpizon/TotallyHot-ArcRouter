@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Judge;
 
@@ -46,7 +47,7 @@ public sealed class JudgeOptions
     /// exists so a future prompt change is distinguishable in the shadow table. Defaults to
     /// <c>g-eval-v1</c>.
     /// </summary>
-    public string PromptVersion { get; init; } = "g-eval-v1";
+    public string PromptVersion { get; init; } = "g-eval-v2-question-rubric";
 
     /// <summary>
     /// Gets the time-to-live, in seconds, for an entry in <see cref="PendingResponseTextCache"/> before it
@@ -120,4 +121,39 @@ public sealed class JudgeOptions
     /// </summary>
     [Range(100, 4_000_000)]
     public int GraderScoreMaxRows { get; init; } = 200_000;
+
+    /// <summary>
+    /// Gets how many earlier text messages <see cref="Telemetry.ConversationWindow"/> may keep before the
+    /// newest user message. Defaults to 6 (about three exchanges); issue #293 plan D1.
+    /// </summary>
+    [Range(0, 64)]
+    public int ConversationWindowEarlierMessages { get; init; } = 6;
+
+    /// <summary>
+    /// Gets the total character budget for the conversation window sent to LLM graders. Defaults to
+    /// 16,384; issue #293 plan D2.
+    /// </summary>
+    [Range(256, 10_000_000)]
+    public int ConversationWindowMaxChars { get; init; } = 16_384;
+
+    /// <summary>
+    /// Gets the maximum characters kept from the newest user message inside the conversation window.
+    /// Defaults to 12,288; longer text is cut head-and-tail so a trailing instruction survives (D2).
+    /// </summary>
+    [Range(64, 10_000_000)]
+    public int ConversationWindowMaxNewestUserChars { get; init; } = 12_288;
+
+    /// <summary>
+    /// Builds a <see cref="ConversationWindowOptions"/> snapshot from the operational bounds above.
+    /// </summary>
+    /// <returns>Options for <see cref="ConversationWindow.Extract"/>.</returns>
+    public ConversationWindowOptions ToConversationWindowOptions()
+    {
+        return new ConversationWindowOptions
+        {
+            MaxEarlierContextMessages = ConversationWindowEarlierMessages,
+            MaxGradingInputChars = ConversationWindowMaxChars,
+            MaxNewestUserMessageChars = ConversationWindowMaxNewestUserChars
+        };
+    }
 }

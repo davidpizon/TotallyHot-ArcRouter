@@ -448,7 +448,8 @@ replacing it, with exactly-once write semantics and graceful static-only degrada
   a specific weight threshold would silently mean something different after any weight retune.
 - ~~**The learning-layer policy was never implemented.**~~ **Shipped.** A new `JudgeRowPolicy` enum
   (`Include`/`Exclude`/`DownWeight`) and `RoutingOptions.JudgeScoredRowPolicy`/`JudgeScoredRowWeight`
-  (default `DownWeight` at `0.5`) are applied identically by every learning consumer that reads raw
+  (default **`Include`** since issue #293 / ADR-0026; `DownWeight` at `0.5` remains a knob) are applied
+  identically by every learning consumer that reads raw
   `memory_entries` rows: `MemoryKnnVoter` (scales a judge-scored neighbor's similarity weight, or drops it
   under `Exclude`), `EmbeddingLogRegTrainingService` and `ClusterTrainingService` (scale the live sample
   weight the same way when building training rows), and `ClusterLedger.Build` (used by both
@@ -457,8 +458,14 @@ replacing it, with exactly-once write semantics and graceful static-only degrada
   `RoutingOptions.ClusterBestMinObservations`'s floor is about how many real data points support a cell, not
   how much trust-weighted mass they carry). The shared rule lives in one place
   (`Models.JudgeRowWeighting.ResolveWeight`) so the policy cannot silently mean something different in one
-  consumer than another. `0.5` is a starting point pending G2's agreement/calibration analysis, not a
+  consumer than another.   `0.5` is a starting point pending G2's agreement/calibration analysis, not a
   measured value — re-tuning it needs no code change.
+
+**Issue #293 (ADR-0026, shipped).** Live learning writes (`RouterMemoryScoreObserver`,
+`EmbeddingMemoryScoreObserver`) run only when `QualityResult.GradeStatus == Complete`. Structure-only and
+incomplete grades still emit `QualitySignalEvent` (with `GradeStatus`) and land in `grade_receipts`, but
+they do not update `memory_entries` or `live:` tallies. New live rows stamp `IsJudgeScored = true`. A
+one-time purge removed pre-change live learning on upgrade.
 
 ## Non-goals
 

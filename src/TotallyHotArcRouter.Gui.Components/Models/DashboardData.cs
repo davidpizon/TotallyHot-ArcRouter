@@ -98,6 +98,9 @@ public sealed record ModelShare(string Model, decimal Value, string Color);
 /// <param name="RouterCostUsd">
 /// Router overhead cost for live turns; <see langword="null"/> on persisted-only turns.
 /// </param>
+/// <param name="QualityGradeLabel">
+/// Live-only label when the grade did not train the router (issue #293), or <see langword="null"/>.
+/// </param>
 public sealed record ConversationTurn(
     string Id,
     string Agent,
@@ -131,7 +134,8 @@ public sealed record ConversationTurn(
     int? CacheCreationTokens = null,
     int? CacheReadTokens = null,
     int? RouterTokens = null,
-    decimal? RouterCostUsd = null);
+    decimal? RouterCostUsd = null,
+    string? QualityGradeLabel = null);
 
 /// <summary>A conversation (session) whose turns are shown in the Live Stream tab.</summary>
 /// <param name="Id">The session id.</param>

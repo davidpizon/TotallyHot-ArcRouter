@@ -51,6 +51,7 @@ public sealed class QualityGrader : IQualityGrader
         var syntax = _structuralParser.Check(code: request.Code, language: request.Language);
         var analysis = _analyzer.Report(code: request.Code, language: request.Language, prompt: request.Prompt);
 
+        var questionPresent = !string.IsNullOrWhiteSpace(request.Prompt);
         var result = new QualityResult
         {
             RequestCorrelationId = request.CorrelationId,
@@ -60,12 +61,20 @@ public sealed class QualityGrader : IQualityGrader
             Language = request.Language.ToString(),
             SyntaxValid = syntax.IsValid,
             SyntaxAuthoritative = syntax.IsAuthoritative,
+            SyntaxConfidence = syntax.Confidence,
+            QuestionPresent = questionPresent,
             AnalysisScore = analysis.Score,
             AnalysisFindings = analysis.Notes,
             DegradedReason = syntax.IsAuthoritative ? null : "heuristic-syntax-check"
         };
 
-        result = result with { UnifiedScore = _scorer.Score(result: result, dimension: request.Dimension) };
+        // Status is finalized by the aggregator once pending LLM graders resolve; a provisional Incomplete
+        // here keeps observers honest if anything observes before the join closes.
+        result = result with
+        {
+            UnifiedScore = _scorer.Score(result: result, dimension: request.Dimension),
+            GradeStatus = GradeStatus.Incomplete
+        };
 
         _logger.LogInformation(
             message:

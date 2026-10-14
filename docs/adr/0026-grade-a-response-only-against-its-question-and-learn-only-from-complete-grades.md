@@ -1,8 +1,9 @@
 # 0026. Grade a response against its question, and learn only from complete grades
 
-**Status:** proposed
+**Status:** accepted
 **Date:** 2026-10-14
 **Deciders:** David Pizon
+**Accepted:** 2026-10-14 (David, chat sign-off on #293 plan)
 
 ## Context and Problem Statement
 
@@ -67,6 +68,7 @@ The rules, in short (full design in the plan):
    memory, the voters, or the trainers. The other two are stored for the dashboard and audit, labeled.
 2. Weights are fixed per dimension and must sum to 1, checked at startup. Starting weights for code tasks are
    judge 0.60, syntax 0.25, analysis 0.15. The remaining-weight division and the syntax weight halving are removed.
+   Heuristic syntax carries a confidence in `[0,1]`; below 0.70 the grade is `Incomplete` (weights stay fixed).
 3. The judge scores one grade against three named criteria — relevance, correctness, completeness — with a
    per-dimension hint keyed on `RouterDimension`.
 4. A grader sees the newest user message plus up to six earlier text messages, within 16,384 characters, after

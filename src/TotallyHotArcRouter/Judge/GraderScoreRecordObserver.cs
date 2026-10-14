@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Quality.Grading;
 
@@ -16,13 +17,19 @@ public sealed class GraderScoreRecordObserver : IQualityScoreObserver
     private readonly ILogger<GraderScoreRecordObserver> _logger;
     private readonly PendingGraderBackboneCache _pendingGraderBackboneCache;
     private readonly PendingValueCache<int> _pendingResponseLengthCache;
+    private readonly JudgeOptions _judgeOptions;
+    private readonly PendingConversationWindowCache _pendingWindowCache;
     private readonly IGraderScoreStore _store;
+    private readonly QuestionHmacHasher _questionHmacHasher;
     private readonly TimeProvider _timeProvider;
 
     /// <summary>Initializes a new instance of the <see cref="GraderScoreRecordObserver"/> class.</summary>
     /// <param name="store">Where each grader's row is persisted.</param>
     /// <param name="pendingResponseLengthCache">Supplies the graded response's character length, if captured.</param>
     /// <param name="pendingGraderBackboneCache">Supplies each async grader's resolved backbone model, if any completed.</param>
+    /// <param name="pendingWindowCache">Supplies the newest user message for the question HMAC.</param>
+    /// <param name="questionHmacHasher">Computes the keyed question hash stamped on each row.</param>
+    /// <param name="judgeOptions">Supplies the judge prompt version for judge rows.</param>
     /// <param name="logger">The logger.</param>
     /// <param name="timeProvider">
     /// Clock used to stamp each row's <see cref="GraderScoreRecord.CreatedAtUtc"/>; defaults to
@@ -32,17 +39,26 @@ public sealed class GraderScoreRecordObserver : IQualityScoreObserver
         IGraderScoreStore store,
         PendingValueCache<int> pendingResponseLengthCache,
         PendingGraderBackboneCache pendingGraderBackboneCache,
+        PendingConversationWindowCache pendingWindowCache,
+        QuestionHmacHasher questionHmacHasher,
+        IOptions<JudgeOptions> judgeOptions,
         ILogger<GraderScoreRecordObserver> logger,
         TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(pendingResponseLengthCache);
         ArgumentNullException.ThrowIfNull(pendingGraderBackboneCache);
+        ArgumentNullException.ThrowIfNull(pendingWindowCache);
+        ArgumentNullException.ThrowIfNull(questionHmacHasher);
+        ArgumentNullException.ThrowIfNull(judgeOptions);
         ArgumentNullException.ThrowIfNull(logger);
 
         _store = store;
         _pendingResponseLengthCache = pendingResponseLengthCache;
         _pendingGraderBackboneCache = pendingGraderBackboneCache;
+        _pendingWindowCache = pendingWindowCache;
+        _questionHmacHasher = questionHmacHasher;
+        _judgeOptions = judgeOptions.Value;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
@@ -74,6 +90,12 @@ public sealed class GraderScoreRecordObserver : IQualityScoreObserver
             _pendingGraderBackboneCache.TryTake(correlationId: result.RequestCorrelationId,
                 backboneByGraderKey: out backboneByGraderKey);
 
+        string? questionHmac = null;
+        if (hasCorrelationId &&
+            _pendingWindowCache.TryPeek(correlationId: result.RequestCorrelationId, out var window) &&
+            window is not null)
+            questionHmac = _questionHmacHasher.TryCompute(window.NewestUserMessage);
+
         var createdAtUtc = _timeProvider.GetUtcNow();
         var written = 0;
 
@@ -81,7 +103,8 @@ public sealed class GraderScoreRecordObserver : IQualityScoreObserver
         {
             await WriteRowAsync(result: result, graderKey: GraderKeys.Analysis, score: analysisScore,
                 backboneByGraderKey: backboneByGraderKey, responseLength: responseLength,
-                createdAtUtc: createdAtUtc, cancellationToken: cancellationToken).ConfigureAwait(false);
+                questionHmac: questionHmac, promptVersion: null, createdAtUtc: createdAtUtc,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
             written++;
         }
 
@@ -89,7 +112,8 @@ public sealed class GraderScoreRecordObserver : IQualityScoreObserver
         {
             await WriteRowAsync(result: result, graderKey: GraderKeys.Judge, score: judgeScore,
                 backboneByGraderKey: backboneByGraderKey, responseLength: responseLength,
-                createdAtUtc: createdAtUtc, cancellationToken: cancellationToken).ConfigureAwait(false);
+                questionHmac: questionHmac, promptVersion: _judgeOptions.PromptVersion, createdAtUtc: createdAtUtc,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
             written++;
         }
 
@@ -97,7 +121,8 @@ public sealed class GraderScoreRecordObserver : IQualityScoreObserver
         {
             await WriteRowAsync(result: result, graderKey: graderKey, score: score,
                 backboneByGraderKey: backboneByGraderKey, responseLength: responseLength,
-                createdAtUtc: createdAtUtc, cancellationToken: cancellationToken).ConfigureAwait(false);
+                questionHmac: questionHmac, promptVersion: null, createdAtUtc: createdAtUtc,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
             written++;
         }
 
@@ -115,6 +140,8 @@ public sealed class GraderScoreRecordObserver : IQualityScoreObserver
         double score,
         IReadOnlyDictionary<string, string> backboneByGraderKey,
         int? responseLength,
+        string? questionHmac,
+        string? promptVersion,
         DateTimeOffset createdAtUtc,
         CancellationToken cancellationToken)
     {
@@ -130,7 +157,9 @@ public sealed class GraderScoreRecordObserver : IQualityScoreObserver
                 GraderKey: graderKey,
                 Score: Math.Clamp(value: score, 0.0, 1.0),
                 GraderBackboneModel: backboneModel,
-                ResponseLengthChars: responseLength),
+                ResponseLengthChars: responseLength,
+                QuestionHmac: questionHmac,
+                PromptVersion: promptVersion),
             cancellationToken: cancellationToken);
     }
 }

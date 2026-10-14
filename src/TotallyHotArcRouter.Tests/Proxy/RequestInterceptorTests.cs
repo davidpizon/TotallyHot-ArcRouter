@@ -196,7 +196,8 @@ public class RequestInterceptorTests
             {
                 Model = "kimi-k2.5",
                 Dimension = RouterDimension.BugFixing,
-                UnifiedScore = 0.95
+                UnifiedScore = 0.95,
+                GradeStatus = GradeStatus.Complete
             },
             cancellationToken: TestContext.Current.CancellationToken);
 

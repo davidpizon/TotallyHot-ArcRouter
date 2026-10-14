@@ -27,11 +27,14 @@ internal static class ShellStructuralParser
         ArgumentNullException.ThrowIfNull(code);
 
         if (string.IsNullOrWhiteSpace(code))
-            return SyntaxVerdict.Invalid(language: CodeLanguage.Shell, false, errors: ["Snippet is empty."]);
+            return SyntaxVerdict.Invalid(language: CodeLanguage.Shell, false,
+                confidence: SyntaxVerdict.LanguageAwareHeuristicConfidence, errors: ["Snippet is empty."]);
 
         return new Scan(code).TryRun(out var error)
-            ? SyntaxVerdict.Valid(language: CodeLanguage.Shell, false)
-            : SyntaxVerdict.Invalid(language: CodeLanguage.Shell, false, errors: [error!]);
+            ? SyntaxVerdict.Valid(language: CodeLanguage.Shell, false,
+                confidence: SyntaxVerdict.LanguageAwareHeuristicConfidence)
+            : SyntaxVerdict.Invalid(language: CodeLanguage.Shell, false,
+                confidence: SyntaxVerdict.LanguageAwareHeuristicConfidence, errors: [error!]);
     }
 
     /// <summary>

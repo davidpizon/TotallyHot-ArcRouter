@@ -30,6 +30,9 @@ namespace TotallyHot.ArcRouter.Gui.Telemetry;
 /// <param name="StatusCode">Upstream HTTP status. Defaults to 0 when unreported.</param>
 /// <param name="RouterTokens">Router overhead token count. Defaults to 0 when unreported.</param>
 /// <param name="RouterCostUsd">Router overhead cost in USD. Defaults to 0 when unreported.</param>
+/// <param name="QualityGradeLabel">
+/// Dashboard label when the grade did not train the router (issue #293), or <see langword="null"/>.
+/// </param>
 public sealed record LiveConversationTurn(
     string SessionId,
     int TurnNumber,
@@ -55,7 +58,8 @@ public sealed record LiveConversationTurn(
     long TotalDurationMs = 0,
     int StatusCode = 0,
     int RouterTokens = 0,
-    decimal RouterCostUsd = 0m);
+    decimal RouterCostUsd = 0m,
+    string? QualityGradeLabel = null);
 
 /// <summary>A conversation (session) reconstructed from the live telemetry stream.</summary>
 /// <param name="SessionId">The session id every turn in <paramref name="Turns"/> shares.</param>
@@ -117,13 +121,15 @@ public static class ConversationAggregator
     /// in arrival order, so this is also chronological order), and orders conversations by most
     /// recently active first.
     /// </summary>
-    public static IReadOnlyList<LiveConversation> Aggregate(IReadOnlyList<RoutingTelemetryEventDto> events)
+    public static IReadOnlyList<LiveConversation> Aggregate(
+        IReadOnlyList<RoutingTelemetryEventDto> events,
+        IReadOnlyDictionary<string, string>? qualityGradeLabelByCorrelation = null)
     {
         ArgumentNullException.ThrowIfNull(events);
 
         return [.. events
             .GroupBy(keySelector: e => e.SessionId, comparer: StringComparer.Ordinal)
-            .Select(BuildConversation)
+            .Select(group => BuildConversation(group: group, qualityGradeLabelByCorrelation: qualityGradeLabelByCorrelation))
             .OrderByDescending(c => c.LastTimestampUtc)];
     }
 
@@ -131,7 +137,9 @@ public static class ConversationAggregator
     /// Builds one <see cref="LiveConversation"/> from a single session's grouped events, ordering its turns
     /// chronologically.
     /// </summary>
-    private static LiveConversation BuildConversation(IGrouping<string, RoutingTelemetryEventDto> group)
+    private static LiveConversation BuildConversation(
+        IGrouping<string, RoutingTelemetryEventDto> group,
+        IReadOnlyDictionary<string, string>? qualityGradeLabelByCorrelation)
     {
         var orderedEvents = group.OrderBy(e => e.TurnNumber).ToList();
 
@@ -161,7 +169,11 @@ public static class ConversationAggregator
                 TotalDurationMs: e.TotalDurationMs,
                 StatusCode: e.StatusCode,
                 RouterTokens: e.RouterTokens,
-                RouterCostUsd: e.RouterCostUsd))
+                RouterCostUsd: e.RouterCostUsd,
+                QualityGradeLabel: ResolveQualityLabel(
+                    sessionId: e.SessionId,
+                    turnNumber: e.TurnNumber,
+                    qualityGradeLabelByCorrelation: qualityGradeLabelByCorrelation)))
             .ToList();
 
         return new LiveConversation(
@@ -177,5 +189,16 @@ public static class ConversationAggregator
             TotalCacheCreationTokens: turns.Sum(t => t.CacheCreationTokens ?? 0),
             TotalCacheReadTokens: turns.Sum(t => t.CacheReadTokens ?? 0),
             UnpricedTurns: turns.Count(t => t.EstimatedCostUsd is null));
+    }
+
+    private static string? ResolveQualityLabel(
+        string sessionId,
+        int turnNumber,
+        IReadOnlyDictionary<string, string>? qualityGradeLabelByCorrelation)
+    {
+        if (qualityGradeLabelByCorrelation is null) return null;
+
+        var correlationId = FormattableString.Invariant($"{sessionId}:{turnNumber}");
+        return qualityGradeLabelByCorrelation.TryGetValue(key: correlationId, value: out var label) ? label : null;
     }
 }
