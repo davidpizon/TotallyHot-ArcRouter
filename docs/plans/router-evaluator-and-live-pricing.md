@@ -403,7 +403,7 @@ The training pairs are data-derived ([§6](#6-meaning-fingerprint-294)). There i
 
 ### 13.4 Calibration and weights are versioned C# settings
 
-\(T\), the conformal quantile, the widened quantile for a child bucket, the voter weights, and the tool-block coefficients with their standardization mean and scale are numbers fit in C#. They are stored as a versioned artifact: data window, held-out metric, fingerprint-model id, tool-feature schema version, bucket version, parent version if borrowed, and the previous accepted values for rollback. They are not an ONNX file. The text-embedding version and the tool-feature schema version are separate, so one can change without discarding the other.
+\(T\) or the Platt slope and offset, the conformal quantile, the widened quantile for a child bucket, the voter weights, and the tool-block coefficients with their standardization mean and scale are numbers fit in C#. They are stored as a versioned artifact: data window, held-out metric, fingerprint-model id, tool-feature schema version, bucket version, parent version if borrowed, and the previous accepted values for rollback. They are not an ONNX file. The text-embedding version and the tool-feature schema version are separate, so one can change without discarding the other.
 
 ### 13.5 ONNX Runtime on-device training is not the path
 
@@ -550,7 +550,7 @@ Each of these stays, with one reason.
 | `SemanticResponseCache` | Lookup is cosine similarity inside a compatibility scope. `HybridCache` is exact-key only. |
 | `PendingValueCache<T>` | `TryTake` is an atomic take-and-remove, and capacity eviction is oldest-first. The pending-text, prompt, and backbone caches sit on this type. |
 | SQLite stores | The existing `Microsoft.Data.Sqlite` stores stay. Rewriting them is the risk. Dapper is acceptable for a new store. This plan does not add Dapper, and it does not migrate the current stores. |
-| `EmbeddingLogRegTrainer`, `LogRegTrainer` | Both already persist a coefficient artifact (`EmbeddingLogRegModelArtifact`, `LogRegModelArtifact`). Moving them would change those on-disk artifacts and their serializers. New prediction heads may use `Microsoft.ML` and record coefficients with the [§13.4](#134-calibration-and-weights-are-versioned-c-settings) artifact. These two trainers are not moved. |
+| `EmbeddingLogRegTrainer`, `LogRegTrainer` | Both already persist a coefficient artifact (`EmbeddingLogRegModelArtifact`, `LogRegModelArtifact`). Moving them would change those on-disk artifacts and their serializers. New prediction heads may use `Microsoft.ML` and record coefficients in, or metadata with, the [§13.4](#134-calibration-and-weights-are-versioned-c-settings) artifact. These two trainers are not moved. |
 | TF-IDF in `LogRegTrainer` | It is the paper-faithful logreg baseline. An ML.NET text featurizer would be a different voter. |
 | `LinUcbBaseline`, `LinThompsonSamplingBaseline` | Vowpal Wabbit needs a native binary. These LinUCB and LinTS baselines stay plain C#. |
 | `RankCorrelation.Spearman` | The two judge analyzers share average-tie ranks and a null result when a sample has zero variance. `Meta.Numerics` exposes `SpearmanRhoTest`, a significance test with a different result. Epoch tests use Meta.Numerics. The judge correlation stays this method. |
