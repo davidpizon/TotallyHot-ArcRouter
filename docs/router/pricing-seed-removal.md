@@ -66,8 +66,10 @@ write must not silently un-free a provider.
 [`../gui/provider-management.md`](../gui/provider-management.md). The catalog's D1 was replaced in place
 by the 24h freshness gate, which kept D2–D6 numbering and every anchor intact.
 [`../research/technical-reference.md`](../research/technical-reference.md) was deliberately **not**
-touched: its Appendix B.1 pricing table is the TotallyHotArcRouter paper's own Table 6, mirrored from the research
-artifact, and has nothing to do with our config.
+touched: its Appendix B.1 pricing table is Table 6 of Zhou et al.,
+*Agent-as-a-Router: Agentic Model Routing for Coding Tasks*
+([arXiv:2606.22902](https://arxiv.org/abs/2606.22902)), mirrored from the research
+artifact, and has nothing to do with this project's config.
 
 Deleting the seed made the docs *shorter*. `utility-model-routing.md` carried a three-layer table and a
 "separation of concerns — estimation vs. decision" argument whose entire job was fencing a placeholder

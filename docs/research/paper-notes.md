@@ -1,19 +1,19 @@
-# Agentic Model Routing for Coding Tasks (arXiv:2606.22902v3)
+# Agent-as-a-Router: Agentic Model Routing for Coding Tasks (arXiv:2606.22902)
 
 ## Paper Metadata
-- **Title:** Agentic Model Routing for Coding Tasks
-- **Date in manuscript:** 2026-06-22 (arXiv v3 posted 2026-06-26)
-- **Reference paper page:** https://arxiv.org/abs/2606.22902
-- **Repository context:** Notes are curated for TotallyHot Arc Router implementation work.
+- **Title:** Agent-as-a-Router: Agentic Model Routing for Coding Tasks
+- **Authors:** Pengfei Zhou, Zhiwei Tang, Yixing Ma, Jiasheng Tang, Yizeng Han, Zhenglin Wan, Fanqing Meng, Wei Wang, Bohan Zhuang, Wangbo Zhao, and Yang You
+- **arXiv:** [2606.22902](https://arxiv.org/abs/2606.22902) (v3; manuscript date 2026-06-22, posted 2026-06-26)
+- **Repository context:** Notes are curated for TotallyHot Arc Router implementation work. The router and results summarized below are the paper's ACRouter.
 - **Main idea:** Model routing for coding should be treated as an **adaptive, streaming decision loop** rather than a one-shot static classifier.
 
 ## Executive Summary
-The paper argues that current LLM routers underperform mainly due to **information deficit**, not weak reasoning. The authors introduce an adaptive routing framework formalized as a **Context → Action → Feedback → Context (C-A-F)** loop, and instantiate it as **TotallyHotArcRouter** with three modules:
+The paper argues that current LLM routers underperform mainly due to **information deficit**, not weak reasoning. Zhou et al. introduce an adaptive routing framework, Agent-as-a-Router, formalized as a **Context → Action → Feedback → Context (C-A-F)** loop, and instantiate it as **ACRouter** (Agentic Coding Router) with three modules:
 1. **Orchestrator** (routing decision),
 2. **Verifier** (execution-grounded scoring),
 3. **Memory** (online accumulation of verified history).
 
-They build **CodeRouterBench** (~10K tasks, 10 dimensions, 8 frontier models) to evaluate routing in streaming settings via **cumulative regret** relative to a per-task oracle. Their method gets the best reported cumulative regret and strongest OOD routing behavior.
+They build **CodeRouterBench** (~10K tasks, 10 dimensions, 8 frontier models) to evaluate routing in streaming settings via **cumulative regret** relative to a per-task oracle. ACRouter gets the best reported cumulative regret and strongest OOD routing behavior.
 
 ## Why This Work Exists
 Most coding agents fix one backbone model. But in a multi-provider setting, model strengths differ by task type and cost tier. Routing every task to the same model leaves measurable quality/cost gains on the table.
@@ -51,7 +51,7 @@ Cumulative regret:
 \]
 Lower is better.
 
-## TotallyHotArcRouter Design Details
+## ACRouter Design Details
 ### 1) Orchestrator (information integration)
 - Inputs: task prompt/metadata + DimensionBest prior + top-10 memory neighbors.
 - Policy: fine-tuned **Qwen3.5-0.8B** + heuristic voting.
@@ -70,7 +70,7 @@ Lower is better.
 - **Static heuristic:** DimensionBest, frozen kNN retrieval.
 - **Static trained policy:** LogReg, TF-IDF+MLP, RouteLLM variants, Qwen3.5-FT.
 - **Dynamic online bandit:** LinUCB / LinTS.
-- **Loop-complete agentic router:** TotallyHot.ArcRouter.
+- **Loop-complete agentic router:** ACRouter.
 
 ## CodeRouterBench
 ### Scale and Split
@@ -104,9 +104,12 @@ Derived from H100 amortization and measured throughput (~35,094 tok/s combined):
 - **$0.054 / 1M tokens** for self-hosted router-side generation.
 
 ## Main Results (Table 3)
+
+These figures are what Zhou et al. report for ACRouter on CodeRouterBench.
+
 ### In-distribution (n=2,919)
 - Oracle: AvgPerf 57.00, CumReg 0, Perf/$ 8.20
-- **TotallyHotArcRouter:** **49.98**, **205.5**, 3.79
+- **ACRouter:** **49.98**, **205.5**, 3.79
 - DimensionBest: 47.50, 277.4, 3.69
 - LinUCB: 46.84, 296.9, 4.38
 - LinTS: 46.48, 307.4, 4.49
@@ -115,7 +118,7 @@ Derived from H100 amortization and measured throughput (~35,094 tok/s combined):
 
 ### OOD agentic programming (n=176)
 - Oracle: AvgPerf 75.89, CumReg 0, Perf/$ 2.32
-- **TotallyHotArcRouter:** **62.50**, **17.0**, 1.18
+- **ACRouter:** **62.50**, **17.0**, 1.18
 - LinUCB: 49.82, 31.1, 0.96
 - LinTS: 46.43, 35.9, 0.75
 - Qwen3.5-0.8B-FT: 55.36, 27.2, 0.74
