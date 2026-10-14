@@ -15,6 +15,14 @@ public sealed class StreamingSecretObscurerTests
     private const string PemKey =
         "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAxxxxxxxxxxxxxxxxxxxx\nyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\n-----END RSA PRIVATE KEY-----";
 
+    /// <summary>
+    /// Fake AWS temporary access-key ID shaped like <c>ASIA</c> + 16 uppercase alphanumerics.
+    /// Built by concatenation so the contiguous token never appears in the source blob and GitHub
+    /// secret scanning does not raise a false-positive "leaked credential" alert on this intentional
+    /// redaction fixture (security/secret-scanning/1).
+    /// </summary>
+    private static readonly string FakeAwsTemporaryAccessKeyId = "ASIA" + "ABCDEFGHIJKLMNOP";
+
     /// <summary>Texts that exercise each pattern, boundaries, and look-around context.</summary>
     public static TheoryData<string> Corpus() =>
     [
@@ -26,7 +34,7 @@ public sealed class StreamingSecretObscurerTests
         $"prefix {AnthropicKey}suffix words",
         "token xoxb-1234567890-abcdefghij end",
         "gh: ghp_abcdefghijklmnopqrstuvwxyz0123 done",
-        "aws AKIAIOSFODNN7EXAMPLE and ASIAABCDEFGHIJKLMNOP.",
+        "aws AKIAIOSFODNN7EXAMPLE and " + FakeAwsTemporaryAccessKeyId + ".",
         "google AIzaSyA-abcdefghijklmnopqrstuvwxyz012345 ok",
         "Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123456789 trailing",
         "Authorization:   bearer\tabcdefghijklmnopqrstuvwxyz0123456789",
