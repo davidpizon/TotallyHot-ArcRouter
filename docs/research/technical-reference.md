@@ -373,7 +373,7 @@ For local GPU-served routers (finetuned LLMs, etc.): tokens priced at **$0.054/M
 
 ### 5.2 Main Results (Table 3)
 
-Table 3 of the paper labels this row "ACRouter (ours)". The parenthetical is Zhou et al. referring to ACRouter. The figures below are those reported results.
+In Table 3, Zhou et al. label their router "ACRouter (ours)". The result rows below name that router ACRouter. In the paper, "ours" means the authors' router. The figures are the results they report.
 
 #### In-Distribution Test ($n = 2,919$, 9 dimensions)
 
