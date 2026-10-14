@@ -35,6 +35,14 @@ namespace TotallyHot.ArcRouter.Judge;
 /// <see cref="CorrelationId"/> so a verbosity-skew query never needs a join back to a separate per-request
 /// table.
 /// </param>
+/// <param name="QuestionHmac">
+/// Keyed hash of the whitespace-normalized newest user message (issue #293 plan §2.4), duplicated here so
+/// per-grader queries need no join to <c>grade_receipts</c>.
+/// </param>
+/// <param name="PromptVersion">
+/// The judge prompt version when <see cref="GraderKeys.Judge"/> produced this row; otherwise
+/// <see langword="null"/>.
+/// </param>
 public sealed record GraderScoreRecord(
     long Id,
     string CorrelationId,
@@ -44,4 +52,6 @@ public sealed record GraderScoreRecord(
     string GraderKey,
     double Score,
     string? GraderBackboneModel,
-    int? ResponseLengthChars);
+    int? ResponseLengthChars,
+    string? QuestionHmac = null,
+    string? PromptVersion = null);

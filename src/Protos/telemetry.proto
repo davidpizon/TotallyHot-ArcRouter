@@ -1300,6 +1300,7 @@ message QualitySignalEvent {
   optional double analysis_score = 16;
   optional double judge_score = 17;
   optional string degraded_reason = 18;
+  optional string grade_status = 19;
 }
 
 // The GUI's System Settings window's "Software Update" section (docs/router/auto-update-plan.md

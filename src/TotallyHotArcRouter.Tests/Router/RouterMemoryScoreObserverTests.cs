@@ -28,7 +28,8 @@ public class RouterMemoryScoreObserverTests
         {
             Dimension = "code_generation",
             Model = "gpt-5.4",
-            UnifiedScore = 0.75
+            UnifiedScore = 0.75,
+            GradeStatus = GradeStatus.Complete
         };
 
         await observer.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
@@ -43,7 +44,10 @@ public class RouterMemoryScoreObserverTests
         var memory = new RouterMemory();
         var observer = CreateObserver(memory);
 
-        await observer.ObserveAsync(result: new QualityResult { Dimension = "d", Model = "m", UnifiedScore = 1.5 },
+        await observer.ObserveAsync(result: new QualityResult
+            {
+                Dimension = "d", Model = "m", UnifiedScore = 1.5, GradeStatus = GradeStatus.Complete
+            },
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1.0, actual: memory.GetAverageScore(dimension: "live:d", model: "m"));
@@ -77,7 +81,8 @@ public class RouterMemoryScoreObserverTests
             Dimension = "code_generation",
             Model = "gpt-5.4",
             UnifiedScore = 0.9,
-            RequestCorrelationId = "sess-1:3"
+            RequestCorrelationId = "sess-1:3",
+            GradeStatus = GradeStatus.Complete
         }, cancellationToken: TestContext.Current.CancellationToken);
 
         publisher.Verify(
@@ -85,6 +90,23 @@ public class RouterMemoryScoreObserverTests
                 It.Is<QualitySignalEvent>(s => s.CorrelationId == "sess-1:3" && s.Dimension == "live:code_generation"),
                 It.IsAny<CancellationToken>()),
             times: Times.Once);
+    }
+
+    [Fact]
+    public async Task ObserveAsync_IncompleteGrade_DoesNotWriteLiveMemory()
+    {
+        var memory = new RouterMemory();
+        var observer = CreateObserver(memory);
+
+        await observer.ObserveAsync(result: new QualityResult
+        {
+            Dimension = "code_generation",
+            Model = "gpt-5.4",
+            UnifiedScore = 0.9,
+            GradeStatus = GradeStatus.StructureOnly
+        }, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Empty(memory.GetModelsForDimension("live:code_generation"));
     }
 
     [Fact]
@@ -99,10 +121,11 @@ public class RouterMemoryScoreObserverTests
             Dimension = "code_generation",
             Model = "gpt-5.4",
             UnifiedScore = 0.9,
-            RequestCorrelationId = string.Empty
+            RequestCorrelationId = string.Empty,
+            GradeStatus = GradeStatus.Complete
         }, cancellationToken: TestContext.Current.CancellationToken);
 
-        // The score is still learned, but an unjoinable signal is not published.
+        // A complete grade still learns, but an unjoinable signal is not published.
         Assert.Equal(0.9, actual: memory.GetAverageScore(dimension: "live:code_generation", model: "gpt-5.4"));
         publisher.Verify(
             expression: p => p.PublishQualitySignalAsync(It.IsAny<QualitySignalEvent>(), It.IsAny<CancellationToken>()),

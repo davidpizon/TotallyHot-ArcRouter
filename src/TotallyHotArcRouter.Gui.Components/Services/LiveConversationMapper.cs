@@ -120,7 +120,8 @@ public static class LiveConversationMapper
             CacheCreationTokens: turn.CacheCreationTokens,
             CacheReadTokens: turn.CacheReadTokens,
             RouterTokens: turn.RouterTokens,
-            RouterCostUsd: turn.RouterCostUsd);
+            RouterCostUsd: turn.RouterCostUsd,
+            QualityGradeLabel: turn.QualityGradeLabel);
     }
 
     /// <summary>

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Quality.Grading;
 using TotallyHot.ArcRouter.Quality.Scoring;
 
@@ -61,6 +62,9 @@ public class QualityScoreAggregatorTests
             Language = nameof(CodeLanguage.CSharp),
             SyntaxValid = syntaxValid,
             SyntaxAuthoritative = true,
+            SyntaxConfidence = 1.0,
+            QuestionPresent = true,
+            AnalysisScore = null,
             UnifiedScore = syntaxValid ? 1.0 : 0.0
         };
     }
@@ -258,7 +262,9 @@ public class QualityScoreAggregatorTests
         var observed = Assert.Single(observer.Observed);
         Assert.Null(observed.JudgeScore);
         Assert.Equal(expected: "judge-join-timeout", actual: observed.DegradedReason);
-        Assert.Equal(1.0, actual: observed.UnifiedScore);
+        // Fixed weights: syntax 0.5 + missing judge 0.5 → 0.5, status Incomplete (judge was available).
+        Assert.Equal(0.5, actual: observed.UnifiedScore);
+        Assert.Equal(GradeStatus.Incomplete, actual: observed.GradeStatus);
     }
 
     [Fact]

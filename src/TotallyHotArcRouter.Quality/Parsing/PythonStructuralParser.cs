@@ -25,11 +25,14 @@ internal static class PythonStructuralParser
         ArgumentNullException.ThrowIfNull(code);
 
         if (string.IsNullOrWhiteSpace(code))
-            return SyntaxVerdict.Invalid(language: CodeLanguage.Python, false, errors: ["Snippet is empty."]);
+            return SyntaxVerdict.Invalid(language: CodeLanguage.Python, false,
+                confidence: SyntaxVerdict.LanguageAwareHeuristicConfidence, errors: ["Snippet is empty."]);
 
         return new Scan(code).TryRun(out var error)
-            ? SyntaxVerdict.Valid(language: CodeLanguage.Python, false)
-            : SyntaxVerdict.Invalid(language: CodeLanguage.Python, false, errors: [error!]);
+            ? SyntaxVerdict.Valid(language: CodeLanguage.Python, false,
+                confidence: SyntaxVerdict.LanguageAwareHeuristicConfidence)
+            : SyntaxVerdict.Invalid(language: CodeLanguage.Python, false,
+                confidence: SyntaxVerdict.LanguageAwareHeuristicConfidence, errors: [error!]);
     }
 
     /// <summary>

@@ -1,3 +1,5 @@
+using TotallyHot.ArcRouter.Quality;
+
 namespace TotallyHot.ArcRouter.Telemetry;
 
 /// <summary>
@@ -27,6 +29,7 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// </param>
 /// <param name="UnifiedScore">The unified score u_i in [0,1] fed into router memory.</param>
 /// <param name="DegradedReason">Why this signal carries less than a full grading, or null when it is complete.</param>
+/// <param name="GradeStatus">Whether this grade trained the router (issue #293 / ADR-0026).</param>
 /// <param name="TimestampUtc">When the signal was produced.</param>
 public sealed record QualitySignalEvent(
     string CorrelationId,
@@ -40,4 +43,5 @@ public sealed record QualitySignalEvent(
     double? JudgeScore,
     double UnifiedScore,
     string? DegradedReason,
+    GradeStatus GradeStatus,
     DateTimeOffset TimestampUtc);

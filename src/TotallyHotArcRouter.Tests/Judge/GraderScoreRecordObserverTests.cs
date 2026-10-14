@@ -1,7 +1,9 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Judge;
+using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Quality;
+using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Tests.Judge;
 
@@ -146,6 +148,10 @@ public class GraderScoreRecordObserverTests
             store: store,
             pendingResponseLengthCache: lengthCache ?? new PendingValueCache<int>(Options.Create(new JudgeOptions())),
             pendingGraderBackboneCache: backboneCache ?? new PendingGraderBackboneCache(Options.Create(new JudgeOptions())),
+            pendingWindowCache: new PendingConversationWindowCache(Options.Create(new JudgeOptions())),
+            questionHmacHasher: new QuestionHmacHasher(new ProtectedSecretStore(Path.Combine(Path.GetTempPath(),
+                Guid.NewGuid().ToString("N"), "secrets.dat"))),
+            judgeOptions: Options.Create(new JudgeOptions()),
             logger: NullLogger<GraderScoreRecordObserver>.Instance);
     }
 

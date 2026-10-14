@@ -171,7 +171,7 @@ public class GEvalJudgeClientTests
             comparisonType: StringComparison.Ordinal);
         Assert.Contains(expectedSubstring: "write a function that reverses a string", actualString: request.Body,
             comparisonType: StringComparison.Ordinal);
-        Assert.Contains(expectedSubstring: "A complete answer to a different question", actualString: request.Body,
+        Assert.Contains(expectedSubstring: "rather than a different question", actualString: request.Body,
             comparisonType: StringComparison.Ordinal);
     }
 

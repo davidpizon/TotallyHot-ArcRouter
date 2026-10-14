@@ -27,6 +27,7 @@ public class TelemetryPublisherDefaultMemberTests
                 JudgeScore: null,
                 UnifiedScore: 0.8,
                 DegradedReason: null,
+                GradeStatus: TotallyHot.ArcRouter.Quality.GradeStatus.Complete,
                 TimestampUtc: DateTimeOffset.UtcNow),
             TestContext.Current.CancellationToken);
     }

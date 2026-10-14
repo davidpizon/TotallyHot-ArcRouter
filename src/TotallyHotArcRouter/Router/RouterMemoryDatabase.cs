@@ -96,6 +96,32 @@ public sealed class RouterMemoryDatabase
 
                                      CREATE INDEX IF NOT EXISTS ix_grader_scores_created_at
                                          ON grader_scores (created_at_utc);
+
+                                     CREATE TABLE IF NOT EXISTS grade_receipts (
+                                         correlation_id       TEXT    PRIMARY KEY,
+                                         created_at_utc       TEXT    NOT NULL,
+                                         dimension            TEXT    NOT NULL,
+                                         model                TEXT    NOT NULL,
+                                         grade_status         TEXT    NOT NULL,
+                                         unified_score        REAL    NOT NULL,
+                                         question_hmac        TEXT    NULL,
+                                         question_chars       INTEGER NULL,
+                                         context_messages     INTEGER NULL,
+                                         question_truncated   INTEGER NOT NULL DEFAULT 0,
+                                         fingerprint_ref      TEXT    NULL,
+                                         scorer_version       TEXT    NOT NULL,
+                                         prompt_version       TEXT    NULL,
+                                         weights_version      TEXT    NOT NULL,
+                                         abstained_graders    TEXT    NOT NULL DEFAULT ''
+                                     );
+
+                                     CREATE INDEX IF NOT EXISTS ix_grade_receipts_created_at
+                                         ON grade_receipts (created_at_utc);
+
+                                     CREATE TABLE IF NOT EXISTS schema_meta (
+                                         key                  TEXT    PRIMARY KEY,
+                                         value                TEXT    NOT NULL
+                                     );
                                      """;
 
     /// <summary>
@@ -305,7 +331,20 @@ public sealed class RouterMemoryDatabase
         MigrateIsJudgeScoredColumn(connection);
         MigrateEmbeddingModelColumn(connection);
         MigrateJudgeShadowScoreColumns(connection);
+        MigrateGraderScoreQuestionColumns(connection);
+        MigrateIssue293LiveLearningPurge(connection);
     }
+
+    /// <summary>
+    /// Marker in <c>schema_meta</c> recording that pre-#293 live learning was purged (plan §6).
+    /// </summary>
+    internal const string Issue293LiveLearningPurgeKey = "issue-293-live-learning-purge";
+
+    /// <summary>
+    /// Default live-memory prefix used when purging <c>dimension_scores</c> rows; matches
+    /// <see cref="Quality.QualityOptions.LiveMemoryPrefix"/>.
+    /// </summary>
+    private const string DefaultLiveMemoryPrefix = "live:";
 
     // CREATE TABLE IF NOT EXISTS silently does nothing when the table already exists, so it cannot add a
     // column to a database created before provenance tracking existed - the same blind spot
@@ -443,6 +482,99 @@ public sealed class RouterMemoryDatabase
             add.CommandText = "ALTER TABLE judge_shadow_scores ADD COLUMN syntax_authoritative INTEGER NULL;";
             add.ExecuteNonQuery();
         }
+    }
+
+    /// <summary>
+    /// Adds nullable <c>question_hmac</c> and <c>prompt_version</c> to <c>grader_scores</c> when missing
+    /// (issue #293 plan §2.4).
+    /// </summary>
+    private static void MigrateGraderScoreQuestionColumns(SqliteConnection connection)
+    {
+        if (!ColumnExists(connection: connection, table: "grader_scores", column: "question_hmac"))
+        {
+            using var alter = connection.CreateCommand();
+            alter.CommandText = "ALTER TABLE grader_scores ADD COLUMN question_hmac TEXT NULL;";
+            alter.ExecuteNonQuery();
+        }
+
+        if (!ColumnExists(connection: connection, table: "grader_scores", column: "prompt_version"))
+        {
+            using var alter = connection.CreateCommand();
+            alter.CommandText = "ALTER TABLE grader_scores ADD COLUMN prompt_version TEXT NULL;";
+            alter.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>
+    /// One-time purge of pre-#293 live learning: all <c>memory_entries</c>, <c>live:</c> tallies, and
+    /// accumulated judge/grader score rows (plan §6, ADR-0024).
+    /// </summary>
+    private static void MigrateIssue293LiveLearningPurge(SqliteConnection connection)
+    {
+        if (SchemaMetaExists(connection: connection, key: Issue293LiveLearningPurgeKey)) return;
+
+        var memoryDeleted = ExecuteCountDelete(connection: connection, sql: "DELETE FROM memory_entries;");
+        var liveTalliesDeleted = ExecuteCountDelete(connection: connection,
+            sql: "DELETE FROM dimension_scores WHERE dimension LIKE $prefix;",
+            parameterName: "$prefix", parameterValue: DefaultLiveMemoryPrefix + "%");
+        var graderScoresDeleted = ExecuteCountDelete(connection: connection, sql: "DELETE FROM grader_scores;");
+        var shadowScoresDeleted = ExecuteCountDelete(connection: connection, sql: "DELETE FROM judge_shadow_scores;");
+
+        WriteSchemaMeta(connection: connection, key: Issue293LiveLearningPurgeKey, value: DateTimeOffset.UtcNow.ToString("O"));
+
+        if (!SqliteHardening.TruncateWal(connection))
+            Log.Warning(
+                "The router memory database write-ahead log was busy after the issue-293 live-learning purge; deleted content will be finalized on the next restart or eviction.");
+
+        using (var vacuum = connection.CreateCommand())
+        {
+            vacuum.CommandText = "VACUUM;";
+            vacuum.ExecuteNonQuery();
+        }
+
+        Log.Information(
+            messageTemplate:
+            "Issue-293 live-learning purge complete: {MemoryEntriesDeleted} memory_entries and {LiveTalliesDeleted} live dimension_scores deleted.",
+            propertyValue0: memoryDeleted,
+            propertyValue1: liveTalliesDeleted);
+        Log.Information(
+            messageTemplate:
+            "Issue-293 live-learning purge complete: {GraderScoresDeleted} grader_scores and {ShadowScoresDeleted} judge_shadow_scores deleted.",
+            propertyValue0: graderScoresDeleted,
+            propertyValue1: shadowScoresDeleted);
+    }
+
+    private static bool SchemaMetaExists(SqliteConnection connection, string key)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM schema_meta WHERE key = $key;";
+        command.Parameters.AddWithValue(parameterName: "$key", value: key);
+        return Convert.ToInt32(value: command.ExecuteScalar(), provider: CultureInfo.InvariantCulture) > 0;
+    }
+
+    private static void WriteSchemaMeta(SqliteConnection connection, string key, string value)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+                              INSERT INTO schema_meta (key, value) VALUES ($key, $value)
+                              ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$key", value: key);
+        command.Parameters.AddWithValue(parameterName: "$value", value: value);
+        command.ExecuteNonQuery();
+    }
+
+    private static int ExecuteCountDelete(
+        SqliteConnection connection,
+        string sql,
+        string? parameterName = null,
+        string? parameterValue = null)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        if (parameterName is not null)
+            command.Parameters.AddWithValue(parameterName: parameterName, value: parameterValue!);
+        return command.ExecuteNonQuery();
     }
 
     /// <summary>Checks whether <paramref name="table"/> already has a column named <paramref name="column"/>.</summary>

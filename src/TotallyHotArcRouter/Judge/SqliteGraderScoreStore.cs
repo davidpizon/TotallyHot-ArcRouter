@@ -32,10 +32,10 @@ public sealed class SqliteGraderScoreStore : IGraderScoreStore
         command.CommandText = """
                               INSERT INTO grader_scores (
                                   correlation_id, created_at_utc, dimension, model, grader_key, score,
-                                  grader_backbone_model, response_length_chars)
+                                  grader_backbone_model, response_length_chars, question_hmac, prompt_version)
                               VALUES (
                                   $correlationId, $createdAtUtc, $dimension, $model, $graderKey, $score,
-                                  $graderBackboneModel, $responseLengthChars);
+                                  $graderBackboneModel, $responseLengthChars, $questionHmac, $promptVersion);
                               """;
         command.Parameters.AddWithValue(parameterName: "$correlationId", value: record.CorrelationId);
         command.Parameters.AddWithValue(parameterName: "$createdAtUtc", value: record.CreatedAtUtc.ToString("O"));
@@ -47,6 +47,10 @@ public sealed class SqliteGraderScoreStore : IGraderScoreStore
             value: (object?)record.GraderBackboneModel ?? DBNull.Value);
         command.Parameters.AddWithValue(parameterName: "$responseLengthChars",
             value: (object?)record.ResponseLengthChars ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$questionHmac",
+            value: (object?)record.QuestionHmac ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$promptVersion",
+            value: (object?)record.PromptVersion ?? DBNull.Value);
 
         command.ExecuteNonQuery();
         return Task.CompletedTask;
@@ -101,7 +105,7 @@ public sealed class SqliteGraderScoreStore : IGraderScoreStore
         using var command = connection.CreateCommand();
         command.CommandText = """
                               SELECT id, correlation_id, created_at_utc, dimension, model, grader_key, score,
-                                     grader_backbone_model, response_length_chars
+                                     grader_backbone_model, response_length_chars, question_hmac, prompt_version
                               FROM grader_scores;
                               """;
 
@@ -117,7 +121,9 @@ public sealed class SqliteGraderScoreStore : IGraderScoreStore
                 GraderKey: reader.GetString(5),
                 Score: reader.GetDouble(6),
                 GraderBackboneModel: reader.IsDBNull(7) ? null : reader.GetString(7),
-                ResponseLengthChars: reader.IsDBNull(8) ? null : reader.GetInt32(8)));
+                ResponseLengthChars: reader.IsDBNull(8) ? null : reader.GetInt32(8),
+                QuestionHmac: reader.FieldCount > 9 && !reader.IsDBNull(9) ? reader.GetString(9) : null,
+                PromptVersion: reader.FieldCount > 10 && !reader.IsDBNull(10) ? reader.GetString(10) : null));
 
         return Task.FromResult<IReadOnlyList<GraderScoreRecord>>(rows);
     }

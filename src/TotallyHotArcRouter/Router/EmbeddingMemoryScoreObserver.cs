@@ -72,6 +72,16 @@ public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
             return;
         }
 
+        if (result.GradeStatus != GradeStatus.Complete)
+        {
+            _logger.LogDebug(
+                message:
+                "Skipping embedding-memory observation for correlation {CorrelationId} because grade status is {GradeStatus}.",
+                result.RequestCorrelationId,
+                result.GradeStatus);
+            return;
+        }
+
         var score = Math.Clamp(value: result.UnifiedScore, 0.0, 1.0);
 
         // docs/router/self-organizing-classification-plan.md Phase T1c: cost, IsExploratory, and
@@ -120,11 +130,9 @@ public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
             isExploratory: recoveredIsExploratory,
             propensity: recoveredPropensity,
             dimension: recoveredDimension,
-            // "Judge-scored" means the G-Eval judge actually contributed a grade that fed UnifiedScore, not
-            // merely that a judge grade was requested/pending - QualityScoreAggregator can write a
-            // static-only result when the judge times out or abstains, and that row is execution/heuristic-
-            // grounded like any other (docs/router/geval-shadow-scoring-plan.md's G3 "still owed" item).
-            isJudgeScored: result.JudgeScore.HasValue).ConfigureAwait(false);
+            // After issue #293 only Complete grades reach memory; every surviving live row is judge-grounded
+            // question-aware evidence (ADR-0026).
+            isJudgeScored: true).ConfigureAwait(false);
 
         if (_logger.IsEnabled(LogLevel.Information))
             _logger.LogInformation(

@@ -201,6 +201,8 @@ public sealed class TelemetryBroadcaster
 
         if (e.DegradedReason is { } degradedReason) wire.DegradedReason = degradedReason;
 
+        wire.GradeStatus = e.GradeStatus.ToString();
+
         return wire;
     }
 }

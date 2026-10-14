@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Quality;
 
 namespace TotallyHot.ArcRouter.Judge;
 
@@ -30,7 +31,7 @@ namespace TotallyHot.ArcRouter.Judge;
 /// rule; mirrored in docs/router/geval-shadow-scoring-plan.md and src/PLAN.md's Settled deferrals):
 /// the plan's full recipe calls for an auto-CoT evaluation-steps preamble generated once per dimension by
 /// a separate LLM call and then cached with artifact-version guards. This client instead uses a static,
-/// hardcoded per-dimension prompt constant (<see cref="DimensionCriteria"/>) - the task introduction,
+/// hardcoded per-dimension prompt hints plus the three-criterion question rubric (issue #293) - the task introduction,
 /// criteria, and form-filling cue are still G-Eval-shaped, but the chain-of-thought evaluation steps are
 /// authored once here rather than generated-and-cached. <see cref="JudgeOptions.PromptVersion"/> still
 /// exists so a future move to generated-and-cached CoT is a version bump, not a schema change. Similarly,
@@ -46,10 +47,6 @@ public sealed class GEvalJudgeClient : IJudgeClient
     private const int MinScore = 1;
     private const int MaxScore = 5;
 
-    /// <summary>Generic G-Eval evaluation steps used when a dimension has no entry in <see cref="DimensionCriteria"/>.</summary>
-    private const string DefaultCriteria =
-        "Overall quality: correctness, clarity, and usefulness of the response for the task it was given.";
-
     /// <summary>
     /// The chat-completions path appended to the provider's base URL, collapsed against it by
     /// <see cref="ProviderUrlBuilder.BuildPassthroughUrl"/>.
@@ -57,26 +54,45 @@ public sealed class GEvalJudgeClient : IJudgeClient
     private const string ChatCompletionsPath = "/v1/chat/completions";
 
     /// <summary>
-    /// Per-dimension G-Eval evaluation criteria, authored once as a static prompt fragment rather than
-    /// generated via auto-CoT and cached (see this type's remarks for why). Keys match the router's
-    /// dimension labels (docs/router/self-organizing-classification-plan.md's heuristic classifier
-    /// output); an unrecognized dimension falls back to <see cref="DefaultCriteria"/>.
+    /// The three criteria every judge call applies, in fixed order (issue #293). A response that fails
+    /// Relevance must score 1 or 2 regardless of the others.
     /// </summary>
-    private static readonly IReadOnlyDictionary<string, string> DimensionCriteria =
+    private const string SharedCriteria =
+        """
+        Score the response against ALL three criteria below. Produce one integer from 1 to 5 that reflects
+        the overall result. If the response fails Relevance (it answers a different question than the one
+        asked), you MUST score 1 or 2 regardless of Correctness or Completeness.
+
+        1. Relevance — Does the response address what was asked, rather than a different question?
+        2. Correctness — Is what it says or writes right for what was asked?
+        3. Completeness — Does it cover the whole request, without stubs, cut-off output, or skipped parts?
+        """;
+
+    /// <summary>
+    /// One-sentence dimension emphasis keyed on <see cref="RouterDimension"/> constants. Every router
+    /// dimension has an entry so none silently falls through to a generic line.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> DimensionHints =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["algorithm"] =
-                "Algorithmic correctness: does the response solve the stated problem with a sound approach, correct edge-case handling, and reasonable complexity?",
-            ["bug_fixing"] =
-                "Bug-fixing quality: does the response correctly identify and fix the described defect without introducing new ones or changing unrelated behavior?",
-            ["test_generation"] =
-                "Test quality: do the generated tests meaningfully exercise the described behavior, including edge cases, and would they actually fail on a broken implementation?",
-            ["code_review"] =
-                "Review quality: does the response identify real issues, explain them clearly, and avoid flagging non-issues?",
-            ["design"] =
-                "Design quality: is the proposed design coherent, addresses the stated requirements, and reasonably justifies its tradeoffs?",
-            ["explanation"] =
-                "Explanation quality: is the explanation accurate, clear, and appropriately complete for the question asked?"
+            [RouterDimension.CodeGeneration] =
+                "Dimension emphasis: judge whether the synthesized code matches the requested behavior.",
+            [RouterDimension.AlgorithmDesign] =
+                "Dimension emphasis: judge whether the approach solves the stated algorithmic problem with sound edge-case handling.",
+            [RouterDimension.BugFixing] =
+                "Dimension emphasis: judge whether the described defect is correctly identified and fixed without unrelated changes.",
+            [RouterDimension.CodeCompletion] =
+                "Dimension emphasis: judge whether the completion correctly fills the requested gap in the surrounding code.",
+            [RouterDimension.CodeRefactoring] =
+                "Dimension emphasis: judge whether the refactor preserves behavior while improving the requested quality.",
+            [RouterDimension.DataScience] =
+                "Dimension emphasis: judge whether the analysis or pipeline code correctly answers the data task asked.",
+            [RouterDimension.MultiLanguage] =
+                "Dimension emphasis: judge whether the port or cross-language change correctly preserves the requested meaning.",
+            [RouterDimension.CodeUnderstanding] =
+                "Dimension emphasis: judge whether the explanation accurately and completely answers the question about the code.",
+            [RouterDimension.TestGeneration] =
+                "Dimension emphasis: judge whether the tests meaningfully exercise the described behavior, including edge cases."
         };
 
     // ReSharper disable once RedundantVerbatimStringPrefix
@@ -191,8 +207,9 @@ public sealed class GEvalJudgeClient : IJudgeClient
     }
 
     /// <summary>
-    /// Composes the G-Eval-shaped prompt: task introduction, the requirement the response was written for,
-    /// per-dimension criteria, evaluation steps, and a form-filling cue asking for a single 1-5 digit.
+    /// Composes the G-Eval-shaped prompt: the shared relevance/correctness/completeness rubric, a
+    /// per-<see cref="RouterDimension"/> hint, the requirement the response was written for, and a
+    /// form-filling cue asking for a single 1-5 digit.
     /// </summary>
     /// <remarks>
     /// <paramref name="taskPrompt"/> closes the gap docs/research/code-quality-metrics-assessment.md §1
@@ -201,29 +218,24 @@ public sealed class GEvalJudgeClient : IJudgeClient
     /// <see cref="GraderQuestionText.Require">required</see> a non-empty question; this method always
     /// weaves it in rather than omitting the section or filling a placeholder.
     /// </remarks>
-    /// <param name="dimension">The task dimension whose G-Eval criteria should be applied.</param>
+    /// <param name="dimension">The task dimension whose hint should be applied.</param>
     /// <param name="responseText">The agent's response text to score.</param>
     /// <param name="taskPrompt">The user/task question the response was written to answer; never empty.</param>
-    private static string BuildPrompt(string dimension, string responseText, string taskPrompt)
+    internal static string BuildPrompt(string dimension, string responseText, string taskPrompt)
     {
-        // ReSharper disable once NullCoalescingConditionIsAlwaysNotNullAccordingToAPIContract
-        // Nullable annotations are a compile-time contract, not a runtime guarantee - the dimension
-        // originates in scored telemetry, where it can be absent.
-        var criteria = DimensionCriteria.TryGetValue(key: dimension ?? string.Empty, value: out var dimensionCriteria)
-            ? dimensionCriteria
-            : DefaultCriteria;
+        var hint = ResolveDimensionHint(dimension);
 
         return $"""
-                You are an expert evaluator. Your task is to rate the quality of an AI assistant's response on a
-                scale of 1 (worst) to 5 (best), according to the following criterion:
+                You are an expert evaluator. Rate the AI assistant's response on a scale of 1 (worst) to 5
+                (best) using the criteria below.
 
-                {criteria}
+                {SharedCriteria}
+
+                {hint}
                 {GraderQuestionText.FormatTaskSection(taskPrompt)}
                 Evaluation steps:
-                1. Read the task and the response carefully.
-                2. Judge the response strictly against the criterion above and the task above, not against
-                   unrelated qualities. A complete answer to a different question than the one asked must
-                   score low.
+                1. Read the task (and any earlier conversation context in it) and the response carefully.
+                2. Apply Relevance, then Correctness, then Completeness. Fail Relevance → score 1 or 2.
                 3. Decide on a single integer score from 1 to 5.
 
                 Response to evaluate:
@@ -233,6 +245,22 @@ public sealed class GEvalJudgeClient : IJudgeClient
 
                 Respond with only a single digit from 1 to 5 and nothing else.
                 """;
+    }
+
+    /// <summary>
+    /// Resolves the one-sentence dimension hint for <paramref name="dimension"/>. Every
+    /// <see cref="RouterDimension.AllDimensions"/> value has a dedicated hint; anything else gets a
+    /// generic coding-task emphasis (still never silent about the three criteria).
+    /// </summary>
+    /// <param name="dimension">The router dimension label.</param>
+    /// <returns>The hint sentence to weave into the prompt.</returns>
+    internal static string ResolveDimensionHint(string? dimension)
+    {
+        if (!string.IsNullOrEmpty(dimension) &&
+            DimensionHints.TryGetValue(key: dimension, value: out var hint))
+            return hint;
+
+        return "Dimension emphasis: judge the response as a coding-task answer to the stated question.";
     }
 
     /// <summary>

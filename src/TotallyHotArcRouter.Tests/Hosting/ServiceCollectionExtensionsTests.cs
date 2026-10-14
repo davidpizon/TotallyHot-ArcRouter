@@ -228,7 +228,7 @@ public class ServiceCollectionExtensionsTests
         // tautological.
         Assert.Equal(
             expected: [typeof(RouterMemoryScoreObserver), typeof(EmbeddingMemoryScoreObserver),
-                typeof(TranscriptScoreObserver), typeof(GraderScoreRecordObserver)],
+                typeof(TranscriptScoreObserver), typeof(GraderScoreRecordObserver), typeof(GradeReceiptRecordObserver)],
             actual: composite.Observers.Select(o => o.GetType()));
     }
 

@@ -65,7 +65,13 @@ public sealed class QualityOptions
     /// freezes the corpus at the old scorer's verdicts, and bumping it needlessly re-grades every row (and,
     /// once LLM graders are registered, pays for every one of them again).
     /// </remarks>
-    public string ScorerVersion { get; init; } = "2.0";
+    public string ScorerVersion { get; init; } = "3.0";
+
+    /// <summary>
+    /// Identifies the weight table version stamped onto grade receipts so an audit can tell which fixed
+    /// weights produced a score. Bump when <see cref="DimensionWeights"/> defaults change.
+    /// </summary>
+    public string WeightsVersion { get; init; } = "3.0-judge-heavy";
 
     /// <summary>Per-dimension scoring weights, keyed by dimension name.</summary>
     public Dictionary<string, DimensionWeightOptions> DimensionWeights { get; set; } =
@@ -81,40 +87,55 @@ public sealed class QualityOptions
 
         return DimensionWeightOptions.Default;
     }
+
+    /// <summary>
+    /// Ensures every configured dimension's weights (and the default) sum to 1 within 1e-9. Called at
+    /// host startup so a misconfigured table fails fast rather than silently shifting effective weights.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown when any dimension's weights do not sum to 1.</exception>
+    public void EnsureDimensionWeightsSumToOne()
+    {
+        DimensionWeightOptions.Default.EnsureSumsToOne(dimensionLabel: "(default)");
+        foreach (var (dimension, weights) in DimensionWeights)
+            weights.EnsureSumsToOne(dimensionLabel: dimension);
+    }
 }
 
 /// <summary>
-/// Per-dimension weights for the three axes of the unified score. Weights need not pre-sum to 1: the
-/// scorer normalizes by their total, and drops any axis that does not apply to a given result rather than
-/// scoring it zero, so a missing signal never masquerades as a failing one.
+/// Per-dimension fixed weights for the unified score. <see cref="Syntax"/> + <see cref="Analysis"/> +
+/// <see cref="Judge"/> + Σ<see cref="ExtraWeights"/> must equal 1.0 (ADR-0026 / Eq. 8).
 /// </summary>
 public sealed class DimensionWeightOptions
 {
-    /// <summary>The default balanced weighting used when a dimension has no explicit configuration.</summary>
-    public static DimensionWeightOptions Default { get; } = new() { Syntax = 0.4, Analysis = 0.2, Judge = 0.4 };
+    /// <summary>Absolute tolerance when checking that weights sum to 1.</summary>
+    public const double SumTolerance = 1e-9;
+
+    /// <summary>
+    /// The default judge-heavy weighting used when a dimension has no explicit configuration
+    /// (issue #293 starting weights).
+    /// </summary>
+    public static DimensionWeightOptions Default { get; } = new() { Syntax = 0.25, Analysis = 0.15, Judge = 0.60 };
 
     /// <summary>Weight applied to the structural-validity signal (s_syntax): does the snippet parse?</summary>
-    public double Syntax { get; init; } = 0.4;
+    public double Syntax { get; init; } = 0.25;
 
     /// <summary>
     /// Weight applied to the composed static-analysis signal (s_analysis): diagnostic severity, placeholder
     /// and truncation detection, and complexity - everything provable about the code without running it.
     /// </summary>
-    public double Analysis { get; init; } = 0.2;
+    public double Analysis { get; init; } = 0.15;
 
     /// <summary>
-    /// Weight applied to the G-Eval judge's grade (s_judge). Dropped from the normalization whenever the
-    /// judge is disabled, abstains, or does not answer within
-    /// <see cref="QualityOptions.JudgeJoinTimeoutMs"/>, so a static-only score spans the full [0,1] range
-    /// rather than being capped by an axis that could never be filled.
+    /// Weight applied to the G-Eval judge's grade (s_judge). When the judge is absent the grade status
+    /// becomes <see cref="GradeStatus.StructureOnly"/> or <see cref="GradeStatus.Incomplete"/>; the weight
+    /// itself is never dropped or renormalized.
     /// </summary>
-    public double Judge { get; init; } = 0.4;
+    public double Judge { get; init; } = 0.60;
 
     /// <summary>
     /// Weights for graders beyond the three built-in axes above, keyed by grader name and matched against
-    /// <see cref="QualityResult.GraderScores"/>. Empty by default: Phase Q1 generalizes the join and the
-    /// scorer's loop to support this, but registers no additional grader itself. A grader with no entry
-    /// here contributes nothing, the same drop-rather-than-zero treatment the three named axes get.
+    /// <see cref="QualityResult.GraderScores"/>. Must be included in the sum-to-1 check. Leave at zero
+    /// unless the corresponding portfolio grader is enabled and expected to always join.
     /// </summary>
     public IReadOnlyDictionary<string, double> ExtraWeights { get; init; } =
         new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
@@ -125,5 +146,25 @@ public sealed class DimensionWeightOptions
     public double ResolveExtraWeight(string graderKey)
     {
         return ExtraWeights.GetValueOrDefault(key: graderKey, defaultValue: 0.0);
+    }
+
+    /// <summary>Sum of syntax, analysis, judge, and every extra weight.</summary>
+    /// <returns>The total weight.</returns>
+    public double TotalWeight()
+    {
+        var total = Syntax + Analysis + Judge;
+        foreach (var weight in ExtraWeights.Values) total += weight;
+        return total;
+    }
+
+    /// <summary>Throws when <see cref="TotalWeight"/> is not within <see cref="SumTolerance"/> of 1.0.</summary>
+    /// <param name="dimensionLabel">Dimension name used in the exception message.</param>
+    public void EnsureSumsToOne(string dimensionLabel)
+    {
+        var total = TotalWeight();
+        if (Math.Abs(total - 1.0) > SumTolerance)
+            throw new InvalidOperationException(
+                FormattableString.Invariant(
+                    $"Quality dimension '{dimensionLabel}' weights must sum to 1.0 (±{SumTolerance}); got {total}."));
     }
 }

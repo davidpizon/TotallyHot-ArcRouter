@@ -61,8 +61,10 @@ public class QualityGraderTests
         Assert.True(result.SyntaxValid);
         Assert.True(result.SyntaxAuthoritative);
         Assert.Null(result.DegradedReason);
-        Assert.True(condition: result.UnifiedScore > 0.9,
-            userMessage: $"expected a high score, got {result.UnifiedScore}");
+        // Without a judge axis, fixed weights cap the structural score at Syntax+Analysis (default 0.40).
+        Assert.True(condition: result.UnifiedScore is >= 0.25 and <= 0.40,
+            userMessage: $"expected a structural-only score in [0.25, 0.40], got {result.UnifiedScore}");
+        Assert.Equal(1.0, actual: result.SyntaxConfidence);
     }
 
     [Fact]

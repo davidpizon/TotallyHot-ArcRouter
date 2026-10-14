@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Quality;
+using GradeStatus = TotallyHot.ArcRouter.Quality.GradeStatus;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Tests.TestSupport;
@@ -33,7 +34,8 @@ public class EmbeddingMemoryScoreObserverTests
         {
             RequestCorrelationId = "corr-1",
             Model = "claude-opus-4-6",
-            UnifiedScore = 0.75
+            UnifiedScore = 0.75,
+            GradeStatus = GradeStatus.Complete
         };
 
         await observer.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
@@ -120,7 +122,10 @@ public class EmbeddingMemoryScoreObserverTests
             pendingCostCache: CreatePendingCostCache(), pendingProvenanceCache: CreatePendingProvenanceCache(),
             logger: NullLogger<EmbeddingMemoryScoreObserver>.Instance);
 
-        var result = new QualityResult { RequestCorrelationId = "corr-1", Model = "m", UnifiedScore = 5.0 };
+        var result = new QualityResult
+        {
+            RequestCorrelationId = "corr-1", Model = "m", UnifiedScore = 5.0, GradeStatus = GradeStatus.Complete
+        };
 
         await observer.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -150,7 +155,8 @@ public class EmbeddingMemoryScoreObserverTests
         {
             RequestCorrelationId = "corr-1",
             Model = "claude-opus-4-6",
-            UnifiedScore = 0.75
+            UnifiedScore = 0.75,
+            GradeStatus = GradeStatus.Complete
         };
 
         await observer.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
@@ -179,7 +185,8 @@ public class EmbeddingMemoryScoreObserverTests
         {
             RequestCorrelationId = "corr-1",
             Model = "claude-opus-4-6",
-            UnifiedScore = 0.75
+            UnifiedScore = 0.75,
+            GradeStatus = GradeStatus.Complete
         };
 
         await observer.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
@@ -205,7 +212,11 @@ public class EmbeddingMemoryScoreObserverTests
 
         var result = new QualityResult
         {
-            RequestCorrelationId = "corr-1", Model = "claude-opus-4-6", UnifiedScore = 0.75, JudgeScore = 0.8
+            RequestCorrelationId = "corr-1",
+            Model = "claude-opus-4-6",
+            UnifiedScore = 0.75,
+            JudgeScore = 0.8,
+            GradeStatus = GradeStatus.Complete
         };
 
         await observer.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
@@ -214,7 +225,7 @@ public class EmbeddingMemoryScoreObserverTests
     }
 
     [Fact]
-    public async Task ObserveAsync_NoJudgeScore_StampsIsJudgeScoredFalse()
+    public async Task ObserveAsync_IncompleteGrade_WritesNoEntry()
     {
         var store = new FakeMemoryEntryStore();
         var memory = CreateMemory(store);
@@ -226,14 +237,17 @@ public class EmbeddingMemoryScoreObserverTests
             pendingCostCache: CreatePendingCostCache(), pendingProvenanceCache: CreatePendingProvenanceCache(),
             logger: NullLogger<EmbeddingMemoryScoreObserver>.Instance);
 
-        // A held result can time out and write static-only even when a judge grade was expected - that row
-        // is still execution/heuristic-grounded, not judge-scored, since JudgeScore never actually arrived.
         var result = new QualityResult
-        { RequestCorrelationId = "corr-1", Model = "claude-opus-4-6", UnifiedScore = 0.75, JudgeScore = null };
+        {
+            RequestCorrelationId = "corr-1",
+            Model = "claude-opus-4-6",
+            UnifiedScore = 0.75,
+            GradeStatus = GradeStatus.StructureOnly
+        };
 
         await observer.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.False(Assert.Single(store.Entries).IsJudgeScored);
+        Assert.Empty(store.Entries);
     }
 
     private static EmbeddingMemory CreateMemory(IMemoryEntryStore store)
