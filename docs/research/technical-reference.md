@@ -1,8 +1,9 @@
-# Agentic Model Routing for Coding Tasks
+# Agent-as-a-Router: Agentic Model Routing for Coding Tasks
 **arXiv:2606.22902v3 — Implementation Reading Notes**
 
-> **Third-party work.** This document summarizes a paper written by Pengfei Zhou et al. (see Authors
-> below) as an implementation aid for TotallyHot Arc Router. It is **not** the work of this project,
+> **Third-party work.** This document summarizes Zhou et al., *Agent-as-a-Router: Agentic Model
+> Routing for Coding Tasks* (arXiv:2606.22902; authors below), as an implementation aid for
+> TotallyHot Arc Router. The paper's router is **ACRouter**. It is **not** the work of this project,
 > and it is not a substitute for the paper. The paper remains the copyright of its authors and is
 > distributed under arXiv's own license terms; read the original at
 > <https://arxiv.org/abs/2606.22902>. Figures, tables, and derivations reproduced here are
@@ -14,8 +15,8 @@
 
 | Field | Value |
 |---|---|
-| **Title** | Agentic Model Routing for Coding Tasks |
-| **arXiv ID** | 2606.22902v3 |
+| **Title** | Agent-as-a-Router: Agentic Model Routing for Coding Tasks |
+| **arXiv ID** | 2606.22902 (v3) |
 | **Manuscript Date** | 2026-06-22 (v3 posted 2026-06-26) |
 | **Venue** | arXiv cs.AI |
 | **Paper** | https://arxiv.org/abs/2606.22902 |
@@ -45,7 +46,7 @@
 
 Real-world users typically have access to multiple LLMs from different providers, and these LLMs often excel at distinct domains, yet none dominate all. Routing each task to the most suitable model becomes critical for both performance and cost. Existing routers treat this as a **static, one-off classification problem**. The fundamental bottleneck is identified as **information deficit**: augmenting a vanilla LLM router with performance statistics at the task-dimension level yields a **15.3% relative gain**, surpassing a heuristic router built on the same dimension-level priors.
 
-The proposed routing framework formalizes routing as a **C-A-F loop** (Context→Action→Feedback→Context). It closes the information gap by accumulating execution-grounded experience during deployment. The instantiation **TotallyHotArcRouter** is composed of an **Orchestrator**, a **Verifier**, and a **Memory** module. **CodeRouterBench** is introduced as an evaluation environment comprising ~10K task instances with verified scores from 8 frontier LLMs, enabling **regret-based** router comparison on streaming tasks.
+Zhou et al. propose Agent-as-a-Router, which formalizes routing as a **C-A-F loop** (Context→Action→Feedback→Context). It closes the information gap by accumulating execution-grounded experience during deployment. The instantiation **ACRouter** (Agentic Coding Router) is composed of an **Orchestrator**, a **Verifier**, and a **Memory** module. **CodeRouterBench** is introduced as an evaluation environment comprising ~10K task instances with verified scores from 8 frontier LLMs, enabling **regret-based** router comparison on streaming tasks.
 
 ---
 
@@ -72,9 +73,9 @@ LLM router given the same statistics as DimensionBest **exceeds** it (47.74 vs. 
 
 ### Three Core Contributions
 
-1. **Framework** — C-A-F formalization of routing with cumulative regret as the natural streaming metric.
-2. **Artifacts** — TotallyHotArcRouter (C-A-F instantiation) + CodeRouterBench (~10K tasks, 8 LLMs, execution-verified).
-3. **Findings** — Information deficit is the routing bottleneck; TotallyHotArcRouter attains lowest cumulative regret on both ID and OOD tasks; static learners fail to generalize on OOD.
+1. **Framework** — Agent-as-a-Router, a C-A-F formalization of routing with cumulative regret as the natural streaming metric.
+2. **Artifacts** — ACRouter (C-A-F instantiation) + CodeRouterBench (~10K tasks, 8 LLMs, execution-verified).
+3. **Findings** — Information deficit is the routing bottleneck; ACRouter attains lowest cumulative regret on both ID and OOD tasks; static learners fail to generalize on OOD.
 
 ---
 
@@ -95,7 +96,7 @@ LLM router given the same statistics as DimensionBest **exceeds** it (47.74 vs. 
 
 ### Coding Agents
 
-Evolved from single-call generators into multi-stage harness-based frameworks (planning, retrieval, code editing, execution, self-debugging). Multi-agent variants decompose stages across specialized roles. Production systems include Claude Code and Codex CLI. **TotallyHotArcRouter** addresses the fixed-backbone limitation by actively routing each task to the most suitable model within a continuous stream.
+Evolved from single-call generators into multi-stage harness-based frameworks (planning, retrieval, code editing, execution, self-debugging). Multi-agent variants decompose stages across specialized roles. Production systems include Claude Code and Codex CLI. **ACRouter** addresses the fixed-backbone limitation by actively routing each task to the most suitable model within a continuous stream.
 
 ---
 
@@ -187,7 +188,7 @@ $$r_i(a_i) = s_i(a_i) - 0.1\,\kappa_i(a_i)$$
 
 On ID single-turn tasks the cost term is mostly a soft tie-breaker; on OOD agentic tasks, multi-step backend calls make the cost term materially affect regret.
 
-### 3.3 TotallyHotArcRouter Instantiation
+### 3.3 ACRouter Instantiation
 
 The three design needs from §3.1:
 1. Integrate available information at decision time → **Orchestrator**
@@ -227,7 +228,7 @@ where:
 1. **AST parsing** — structural validity check
 2. **Sandbox execution** — run code in isolated environment *(not implemented — see the deviation note below)*
 
-> **Implementation deviation.** This document describes the *paper*. Arc Router deliberately does **not**
+> **Implementation deviation.** This document describes the *paper*. TotallyHot Arc Router deliberately does **not**
 > implement sandboxed execution: model-generated code is never run, and the paper's execution-based signal
 > is replaced by in-process static analysis blended with the G-Eval judge. Every reference to sandboxing,
 > Docker, or execution-based scoring below is a description of the source research, not of this codebase.
@@ -260,7 +261,7 @@ The C-A-F loop provides a unified taxonomy. Restricting/removing components yiel
 | Static: Heuristic (DimensionBest, kNN Retrieval) | Static lookup | — | Frozen probing-set prior |
 | Static: Trained Policy (LogReg / TF-IDF+MLP / RouteLLM / Qwen3.5-FT) | Trained model | — | — |
 | Dynamic: Online Bandit (LinUCB, LinTS) | $\arg\max$ rule | Reward only | Per-arm parametric posterior |
-| **TotallyHotArcRouter (loop-complete)** | **LLM policy + tools** | **Sandbox-native** | **Online task-embedding kNN** |
+| **ACRouter (loop-complete)** | **LLM policy + tools** | **Sandbox-native** | **Online task-embedding kNN** |
 
 #### Specific Baseline Configurations
 
@@ -331,7 +332,7 @@ Deterministic MD5-based split (seed: `coding-router-v1`):
 
 | Role | Split | Tasks | Purpose |
 |---|---|---|---|
-| **Probing set** | train 60% + val 10% | 7,080 | Develop routers: profile model strengths, train classifiers, calibrate DimensionBest, warm-start TotallyHotArcRouter Memory (200 val tasks) |
+| **Probing set** | train 60% + val 10% | 7,080 | Develop routers: profile model strengths, train classifiers, calibrate DimensionBest, warm-start ACRouter Memory (200 val tasks) |
 | **In-distribution test** | test 30% | 2,919 | Held-out controlled evaluation with execution-verified per-task per-model scores |
 | **OOD test** | — | 176 | Agentic programming; no router accesses ground-truth from this dimension |
 
@@ -372,12 +373,14 @@ For local GPU-served routers (finetuned LLMs, etc.): tokens priced at **$0.054/M
 
 ### 5.2 Main Results (Table 3)
 
+Table 3 of the paper labels this row "ACRouter (ours)". The parenthetical is Zhou et al. referring to ACRouter. The figures below are those reported results.
+
 #### In-Distribution Test ($n = 2,919$, 9 dimensions)
 
 | Router | AvgPerf% ↑ | CumReg ↓ | Perf/$ ↑ |
 |---|---|---|---|
 | **Oracle** | **57.00** | **0** | **8.20** |
-| **TotallyHotArcRouter (ours)** | **49.98** | **205.5** | **3.79** |
+| **ACRouter** | **49.98** | **205.5** | **3.79** |
 | LinUCB | 46.84 | 296.9 | 4.38 |
 | LinTS | 46.48 | 307.4 | 4.49 |
 | DimensionBest | 47.50 | 277.4 | 3.69 |
@@ -397,7 +400,7 @@ For local GPU-served routers (finetuned LLMs, etc.): tokens priced at **$0.054/M
 | Router | AvgPerf% ↑ | CumReg ↓ | Perf/$ ↑ |
 |---|---|---|---|
 | **Oracle** | **75.89** | **0** | **2.32** |
-| **TotallyHotArcRouter (ours)** | **62.50** | **17.0** | **1.18** |
+| **ACRouter** | **62.50** | **17.0** | **1.18** |
 | LinUCB | 49.82 | 31.1 | 0.96 |
 | LinTS | 46.43 | 35.9 | 0.75 |
 | DimensionBest | — | — | — |
@@ -418,11 +421,11 @@ For local GPU-served routers (finetuned LLMs, etc.): tokens priced at **$0.054/M
 
 ### 5.3 Key Observations
 
-1. **TotallyHotArcRouter achieves the best AvgPerf on both ID and OOD** by dynamically accumulating context, with lower cost than always choosing Opus-4.6 (Perf/$: 3.79 ID, 1.18 OOD vs. Always-Opus 1.29 ID, 0.64 OOD).
+1. **ACRouter achieves the best AvgPerf on both ID and OOD** by dynamically accumulating context, with lower cost than always choosing Opus-4.6 (Perf/$: 3.79 ID, 1.18 OOD vs. Always-Opus 1.29 ID, 0.64 OOD).
 2. **Static learners reach fair AvgPerf on ID but collapse on OOD.** Lightweight classifiers (LogReg, TF-IDF+MLP, RouteLLM-MF, RouteLLM-BERT) drop to 8.93%–21.43% AvgPerf on OOD — lower than Random (31.25%).
-3. **Contextual bandits (LinUCB, LinTS) survive OOD better** (49.82% / 46.43%) because they update online, but lag TotallyHotArcRouter due to lacking context-aware reasoning from Orchestrator + Memory.
-4. **Cumulative regret ordering:** TotallyHotArcRouter (205.5) < DimensionBest (277.4) < static classifiers (284–317) < bandits (297–307) < single models (387–593).
-5. **Cost analysis (ID):** Always-Opus costs $34.02 for 43.83% AvgPerf; TotallyHotArcRouter achieves 49.98% for $13.21.
+3. **Contextual bandits (LinUCB, LinTS) survive OOD better** (49.82% / 46.43%) because they update online, but lag ACRouter due to lacking context-aware reasoning from Orchestrator + Memory.
+4. **Cumulative regret ordering:** ACRouter (205.5) < DimensionBest (277.4) < static classifiers (284–317) < bandits (297–307) < single models (387–593).
+5. **Cost analysis (ID):** Always-Opus costs $34.02 for 43.83% AvgPerf; ACRouter achieves 49.98% for $13.21.
 
 ### 5.4 Limitations
 
@@ -434,11 +437,11 @@ For local GPU-served routers (finetuned LLMs, etc.): tokens priced at **$0.054/M
 
 ## 6. Conclusion
 
-The framework formalizes routing as a C-A-F loop, naturally castable as a contextual bandit with cumulative regret as its streaming metric. TotallyHotArcRouter (Orchestrator + Verifier + Memory) attains the lowest cumulative regret on ID stream tasks and is the **only router** that maintains strong performance on OOD agentic-programming. The general principle: **actively closing the information gap through execution-grounded feedback** applies broadly to agent systems routing among heterogeneous tools or models.
+Agent-as-a-Router formalizes routing as a C-A-F loop, naturally castable as a contextual bandit with cumulative regret as its streaming metric. ACRouter (Orchestrator + Verifier + Memory) attains the lowest cumulative regret on ID stream tasks and is the **only router** that maintains strong performance on OOD agentic-programming. The general principle: **actively closing the information gap through execution-grounded feedback** applies broadly to agent systems routing among heterogeneous tools or models.
 
 ---
 
-## Appendix A: TotallyHotArcRouter System Architecture
+## Appendix A: ACRouter System Architecture
 
 ### A.1 Two-Layer Architecture
 
@@ -741,7 +744,7 @@ Radar chart analysis across 9 dimensions reveals distinctly non-circular shapes:
 - Enough to explain why DimensionBest reaches ~0.475 AvgPerf
 - Well short of the 0.570 per-task oracle
 
-The remaining **~73% routing signal** lies in per-task content (algorithm choice, API patterns, edge-case handling) — exactly what TotallyHotArcRouter's task-embedding Memory keys on, rather than the lower-resolution dimension hash used by DimensionBest.
+The remaining **~73% routing signal** lies in per-task content (algorithm choice, API patterns, edge-case handling) — exactly what ACRouter's task-embedding Memory keys on, rather than the lower-resolution dimension hash used by DimensionBest.
 
 ### D.4 Router Bias Distribution
 
@@ -754,10 +757,10 @@ Providing the per-dimension performance prior (+Perf stats) lets the LLM router 
 | Tier | Methods | $Total (ID) | AvgPerf% | Perf/$ |
 |---|---|---|---|---|
 | **Cheap** | Trained classifiers (LogReg $7.54, RouteLLM-MF $7.46, TF-IDF+MLP $7.69, RouteLLM-BERT $7.59, Qwen-FT $6.81) | $6.81–$7.69 | 46.16–47.26 | 6.11–6.82 |
-| **Moderate** | DimensionBest ($12.89), TotallyHotArcRouter ($13.21), online bandits ($10–11) | $10–$13.21 | 46.84–49.98 | 3.69–4.49 |
+| **Moderate** | DimensionBest ($12.89), ACRouter ($13.21), online bandits ($10–11) | $10–$13.21 | 46.84–49.98 | 3.69–4.49 |
 | **Premium** | Always-Opus ($34.02), Always-Qwen3.5+ ($18.14), Random ($15.64) | $15.64–$34.02 | 37.16–43.83 | 1.29–2.48 |
 
-**Key ID cost insight:** Always-Opus pays $34.02 for 43.83% AvgPerf; TotallyHotArcRouter achieves 49.98% AvgPerf for only $13.21 — **a 6.15 AvgPerf improvement at 61% lower cost**.
+**Key ID cost insight:** Always-Opus pays $34.02 for 43.83% AvgPerf; ACRouter achieves 49.98% AvgPerf for only $13.21 — **a 6.15 AvgPerf improvement at 61% lower cost**.
 
 **Cheapest floor:** Always-Kimi-K2.5 at $2.90 sets the cost floor with 36.66% AvgPerf (Perf/$: 12.62, highest in Table 3) at a substantial AvgPerf cost.
 
@@ -768,7 +771,7 @@ Full breakdown for $n = 2,919$ across 9 single-turn coding dimensions including 
 | Family | Router | AvgPerf% ↑ | CumReg ↓ | $Total | Perf/$ ↑ |
 |---|---|---|---|---|---|
 | Bound | Oracle | 57.00 | 0 | $6.95 | 8.20 |
-| **Agentic** | **TotallyHotArcRouter** | **49.98** | **205.5** | **$13.21** | **3.79** |
+| **Agentic** | **ACRouter** | **49.98** | **205.5** | **$13.21** | **3.79** |
 | Bandit | LinTS | 46.48 | 307.4 | $10.35 | 4.49 |
 | Bandit | LinUCB | 46.84 | 296.9 | $10.69 | 4.38 |
 | Heuristic | DimensionBest | 47.50 | 277.4 | $12.89 | 3.69 |
@@ -790,7 +793,7 @@ Full breakdown for $n = 176$ agentic-programming OOD tasks:
 | Family | Router | AvgPerf% ↑ | CumReg ↓ | $Total | Perf/$ ↑ |
 |---|---|---|---|---|---|
 | Bound | Oracle | 75.89 | 0 | $32.71 | 2.32 |
-| **Agentic** | **TotallyHotArcRouter** | **62.50** | **17.0** | **$52.97** | **1.18** |
+| **Agentic** | **ACRouter** | **62.50** | **17.0** | **$52.97** | **1.18** |
 | Bandit | LinTS | 46.43 | 35.9 | $61.91 | 0.75 |
 | Bandit | LinUCB | 49.82 | 31.1 | $51.90 | 0.96 |
 | Heuristic | DimensionBest | — | — | — | — |
@@ -849,7 +852,7 @@ Step-by-step construction kit:
 | 2 | **Profile via probing set** | Use CodeRouterBench (or own tasks via C-A-F) to build dimension × model performance matrix |
 | 3 | **Start with DimensionBest** | Static Memory + lookup achieves ~83% of oracle AvgPerf at near-zero overhead — your baseline |
 | 4 | **Add a classifier** | Swap to trained classifier (LogReg or RouteLLM) for cheaper deployment with comparable AvgPerf; Perf/$ = 6.11–6.82 |
-| 5 | **Complete the C-A-F loop (TotallyHotArcRouter)** | When deploying on new distributions, activate all three modules; initialize Memory with available priors |
+| 5 | **Complete the C-A-F loop (ACRouter)** | When deploying on new distributions, activate all three modules; initialize Memory with available priors |
 | 6 | **Customize tools** | Swap evaluation tools in Verifier (domain-specific tests), add custom routing tools |
 | 7 | **Extend the benchmark** | New models: generate responses + scoring; new dimensions: task set + scoring function |
 
@@ -980,7 +983,7 @@ The paper views coding routing as a concrete first instantiation of a **broader 
 |---|---|
 | **Information deficit > reasoning deficit** | +15.3% relative gain from adding per-dimension stats to LLM router; static routers underperform despite strong LLMs |
 | **No single backend dominates all coding dimensions** | 5 distinct models serve as dimension-best across 9 dimensions; 12× cost range with complementary strengths |
-| **Loop-complete adaptive routing wins on both ID and OOD** | TotallyHotArcRouter achieves lowest CumReg (205.5 ID, 17.0 OOD) and highest AvgPerf (49.98% ID, 62.50% OOD) among all routers |
+| **Loop-complete adaptive routing wins on both ID and OOD** | ACRouter achieves lowest CumReg (205.5 ID, 17.0 OOD) and highest AvgPerf (49.98% ID, 62.50% OOD) among all routers |
 | **Static learners overfit to training distribution** | Lightweight classifiers: 46–47% on ID → 8.93–21.43% on OOD (below Random 31.25%) |
 | **Router capacity is not the bottleneck** | Qwen3.5 scaling 0.8B→27B: only ~0.5 AvgPerf gain; finetuning is the gate |
 | **Dimension identity explains ~27% of oracle-choice entropy** | Remainder lies in per-task content; embedding-based Memory addresses this residual |
