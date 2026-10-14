@@ -891,7 +891,8 @@ public sealed class ConversationImporter
             candidates.AddRange(ResponseShapeFallbacks);
             foreach (var candidate in candidates)
             {
-                if (_responseTextExtractor.TryExtractText(candidate, streaming, responseBytes, out var text))
+                if (_responseTextExtractor.TryExtractText(candidate, streaming, responseBytes, out var text,
+                        out _))
                 {
                     reply = text;
                     break;

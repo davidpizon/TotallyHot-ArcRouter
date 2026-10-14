@@ -45,7 +45,8 @@ public sealed class TranscriptDatabase
                                          archive_session_id TEXT    NULL,
                                          archive_turn_id    TEXT    NULL,
                                          prompt_text_length INTEGER NULL,
-                                         response_text_length INTEGER NULL
+                                         response_text_length INTEGER NULL,
+                                         has_tool_calls INTEGER NULL
                                      );
 
                                      CREATE INDEX IF NOT EXISTS ix_request_transcripts_correlation_id
@@ -182,8 +183,18 @@ public sealed class TranscriptDatabase
         MigrateArchiveIdColumns(connection);
         MigrateTextLengthColumns(connection);
         MigrateOriginColumn(connection);
+        MigrateHasToolCallsColumn(connection);
         ScrubConversationText(connection);
     }
+
+    /// <summary>
+    /// Adds the nullable <c>has_tool_calls</c> flag the Sessions details pane uses to label a zero-length
+    /// response as a tool call rather than an unreadable row (#176 Phase 2). No backfill: response bodies
+    /// are no longer in SQLite, and older rows stay <see langword="null"/> (unknown).
+    /// </summary>
+    /// <param name="connection">An open connection to the transcript database.</param>
+    private static void MigrateHasToolCallsColumn(SqliteConnection connection) =>
+        AddColumnIfMissing(connection, "has_tool_calls", "INTEGER NULL");
 
     /// <summary>
     /// Adds the <c>origin</c> column that tells a captured row from one a conversation import created (#165

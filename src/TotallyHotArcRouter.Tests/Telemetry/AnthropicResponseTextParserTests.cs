@@ -12,7 +12,7 @@ public class AnthropicResponseTextParserTests
     {
         const string json = """{"id":"msg_1","content":[{"type":"text","text":"Hi there!"}]}""";
 
-        var result = AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out var text);
+        var result = AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out var text, hasToolCalls: out _);
 
         Assert.True(result);
         Assert.Equal(expected: "Hi there!", actual: text);
@@ -27,7 +27,7 @@ public class AnthropicResponseTextParserTests
         const string json =
             """{"id":"msg_1","content":[{"type":"text","text":"The answer is"},{"type":"text","text":" "},{"type":"text","text":"42."},{"type":"text","text":"\n\n"},{"type":"text","text":"Done."}]}""";
 
-        var result = AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out var text);
+        var result = AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out var text, hasToolCalls: out _);
 
         Assert.True(result);
         Assert.Equal(expected: "The answer is 42.\n\nDone.", actual: text);
@@ -38,27 +38,71 @@ public class AnthropicResponseTextParserTests
     {
         const string json = """{"id":"msg_1","content":[{"type":"text","text":"\n"},{"type":"text","text":"  "}]}""";
 
-        var result = AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out _);
+        var result = AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out _, hasToolCalls: out _);
 
         Assert.False(result);
     }
 
     [Fact]
-    public void TryExtractFromNonStreamingBody_OnlyToolUseBlocks_ReturnsFalse()
+    public void TryExtractFromNonStreamingBody_OnlyToolUseBlocks_ReturnsFalseWithHasToolCallsTrue()
     {
         const string json = """{"id":"msg_1","content":[{"type":"tool_use","id":"t1","name":"search"}]}""";
 
-        var result = AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out _);
+        var result = AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out _,
+            hasToolCalls: out var hasToolCalls);
 
         Assert.False(result);
+        Assert.True(hasToolCalls);
     }
 
     [Fact]
-    public void TryExtractFromNonStreamingBody_MalformedJson_ReturnsFalse()
+    public void TryExtractFromNonStreamingBody_StringContent_ReturnsTextWithHasToolCallsNull()
     {
-        var result = AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json: "{ not json", text: out _);
+        const string json = """{"id":"msg_1","content":"Hi there"}""";
+
+        var result = AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out var text,
+            hasToolCalls: out var hasToolCalls);
+
+        Assert.True(result);
+        Assert.Equal(expected: "Hi there", actual: text);
+        Assert.Null(hasToolCalls);
+    }
+
+    [Fact]
+    public void TryExtractFromNonStreamingBody_TextOnly_HasToolCallsFalse()
+    {
+        const string json = """{"id":"msg_1","content":[{"type":"text","text":"Hi"}]}""";
+
+        var result = AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json: json, text: out _,
+            hasToolCalls: out var hasToolCalls);
+
+        Assert.True(result);
+        Assert.False(hasToolCalls);
+    }
+
+    [Fact]
+    public void TryExtractFromStreamingBuffer_ToolUseBlockStart_HasToolCallsTrueWithoutText()
+    {
+        var sse =
+            "data: {\"type\":\"content_block_start\",\"content_block\":{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"search\"}}\n\n" +
+            "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{}\"}}\n\n" +
+            "data: {\"type\":\"content_block_stop\"}\n\n";
+
+        var result = AnthropicResponseTextParser.TryExtractFromStreamingBuffer(sseText: sse, text: out _,
+            hasToolCalls: out var hasToolCalls);
 
         Assert.False(result);
+        Assert.True(hasToolCalls);
+    }
+
+    [Fact]
+    public void TryExtractFromNonStreamingBody_MalformedJson_ReturnsFalseWithHasToolCallsNull()
+    {
+        var result = AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json: "{ not json", text: out _,
+            hasToolCalls: out var hasToolCalls);
+
+        Assert.False(result);
+        Assert.Null(hasToolCalls);
     }
 
     [Fact]
@@ -72,7 +116,7 @@ public class AnthropicResponseTextParserTests
             "data: {\"type\":\"content_block_stop\"}\n\n" +
             "data: {\"type\":\"message_stop\"}\n\n";
 
-        var result = AnthropicResponseTextParser.TryExtractFromStreamingBuffer(sseText: sse, text: out var text);
+        var result = AnthropicResponseTextParser.TryExtractFromStreamingBuffer(sseText: sse, text: out var text, hasToolCalls: out _);
 
         Assert.True(result);
         Assert.Equal(expected: "Hi there", actual: text);
@@ -86,7 +130,7 @@ public class AnthropicResponseTextParserTests
             "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"x\\\":\"}}\n\n" +
             "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"actual reply\"}}\n\n";
 
-        var result = AnthropicResponseTextParser.TryExtractFromStreamingBuffer(sseText: sse, text: out var text);
+        var result = AnthropicResponseTextParser.TryExtractFromStreamingBuffer(sseText: sse, text: out var text, hasToolCalls: out _);
 
         Assert.True(result);
         Assert.Equal(expected: "actual reply", actual: text);
@@ -97,7 +141,7 @@ public class AnthropicResponseTextParserTests
     {
         var sse = "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10}}}\n\n";
 
-        var result = AnthropicResponseTextParser.TryExtractFromStreamingBuffer(sseText: sse, text: out _);
+        var result = AnthropicResponseTextParser.TryExtractFromStreamingBuffer(sseText: sse, text: out _, hasToolCalls: out _);
 
         Assert.False(result);
     }
@@ -105,7 +149,7 @@ public class AnthropicResponseTextParserTests
     [Fact]
     public void TryExtractFromStreamingBuffer_EmptyBuffer_ReturnsFalse()
     {
-        var result = AnthropicResponseTextParser.TryExtractFromStreamingBuffer(sseText: string.Empty, text: out _);
+        var result = AnthropicResponseTextParser.TryExtractFromStreamingBuffer(sseText: string.Empty, text: out _, hasToolCalls: out _);
 
         Assert.False(result);
     }
@@ -114,7 +158,7 @@ public class AnthropicResponseTextParserTests
     public void TryExtractFromStreamingBuffer_WhitespaceOnlyDeltasAmongText_RoundTripExactly()
     {
         var result = AnthropicResponseTextParser.TryExtractFromStreamingBuffer(
-            sseText: BuildSse("Hello", "\n\n", "World", "\n", "    ", "x = 1"), text: out var text);
+            sseText: BuildSse("Hello", "\n\n", "World", "\n", "    ", "x = 1"), text: out var text, hasToolCalls: out _);
 
         Assert.True(result);
         Assert.Equal(expected: "Hello\n\nWorld\n    x = 1", actual: text);
@@ -125,7 +169,7 @@ public class AnthropicResponseTextParserTests
     {
         // #189 D1: a blank whole reply is "no text" on every response path, this one included.
         var result = AnthropicResponseTextParser.TryExtractFromStreamingBuffer(sseText: BuildSse("\n", "  "),
-            text: out _);
+            text: out _, hasToolCalls: out _);
 
         Assert.False(result);
     }

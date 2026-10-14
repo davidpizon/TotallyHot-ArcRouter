@@ -13,7 +13,7 @@ public class ResponseTextExtractorTests
         var body = """{"choices":[{"message":{"content":"Hi!"}}]}"""u8.ToArray();
 
         var result =
-            _extractor.TryExtractText(provider: "openai", false, bufferedResponseBody: body, text: out var text);
+            _extractor.TryExtractText(provider: "openai", false, bufferedResponseBody: body, text: out var text, hasToolCalls: out _);
 
         Assert.True(result);
         Assert.Equal(expected: "Hi!", actual: text);
@@ -25,7 +25,7 @@ public class ResponseTextExtractorTests
         var body = """{"content":[{"type":"text","text":"Hi!"}]}"""u8.ToArray();
 
         var result = _extractor.TryExtractText(provider: "anthropic", false, bufferedResponseBody: body,
-            text: out var text);
+            text: out var text, hasToolCalls: out _);
 
         Assert.True(result);
         Assert.Equal(expected: "Hi!", actual: text);
@@ -39,7 +39,7 @@ public class ResponseTextExtractorTests
     {
         var body = """{"choices":[{"message":{"content":"hi"}}]}"""u8.ToArray();
 
-        var result = _extractor.TryExtractText(provider: providerKey, false, bufferedResponseBody: body, text: out _);
+        var result = _extractor.TryExtractText(provider: providerKey, false, bufferedResponseBody: body, text: out _, hasToolCalls: out _);
 
         Assert.True(result);
     }
@@ -54,7 +54,7 @@ public class ResponseTextExtractorTests
         var body = """{"choices":[{"message":{"content":"Hi from Ollama!"}}]}"""u8.ToArray();
 
         var result =
-            _extractor.TryExtractText(provider: "ollama", false, bufferedResponseBody: body, text: out var text);
+            _extractor.TryExtractText(provider: "ollama", false, bufferedResponseBody: body, text: out var text, hasToolCalls: out _);
 
         Assert.True(result);
         Assert.Equal(expected: "Hi from Ollama!", actual: text);
@@ -69,27 +69,61 @@ public class ResponseTextExtractorTests
         var body = """{"choices":[{"message":{"content":"Hi from Bedrock!"}}]}"""u8.ToArray();
 
         var result = _extractor.TryExtractText(provider: providerKey, false, bufferedResponseBody: body,
-            text: out var text);
+            text: out var text, hasToolCalls: out _);
 
         Assert.True(result);
         Assert.Equal(expected: "Hi from Bedrock!", actual: text);
     }
 
     [Fact]
-    public void TryExtractText_UnknownProvider_ReturnsFalse()
+    public void TryExtractText_UnknownProvider_ReturnsFalseWithHasToolCallsNull()
     {
         var body = """{"choices":[{"message":{"content":"hi"}}]}"""u8.ToArray();
 
-        var result = _extractor.TryExtractText(provider: "alibaba", false, bufferedResponseBody: body, text: out _);
+        var result = _extractor.TryExtractText(provider: "alibaba", false, bufferedResponseBody: body, text: out _,
+            hasToolCalls: out var hasToolCalls);
 
         Assert.False(result);
+        Assert.Null(hasToolCalls);
+    }
+
+    [Theory]
+    [InlineData("openai")]
+    [InlineData("ollama")]
+    [InlineData("gemini")]
+    [InlineData("bedrock-titan")]
+    [InlineData("bedrock-llama")]
+    [InlineData("bedrock-anthropic")]
+    public void TryExtractText_RegisteredOpenAiShapeProviders_ToolCallsOnly_ReportsTrue(string providerKey)
+    {
+        var body =
+            """{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"search","arguments":"{}"}}]}}]}"""u8
+                .ToArray();
+
+        var result = _extractor.TryExtractText(provider: providerKey, false, bufferedResponseBody: body, text: out _,
+            hasToolCalls: out var hasToolCalls);
+
+        Assert.False(result);
+        Assert.True(hasToolCalls);
+    }
+
+    [Fact]
+    public void TryExtractText_Anthropic_ToolUseOnly_ReportsTrue()
+    {
+        var body = """{"content":[{"type":"tool_use","id":"t1","name":"search"}]}"""u8.ToArray();
+
+        var result = _extractor.TryExtractText(provider: "anthropic", false, bufferedResponseBody: body, text: out _,
+            hasToolCalls: out var hasToolCalls);
+
+        Assert.False(result);
+        Assert.True(hasToolCalls);
     }
 
     [Fact]
     public void TryExtractText_EmptyBuffer_ReturnsFalse()
     {
         var result = _extractor.TryExtractText(provider: "openai", false,
-            bufferedResponseBody: ReadOnlyMemory<byte>.Empty, text: out _);
+            bufferedResponseBody: ReadOnlyMemory<byte>.Empty, text: out _, hasToolCalls: out _);
 
         Assert.False(result);
     }
@@ -99,7 +133,7 @@ public class ResponseTextExtractorTests
     {
         var sse = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n"u8.ToArray();
 
-        var result = _extractor.TryExtractText(provider: "openai", true, bufferedResponseBody: sse, text: out var text);
+        var result = _extractor.TryExtractText(provider: "openai", true, bufferedResponseBody: sse, text: out var text, hasToolCalls: out _);
 
         Assert.True(result);
         Assert.Equal(expected: "hi", actual: text);
@@ -110,7 +144,7 @@ public class ResponseTextExtractorTests
     {
         var body = "{\"choices\":[{\"message\":{\"content\":\"hi\"}}]}"u8.ToArray();
 
-        var result = _extractor.TryExtractText(provider: null!, false, bufferedResponseBody: body, text: out var text);
+        var result = _extractor.TryExtractText(provider: null!, false, bufferedResponseBody: body, text: out var text, hasToolCalls: out _);
 
         Assert.False(result);
         Assert.Equal(expected: string.Empty, actual: text);

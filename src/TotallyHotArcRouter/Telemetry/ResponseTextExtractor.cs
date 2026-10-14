@@ -7,6 +7,8 @@ namespace TotallyHot.ArcRouter.Telemetry;
 /// Extracts the assistant's reply text from an already-fully-buffered upstream response body,
 /// dispatching to the right provider-specific parser. Mirrors <see cref="IUsageExtractor"/>'s
 /// single-shot-parse-over-a-captured-buffer design exactly, for <see cref="RoutingTelemetryEvent.ResponseSummary"/>.
+/// Also reports whether that body carried a tool-call block so the transcript row can label a no-text reply
+/// (#176 Phase 2).
 /// </summary>
 public interface IResponseTextExtractor
 {
@@ -23,12 +25,20 @@ public interface IResponseTextExtractor
     /// capture-cap note on the caller).
     /// </param>
     /// <param name="text">The extracted text, when this method returns <see langword="true"/>.</param>
+    /// <param name="hasToolCalls">
+    /// <see langword="true"/> when a tool-call block was seen, <see langword="false"/> when the body was
+    /// parseable and had none, or <see langword="null"/> when the provider is unregistered or the body could
+    /// not be read. Independent of whether text was found: a tool-only reply returns
+    /// <see langword="false"/> from this method with <paramref name="hasToolCalls"/> still
+    /// <see langword="true"/>.
+    /// </param>
     /// <returns>
     /// <see langword="true"/> if text could be determined; otherwise <see langword="false"/> (unknown provider,
     /// malformed/truncated body, or no non-blank text in the response). Text is returned verbatim: whitespace
     /// inside the reply, including whitespace-only stream deltas, is kept.
     /// </returns>
-    bool TryExtractText(string provider, bool isStreaming, ReadOnlyMemory<byte> bufferedResponseBody, out string text);
+    bool TryExtractText(string provider, bool isStreaming, ReadOnlyMemory<byte> bufferedResponseBody, out string text,
+        out bool? hasToolCalls);
 }
 
 /// <inheritdoc cref="IResponseTextExtractor"/>
@@ -62,15 +72,17 @@ public sealed class ResponseTextExtractor : IResponseTextExtractor
 
     /// <inheritdoc/>
     public bool TryExtractText(string provider, bool isStreaming, ReadOnlyMemory<byte> bufferedResponseBody,
-        out string text)
+        out string text, out bool? hasToolCalls)
     {
         text = string.Empty;
+        hasToolCalls = null;
 
         if (bufferedResponseBody.IsEmpty) return false;
 
         // Unknown/unsupported provider (e.g. alibaba, zhipu, moonshot, minimax), or a null/blank key: no
         // registration, so no parser shape to dispatch on. Fail gracefully rather than guessing at an
         // unverified response shape, or throwing on a Dictionary null-key lookup for a public method.
+        // hasToolCalls stays null so the transcript row records "unknown", never a false negative.
         if (string.IsNullOrEmpty(provider) ||
             !_providerRegistrations.TryGetValue(key: provider, value: out var registration)) return false;
 
@@ -87,11 +99,15 @@ public sealed class ResponseTextExtractor : IResponseTextExtractor
         return registration.UsageParserShape switch
         {
             UsageParserShape.OpenAiCompatible => isStreaming
-                ? OpenAiResponseTextParser.TryExtractFromStreamingBuffer(sseText: body, text: out text)
-                : OpenAiResponseTextParser.TryExtractFromNonStreamingBody(json: body, text: out text),
+                ? OpenAiResponseTextParser.TryExtractFromStreamingBuffer(sseText: body, text: out text,
+                    hasToolCalls: out hasToolCalls)
+                : OpenAiResponseTextParser.TryExtractFromNonStreamingBody(json: body, text: out text,
+                    hasToolCalls: out hasToolCalls),
             UsageParserShape.Native => isStreaming
-                ? AnthropicResponseTextParser.TryExtractFromStreamingBuffer(sseText: body, text: out text)
-                : AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json: body, text: out text),
+                ? AnthropicResponseTextParser.TryExtractFromStreamingBuffer(sseText: body, text: out text,
+                    hasToolCalls: out hasToolCalls)
+                : AnthropicResponseTextParser.TryExtractFromNonStreamingBody(json: body, text: out text,
+                    hasToolCalls: out hasToolCalls),
             _ => false
         };
     }
