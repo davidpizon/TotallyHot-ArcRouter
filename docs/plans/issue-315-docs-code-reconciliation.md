@@ -137,8 +137,8 @@ Keep the G-Eval recipe citation for the judge that does run.
 
 **Change.**
 
-- ADR-0015 status becomes `superseded by ADR-0024`. Leave the old "writing account" sentence in the decision history, and add a note that the code no longer grants that ACE. Do not edit `SecureFile` to put it back.
-- ADR-0024 status becomes `accepted`. The code already enforces it, and #184 is closed. `packaging-and-distribution.md` §3.1 already treats the DACL as current; point the status note at that section.
+- ADR-0015's status line is `accepted` today. Change it to `superseded by ADR-0024`. Leave the old "writing account" sentence in the decision history, and add a note that the code no longer grants that ACE. Do not edit `SecureFile` to put it back.
+- ADR-0024's status line is `proposed` today. Change it to `accepted`. The code already enforces it, and #184 is closed. `packaging-and-distribution.md` §3.1 already treats the DACL as current; point the status note at that section.
 - Index rows match those two statuses.
 - D5: the SQLite file is not "readable by local `Users`." The production directory policy is `SYSTEM` and `Administrators` only on Windows, and owner-only `0700` for Unix state directories.
 
@@ -173,7 +173,10 @@ Write what the code does:
 
 - LLM forwarding is HTTPS on `ProxyListenerOptions.Port` (default 47101).
 - Telemetry and admin gRPC are mapped on the web listener, `UseHttps`, `WebInterfaceOptions.Port` (default 47104). `TelemetryChannelFactory.DefaultServerAddress` is `https://localhost:47104`. There is no `DefaultGrpcPort`.
-- `TelemetryService` RPCs at this commit: `StreamEvents`, `ListPersistedSessions`, `GetTurnTexts`. The same listener also maps the other services in `src/Protos/telemetry.proto`: `PriceSourceAdminService`, `BenchmarkDataAdminService`, `LlmRouterModelAdminService`, `RoutingModeAdminService`, `RoutingGateAdminService`, `ManagementTokenAdminService`, `PasskeyAdminService`, `RouterSettingsAdminService`, `ClusterModelAdminService`, `RouterModelAdminService`, `RegretHarnessAdminService`, `JudgeCalibrationAdminService`, `UpdateAdminService`, `CostReconciliationAdminService`, `ConversationAdminService`. Re-read every `service` and `rpc` line and the `MapGrpcService` calls in `ProxyServer` and `ProxyServerDependencies`, and write that list. Do not leave "sole RPC".
+- `TelemetryService` RPCs at this commit: `StreamEvents`, `ListPersistedSessions`, `GetTurnTexts`. That is the whole of `TelemetryService`. It is not the whole listener.
+- The same web listener also maps the other services in `src/Protos/telemetry.proto`: `PriceSourceAdminService`, `BenchmarkDataAdminService`, `LlmRouterModelAdminService`, `RoutingModeAdminService`, `RoutingGateAdminService`, `ManagementTokenAdminService`, `PasskeyAdminService`, `RouterSettingsAdminService`, `ClusterModelAdminService`, `RouterModelAdminService` (implemented by `LogRegModelAdminGrpcService`), `RegretHarnessAdminService`, `JudgeCalibrationAdminService`, `UpdateAdminService`, `CostReconciliationAdminService`, `ConversationAdminService`.
+- It also maps `src/Protos/admin.proto`: `ProviderAdminService` and `UsageAdminService` (`ProxyServer` maps `ProviderAdminGrpcService` and `UsageAdminGrpcService`). The telemetry.proto list is not the full set.
+- Re-read every `service` line in both proto files and every `MapGrpcService` call in `ProxyServer` and `ProxyServerDependencies`, and write that list. Do not leave "sole RPC".
 - TLS is the router listener's HTTPS, not a private h2c port.
 
 Also mark the ledger shipped, in the same file:
@@ -342,13 +345,13 @@ Replace with the current registration: `ProxyServiceCollectionExtensions` regist
 - `docs/router/geval-shadow-scoring-plan.md` header (around lines 12–14) and phase map (around lines 182–184)
 - `docs/README.md` G-Eval row
 
-**G2, not conditional.** The header says "G2 proposed … G3 shipped." The table says G2 "Shipped" and G3 "Proposed." G2 is shipped: `QualityScorer` folds `result.JudgeScore` into the weighted total, and judge calibration is a Governance surface (`JudgeCalibrationAdmin`) plus the CLI/report path. Header and table both say G2 shipped.
+**G2, not conditional.** The header says "G2 proposed … G3 shipped." The phase table already says G2 "Shipped" (around line 183) and G3 "Proposed." Change the header so it says G2 shipped. Leave the table's G2 cell as Shipped. Do not rewrite it into a second, different wording. G2 is shipped: `QualityScorer` folds `result.JudgeScore` into the weighted total, and judge calibration is a Governance surface (`JudgeCalibrationAdmin`) plus the CLI/report path.
 
 **G3 verification, before any G3 sentence is rewritten.** Read these symbols and record which ones exist:
 
 1. `QualityScorer` folds `result.JudgeScore` into the weighted total (the three-axis blend).
-2. `TranscriptScoreObserver` (or the memory observer the Phase G3 note names) sets `is_judge_scored` from `JudgeScore.HasValue`.
-3. `RoutingOptions.JudgeScoredRowPolicy` / `JudgeScoredRowWeight` and `JudgeRowWeighting.ResolveWeight` (or `ResolveJudgeRowWeight`) are applied by `MemoryKnnVoter`, `EmbeddingLogRegTrainingService`, `ClusterTrainingService`, and `ClusterLedger.Build`.
+2. `TranscriptScoreObserver` and `EmbeddingMemoryScoreObserver` set `is_judge_scored` from `JudgeScore.HasValue`.
+3. `RoutingOptions.JudgeScoredRowPolicy` / `JudgeScoredRowWeight` are applied through `RoutingOptions.ResolveJudgeRowWeight` by `MemoryKnnVoter`, `EmbeddingLogRegTrainingService`, and `ClusterTrainingService`. `ClusterLedger.Build` calls `JudgeRowWeighting.ResolveWeight`. Those are two methods. Both must be present.
 4. The Phase G3 section of the same plan says the original "non-executable dimensions only" scope was superseded because execution was removed.
 
 At `d3452c4a` all four are present, and the Phase G3 body already says the blend, the provenance flag, and the learning policy shipped. Re-read them anyway. Then pick exactly one of these writings, and use it in the header, the G3 table row, and the `docs/README.md` row:
@@ -392,7 +395,8 @@ Do not change `QualityScorer` in Phase A.
 2. Then look for a remaining split between GUI constants and router defaults. At `d3452c4a` these still duplicate each other, and the GUI projects do not reference the router:
    - `TotallyHot.ArcRouter.Gui.Services.OpenAiCompatibleDropIn.BaseUrl` (`https://localhost:47101/v1`) and `DashboardUrl` (`https://localhost:47104`), against `ProxyListenerOptions.Port` (47101) and `WebInterfaceOptions.Port` (47104). The router test `OpenAiCompatibleDropInTests.Gui_drop_in_constants_stay_in_lockstep_with_the_router` already greps the GUI source for the router's formatted strings.
    - `TelemetryChannelFactory.DefaultServerAddress` (`https://localhost:47104`), which that grep does not cover, against `WebInterfaceOptions.Port`.
-   - `McpServer`'s constructor default `port = 47103` against `McpOptions.Port`.
+   - `McpServer`'s constructor default `port = 47103`, `McpOptions.Port`, and `appsettings.json` `Mcp:Port`. Three literals, one value.
+   - `PlainHttpListenerOptions.Port` (47105) is a different opt-in listener. It is not part of this split unless a re-read finds a GUI constant that copies it. Do not retarget D3 at 47105 just because the number is in the 47100s.
 
 **If any of those splits remain.** Retarget D3. Replace the 5000-series citations with the symbols that still differ. The fix stays the one D3 already allows: a shared constant, or a written decision to keep the split because the GUI must not reference the router. Where a lockstep test already exists, documenting that test is enough. Where it does not (`TelemetryChannelFactory.DefaultServerAddress`, and the `McpServer` default if it is still a second literal), adding the same kind of lockstep test is Phase B-sized only if the retarget chooses code. **Phase A only retargets the text.** A new shared constant or a new test is a follow-up on D3, not part of the docs pull request, and not part of §4. Do not add a project reference from a GUI assembly to the router.
 
@@ -452,31 +456,37 @@ These were in the audit as non-findings. Do not edit them in Phase A.
 
 **Own pull request.** After this plan is approved. Not in the Phase A pull request. The code pull request links this plan and says it implements #315 item 4 / ADR-0018. It may close #315 only if Phase A has already merged; otherwise it says which phase it contains and does not use a closing keyword that would close the issue early. Prefer leaving #315 open until both phases have merged, and closing it from the later of the two pull requests.
 
-**What is wrong today.** `ProxyMiddleware` calls `Response.CompleteAsync` (ADR-0018 step 1, done), then the same request awaits `RequestTelemetryPublisher.PublishAsync`. That call does the synchronous SQLite work the ADR names: spend (`ISpendTracker.RecordAsync`), budget (`IBudgetEnforcer.RecordUsageAsync`), the usage ledger (`IUsageLedger.RecordAsync`), plus the transcript insert and the live telemetry event. There is no `ServedRequest` type under `src/`. `SessionCaptureWriter` is a second queue. Its own comment says it is only shaped like ADR-0018 so the two can be merged later. ADR-0019's "writes go through ADR-0018's background writer" is the same gap. `BedrockInvocationHandler` repeats the same await-then-`SubmitAsync` pair.
+**What is wrong today.** `ProxyMiddleware` calls `Response.CompleteAsync` (ADR-0018 step 1, done), then the same request awaits `RequestTelemetryPublisher.PublishAsync` (`ProxyMiddleware` around line 769, `BedrockInvocationHandler` around line 286). Inside one try, `PublishAsync` runs `RecordSpendAndBudgetAsync` (spend, then budget, then the ledger), then `PersistTranscriptAsync`, then `PublishTelemetryEventAsync`. A throw skips the rest of that try and comes back as `PublishedTurn.TelemetryFailure`. `capture.SubmitAsync` is the next call in the same outer try at both sites, so a telemetry failure that was caught inside `PublishAsync` still stores the session, and a throw from `PublishAsync` itself skips `SubmitAsync`. Spend, budget, ledger, and the transcript insert already use `CancellationToken.None`. The live event does not: `PublishTelemetryEventAsync` takes the `cancellationToken` argument, and both call sites pass `context.RequestAborted`.
 
-`RateLimitHeaderCapture` is the older single-consumer loop the ADR cites. It drops when the channel is full (`TryWrite` returns false). Do not copy that. ADR-0018 says a full channel waits and never drops a spend row.
+There is no `ServedRequest` type under `src/`. `SessionCaptureWriter` is a second queue. Its class comment says it is "shaped like ADR-0018's writer so the two can be merged later." ADR-0019's "writes go through ADR-0018's background writer" is the same gap. The Bedrock call is not the middleware call with a different route: `telemetryShapeProvider` is the literal `"openai"`, and `nativeResponseBytes` is a positional `null`. The `ServedRequest` built there must keep both.
+
+`RateLimitHeaderCapture` (`src/TotallyHotArcRouter/Telemetry/RateLimitHeaderCapture.cs`) is the older single-consumer loop the ADR cites. On a full channel `TryWrite` returns false and that capture is dropped. Do not copy that. ADR-0018 says a full channel waits and never drops a spend row.
 
 ### 4.1 Shape
 
 ```mermaid
 flowchart TB
   subgraph req["Request thread, after CompleteAsync"]
-    Snap["Snapshot path, session headers, user-agent, upstream request id"]
-    Enq["Enqueue one ServedRequest; transfer capture ownership"]
+    Snap["Snapshot path, session headers, user-agent, upstream request id, start epoch"]
+    Fin["Finish capture bodies, 30s SubmitTimeout, as today"]
+    Bind["BindArchive on this thread, so archive-bound is set before enqueue"]
+    Enq["Enqueue one ServedRequest of finished spool refs"]
   end
-  Snap --> Enq
+  Snap --> Fin --> Bind --> Enq
   Enq --> Ch["Bounded Channel of ServedRequest, single reader, FullMode Wait"]
   Ch --> W["ServedRequestWriter"]
   W --> Gauge["Gauge hold until this item is written, dropped, or abandoned"]
   W --> Ex["Extract usage, cost, and text from the snapshot"]
-  Ex --> Epoch{"Capture epoch still current?"}
-  Epoch -->|yes| File["Finish spools, flush the session file"]
+  Ex --> Epoch{"Start epoch still current?"}
+  Epoch -->|yes| File["Flush the session file"]
   File --> Index["Then commit the transcript index row"]
-  Epoch -->|no| NoFile["No session file; mark the transcript row terminal"]
-  Ex --> Money["Spend, budget, and ledger, including a stale epoch"]
-  Index --> Live["Best-effort live telemetry event and quality ingress"]
+  Epoch -->|no| NoFile["No session file; mark the row terminal if archive-bound"]
+  Ex --> Money["Spend, then budget, then ledger"]
+  Index --> Live["Live event and quality ingress, skipped if that money sequence throws"]
   NoFile --> Money
 ```
+
+The diagram is one consumer's sequence, not parallel tasks. Spend, budget, and the ledger run on that same reader. A failure there does not undo a session file or an index row already written.
 
 One hosted service, one channel, one consumer. `SessionCaptureWriter`'s channel goes away. Its epoch check, spool disposal, drop callback, and `SessionStore.AppendTurn` move behind this writer. `SessionCaptureOptions.QueueCapacity` (default 256) and `ShutdownDrainTimeout` (default 10 seconds) are the bounds. Do not add a second capacity. Pump bounds (`PumpMaxQueuedBytes`, `MinFreeDiskBytes`) stay on `SessionCaptureOptions`. Update the XML docs on the queue properties so they describe telemetry rows and session turns.
 
@@ -486,28 +496,36 @@ A separate `ServedRequestWriterOptions` with the same defaults is acceptable onl
 
 `ServedRequest` is the record ADR-0018 names. It replaces the long `PublishAsync` argument list at both call sites (the C2 clump at this call, not the rest of C2). It holds:
 
-- the route, the client-requested model name, fallback and resolution facts, token and cost inputs the publisher already receives, the rewritten body, the captured response bytes, the native response bytes, streaming flag, timings, status code, and the archive binding;
+- the route, the client-requested model name, fallback and resolution facts, the telemetry shape provider (`"openai"` when a translator ran, and the literal `"openai"` on the Bedrock path), token and cost inputs the publisher already receives, the rewritten body, the captured response bytes, the native response bytes (null on the Bedrock path), streaming flag, timings, status code, and the archive binding;
+- the capture start epoch (`TurnCapture`'s `_startEpoch`, the same value `SessionCaptureItem.Epoch` carries today);
 - snapshots taken on the request thread, and no `HttpContext`: request path, the headers `ISessionIdResolver` reads, header names used only for the existing log line, `User-Agent`, and the upstream request-id header values the ledger already reads;
-- the capture handoff: spool references, not a second copy of the body bytes (ADR-0019). The existing 4 MiB telemetry capture cap is unchanged.
+- the capture handoff after finish: spool references, not a second copy of the body bytes (ADR-0019), and not the in-progress `CaptureBody` tasks. The existing 4 MiB telemetry capture cap is unchanged.
 
-`HttpContext` and `HttpResponseMessage` are not fields. Kestrel can reuse the context after the middleware returns. `CancellationToken` on the record is not `HttpContext.RequestAborted`. Spend recording already uses `CancellationToken.None` for that reason (a streaming client aborts as it finishes reading). The writer does too.
+`HttpContext` and `HttpResponseMessage` are not fields. Kestrel can reuse the context after the middleware returns. The record does not carry `HttpContext.RequestAborted`.
 
-**Ownership.** `ProxyMiddleware` is `using var capture = _turnCapture?.Begin(context)`. `TurnCapture.Dispose` releases spools unless submit has taken ownership. Enqueue must take that ownership before it returns, and `Dispose` on the request path must then be a no-op. The writer disposes spools after the write, and on every drop path. `BedrockInvocationHandler` uses the same capture. Both call sites enqueue; neither awaits the writes.
+**Cancellation, on purpose.** Spend, budget, the ledger, and the transcript insert already use `CancellationToken.None`. The live event does not: it observes `RequestAborted`. Once the event is written on the background writer, that token is the wrong signal. A streaming client aborts it as the response finishes, which is before or as the writer runs, so passing it through would drop the dashboard event for a request that completed. The live event uses `CancellationToken.None` too. That is a behavior change. The request-abort test covers both `RecordAsync` and `ITelemetryPublisher.PublishAsync`.
 
-**What the request thread still does.** `CompleteAsync`, the existing response-body log excerpt, the snapshot, enqueue. Enqueue is `TryWrite`, and on a full channel a Warning with a static template and then `WriteAsync` (wait). The client's response is already complete, so the wait holds a pipeline thread and not the client. That wait is the ADR's back-pressure. The producer never drops a spend row because the queue is full.
+**Spool finish stays on the request thread.** `TurnCapture.SubmitAsync` finishes `_requestCompletion`, `_response`, and `_providerResponse` under `SubmitTimeout` (30 seconds) before it enqueues, and it sets `_submitted` only after that finish. At enqueue time the writer receives finished spool refs (`SessionCaptureItem`), which is what `SessionCaptureWriter` already consumes. Do not move `FinishAsync` onto the single reader. A 30 second stall there would block every later spend row. The request thread still waits for that finish, as it does today, and it does not wait for SQLite. That is the ADR-0018 cut: the synchronous commits leave the request. The pump wait does not move onto the writer to chase a stricter reading of "released as soon as the response is complete."
+
+**Ownership.** `ProxyMiddleware` is `using var capture = _turnCapture?.Begin(context)`. `Dispose` releases bodies unless `_submitted` is set. The request thread finishes the bodies, calls `BindArchive` (so `_archiveBound` is set on the request thread, before any writer drop), sets `_submitted`, then enqueues. `Dispose` after that is a no-op. The writer disposes the finished spools after the append, and on every drop path. `BedrockInvocationHandler` uses the same capture object. `BindArchive` does not run again on the writer thread. The one-shot drop notification (`_dropNotified`, and `NotifyTurnDropped`'s `_archiveBound` check) must be safe when the writer thread is the caller: use `Interlocked` for the one-shot, and do not notify when the archive was never bound. That matches today's callback, which already no-ops unless `_archiveBound`.
+
+**What the request thread still does.** `CompleteAsync`, the existing response-body log excerpt, the snapshot, spool finish, `BindArchive`, enqueue. Enqueue replaces both the `PublishAsync` await and the `SubmitAsync` await, inside the same try. A throw from the snapshot or the enqueue is caught by that try, logged, and does not fail the completed response. Enqueue is `TryWrite`, and on a full channel a Warning with a static template and then `WriteAsync` (wait). The client's response is already complete, so the wait holds a pipeline thread and not the client. That wait is the ADR's back-pressure. The producer never drops a spend row because the queue is full.
 
 **Gauge.** `InvokeAsync`'s `InFlightRequestGauge.Track()` still covers routing and streaming, and it ends when the method returns after enqueue. The writer takes its own `Track()` hold in enqueue, before enqueue returns, and releases it in a `finally` when the item is written, dropped, or abandoned. Background jobs that pause on a non-zero gauge stay paused while queued work exists. Use `Track()`, which ignores a double dispose, so the count cannot go negative.
 
-**Order for a turn whose capture epoch is still current.** This is ADR-0019's commit order, which today is reversed (index inside `PublishAsync`, file later on the other queue):
+**Order for a turn whose capture epoch is still current.** Two deliberate changes from today, and one coupling that stays.
 
-1. Extract usage, cost, and text. No SQLite yet.
-2. Finish the capture spools, bounded by the existing submit timeout. A stall records the body missing and logs. It does not fail the consumer.
-3. Append and flush the session file (`SessionStore.AppendTurn`).
-4. Then commit the transcript index row, with the same archive turn id. A turn exists only once that row commits. Startup recovery already truncates a session file back to its last committed record and deletes a spool with no index row. Do not change that recovery in this pull request.
-5. Spend, budget (only when usage was extracted, as today), and the ledger (same gate) run on the writer. A failure in one is logged and does not stop the consumer.
-6. The live telemetry event and `IQualityIngress.TryIngest` stay best-effort on the writer, after extraction. A dashboard listener lags by the queue, the same lag ADR-0018 accepts for budget enforcement. Do not publish the event back on the request thread to hide that lag.
+Today, on the request thread, one try does spend, then budget, then ledger, then the transcript insert, then the live event. The session file is queued after that try returns. A spend exception skips the insert and the live event, and does not skip the session file.
 
-**Clear / stale epoch.** Preserve today's observable. Do not append the session file. Still record spend, budget, and ledger. Still insert the transcript row and then mark it terminal through the existing drop callback (`TurnCapture`'s `onTurnDropped`). A Clear must not resurrect the wiped conversation, and it must not drop the spend for a request that was already served. Re-read `PublishAsync`'s try/catch and `TurnCapture.SubmitAsync` before coding and keep that split: a telemetry failure today still allows session storage; a stale epoch today still allows the transcript insert and then marks it terminal.
+The writer does this instead:
+
+1. Extract usage, cost, and text. No SQLite yet. Bodies are already finished on the request thread.
+2. Re-check the start epoch. When it is still current, append and flush the session file (`SessionStore.AppendTurn`), then commit the transcript index row with the same archive turn id. File then index is ADR-0019. Today the index is inserted before the file is queued. A turn exists only once the index row commits.
+3. If the index insert throws after the flush: log it, do not append again, and run the drop callback only when the archive was bound. The uncommitted file tail is the case startup recovery already handles (truncate each session file to its last committed record, delete a spool with no index row). Do not add a new recovery pass in this pull request.
+4. Spend, then budget (only when usage was extracted), then the ledger, in that order, each still best-effort. **Coupling change, on purpose:** a failure in this sequence does not skip the session file and does not skip the index insert. Today a spend exception skips the insert. Skipping the insert after a flush would orphan the file. The consumer continues.
+5. The live event and `IQualityIngress.TryIngest` stay in the money sequence's success path: a throw from spend, budget, or the ledger skips them, which is today's try. They run on the writer, so a dashboard listener lags by the queue, the same lag ADR-0018 accepts for budget enforcement. Do not publish the event back on the request thread to hide that lag. They use `CancellationToken.None`, which is the cancellation change above.
+
+**Clear / stale epoch.** Checked on the request thread before finish, as `SubmitAsync` does today, and re-checked by the writer before append, as `SessionCaptureWriter` does today. `ServedRequest` carries the start epoch so the writer can do that second check. When the epoch is stale: do not append the session file; still record spend, budget, and ledger; still insert the transcript row; then mark it terminal through the drop callback only if the archive was bound. A Clear must not resurrect the wiped conversation, and it must not drop the spend for a request that was already served.
 
 **One writer implies per-session serialization.** ADR-0019 asks for writes to any one session to be serialized. A single reader gives that. Removing `SessionCaptureWriter`'s channel is what keeps a second consumer from appending the same session.
 
@@ -521,7 +539,7 @@ A separate `ServedRequestWriterOptions` with the same defaults is acceptable onl
 
 **Registration.** `SessionsServiceCollectionExtensions` registers this hosted service once and stops registering `SessionCaptureWriter` as its own hosted service. `ManagementFacade` is untouched.
 
-**Call sites.** `ProxyMiddleware` after `CompleteAsync`, and `BedrockInvocationHandler` at its matching pair. Both build one `ServedRequest` and enqueue. `RequestTelemetryPublisher.PublishAsync`'s side effects become an internal method that takes `ServedRequest`. Keep `ResolveSubstitutionReason` where it is: the response header still needs it before the writer runs.
+**Call sites.** `ProxyMiddleware` after `CompleteAsync` (around line 769) and `BedrockInvocationHandler` (around line 286). At both, the `PublishAsync` await and the `capture.SubmitAsync` await are one enqueue. The Bedrock record keeps `telemetryShapeProvider: "openai"` and a null native body. `RequestTelemetryPublisher.PublishAsync`'s side effects become an internal method that takes `ServedRequest`. Keep `ResolveSubstitutionReason` where it is: the response header still needs it before the writer runs.
 
 **Docs that ride with the code pull request, and only there.**
 
@@ -544,10 +562,12 @@ The tests that must exist:
 | Order | Three items. Index inserts happen in enqueue order. |
 | Shutdown drain, then abandon | Drain timeout shorter than a blocked write. The Warning names the abandoned count. `StopAsync` does not throw. |
 | Gauge | After the request-scope `Track()` is disposed, `InFlightRequestGauge.Count` stays above zero until the writer finishes the item, then returns to the prior value. |
-| Commit order | The session-file append is recorded before the transcript insert, for a current-epoch turn. |
-| Stale epoch | No session-file append. Spend is still recorded. The drop callback runs. |
-| Request abort | A cancelled `RequestAborted`-shaped token does not skip `RecordAsync`. The writer uses `CancellationToken.None`. |
-| Ownership | After a successful enqueue, `TurnCapture.Dispose` does not dispose the spools. The writer does, after the write. |
+| Commit order | For a current-epoch turn, the session-file append is recorded before the transcript insert. |
+| Index insert fails after the flush | The failure is logged, there is no second append, and the drop callback runs only when the archive was bound. No new startup-recovery code. |
+| Spend failure does not skip the file or the index | A throw from `RecordAsync` still leaves the session append and the transcript insert done. The live event is skipped. |
+| Stale epoch | No session-file append. Spend is still recorded. The transcript row is still inserted. The drop callback runs only when the archive was bound. The record carries the start epoch. |
+| Request abort | A cancelled request token does not skip `RecordAsync` or `ITelemetryPublisher.PublishAsync`. Both use `CancellationToken.None`. |
+| Ownership | Finish runs before enqueue. After enqueue, `TurnCapture.Dispose` does not release the spools. The writer releases them after the append. `BindArchive` has already run on the request thread. |
 | No `HttpContext` on `ServedRequest` | The record can be built from the snapshot types alone. |
 
 Update existing tests that assert a transcript, spend, or ledger row as soon as `InvokeAsync` returns. They await the writer's `WaitForIdleAsync` (ADR-0018's neutral consequence). Known suites: `RequestTelemetryPublisherTests`, `ProxyMiddlewareCaptureRecoveryTests`, and the session-capture writer tests. Move the session-capture queue tests onto this writer; do not leave a second channel under test as if it were still the production path.
@@ -558,7 +578,7 @@ Update existing tests that assert a transcript, spend, or ledger row as soon as 
 
 - ADR-0018's six guarantees hold: one writer and enqueue order; crash loss window accepted and not papered over; budget lag bounded by queue depth times write latency; full channel waits and logs Warning and does not drop; shutdown drains until the deadline and logs the abandoned count; the gauge stays non-zero while queued work exists.
 - ADR-0019's write path holds for a stored turn: the queue carries spool references; the session file is flushed before the transcript index row; one writer serializes writes to a session.
-- Both call sites enqueue and return without awaiting SQLite.
+- Both call sites enqueue and return without awaiting SQLite. The request thread may still wait for the existing 30 second spool finish, and it does not wait for the commits.
 - `SessionCaptureWriter` is not registered as a second consumer.
 - `ManagementFacade`'s public methods are unchanged.
 - Static Serilog templates on every new log.
