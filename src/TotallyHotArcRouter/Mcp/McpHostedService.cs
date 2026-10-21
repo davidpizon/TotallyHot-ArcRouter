@@ -24,7 +24,6 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
     private readonly BenchmarkSyncService _benchmarkSyncService;
     private readonly ILogger<McpHostedService> _logger;
     private readonly ManagementFacade _managementFacade;
-    private readonly ILogger<McpServer> _mcpServerLogger;
     private readonly McpOptions _options;
     private readonly PriceCatalogIngestionService _priceCatalogIngestionService;
     private readonly IModelPriceLookup _priceLookup;
@@ -40,7 +39,6 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
     /// </summary>
     public McpHostedService(
         ILogger<McpHostedService> logger,
-        ILogger<McpServer> mcpServerLogger,
         IOptions<McpOptions> options,
         ManagementFacade managementFacade,
         PriceSourceToggleStore priceSourceToggleStore,
@@ -54,7 +52,6 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
         IManagementTokenProvider tokenProvider)
     {
         ArgumentNullException.ThrowIfNull(logger);
-        ArgumentNullException.ThrowIfNull(mcpServerLogger);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(managementFacade);
         ArgumentNullException.ThrowIfNull(priceSourceToggleStore);
@@ -68,7 +65,6 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(tokenProvider);
 
         _logger = logger;
-        _mcpServerLogger = mcpServerLogger;
         _options = options.Value;
         _managementFacade = managementFacade;
         _priceSourceToggleStore = priceSourceToggleStore;
@@ -104,7 +100,6 @@ public sealed class McpHostedService : IHostedService, IAsyncDisposable
         try
         {
             _server = new McpServer(
-                logger: _mcpServerLogger,
                 managementFacade: _managementFacade,
                 priceSourceToggleStore: _priceSourceToggleStore,
                 priceCatalogIngestionService: _priceCatalogIngestionService,
