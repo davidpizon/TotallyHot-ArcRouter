@@ -6,7 +6,10 @@
 > and proposed concrete changes. Every "current behavior" claim below reflects that snapshot, not the
 > present state of the repository — the "proposed" blocks are the sketches that were adopted and
 > shipped; see [`token-tracking-implementation-plan.md`](token-tracking-implementation-plan.md) for
-> what actually landed and where it deviated from the sketch.
+> what actually landed and where it deviated from the sketch. Exception, corrected 2026-10-21 (#315):
+> the rate-limit sentences that named `GET /admin/providers` now name the current gRPC source. The
+> snapshot rides `ProviderAdminService.ListProviders` (port **47104**); history rides
+> `GetRateLimitHistory`. The rest of the "current behavior" blocks remain the original survey snapshot.
 >
 > Where a proposal conflicts with an architectural decision already documented in
 > [`agent-cost-tracking.md`](agent-cost-tracking.md), [`model-price-catalog.md`](model-price-catalog.md),
@@ -76,7 +79,7 @@ flowchart LR
 | Model identity | [`ConfigModelIdentityResolver.cs:64`](../../src/TotallyHotArcRouter/PriceCatalog/ModelIdentityResolver.cs#L64) | **Exact match only.** Provider name equal (case-insensitive) + model id equal after stripping the source's own `provider/` prefix. |
 | Running spend | [`SpendTracker.cs:68`](../../src/TotallyHotArcRouter/Telemetry/SpendTracker.cs#L68) | Process-lifetime in-memory totals + append-only `spend_log.jsonl`. **Nothing reads the file back.** |
 | Budget enforcement | [`ProviderBudgetStore.cs`](../../src/TotallyHotArcRouter/PriceCatalog/ProviderBudgetStore.cs) | Per-provider caps, `YYYY-MM` UTC calendar-month window, auto-reset on rollover. Persisted. |
-| Rate-limit headers | [`RateLimitHeaderCapture.cs:80`](../../src/TotallyHotArcRouter/Telemetry/RateLimitHeaderCapture.cs#L80), [`RateLimitSnapshotParser.cs`](../../src/TotallyHotArcRouter/PriceCatalog/RateLimitSnapshotParser.cs) | Captured verbatim (snapshot + minute-bucketed 30-day history), parsed into a typed `RateLimitSnapshotView`, and shown on the Providers card via `GET /admin/providers`. **Displayed but never interpreted**: no burn-rate projection, no history charts, no staleness state. |
+| Rate-limit headers | [`RateLimitHeaderCapture.cs`](../../src/TotallyHotArcRouter/Telemetry/RateLimitHeaderCapture.cs), [`RateLimitSnapshotParser.cs`](../../src/TotallyHotArcRouter/PriceCatalog/RateLimitSnapshotParser.cs) | Captured verbatim (snapshot + minute-bucketed history), parsed into a typed `RateLimitSnapshotView`. **Corrected 2026-10-21 (#315).** The Providers card reads the snapshot from `ProviderAdminService.ListProviders` on port **47104** (`ManagementFacade.BuildRateLimitView` sets `IsStale` and exhaustion projections). History charts read `GetRateLimitHistory`. There is no `GET /admin/providers`. |
 | Turn counting | [`ConversationTurnTracker.cs:26`](../../src/TotallyHotArcRouter/Telemetry/ConversationTurnTracker.cs#L26) | `ConcurrentDictionary<string,int>`, no eviction, resets on process restart. |
 | Broadcast shape | [`RoutingTelemetryEvent.cs`](../../src/TotallyHotArcRouter/Telemetry/RoutingTelemetryEvent.cs), [`telemetry.proto:161`](../../src/Protos/telemetry.proto#L161) | Carries `PromptTokens`, `CompletionTokens`, `EstimatedCostUsd`. **No cache fields.** |
 | GUI consumption | [`LiveDataStore.cs:50`](../../src/TotallyHotArcRouter.Gui.Components/Services/LiveDataStore.cs#L50), [`LiveConversationMapper.cs:69`](../../src/TotallyHotArcRouter.Gui.Components/Services/LiveConversationMapper.cs#L69) | In-memory `List<RoutingTelemetryEventDto>`, populated only while connected. `CacheHitRate` hardcoded to `0m`. |
@@ -148,7 +151,7 @@ proposal.
 | [5.6](#56-cost-confidence-is-not-modeled--four-different-unknowns-collapse-into-null) | Cost confidence not modeled | P1 | S | No — it *strengthens* the no-fabricated-cost principle |
 | [5.7](#57-model-identity-resolution-is-exact-match-or-nothing) | Model identity resolution is exact-or-nothing | P1 | M | **Yes** — `d3-alias-resolution.md`'s "deliberately exact" rule |
 | [5.8](#58-no-reconciliation-against-provider-reported-billing) | No reconciliation vs. provider-reported billing | P2 | L | No — implements `agent-cost-tracking.md` §3.5 |
-| [5.9](#59-rate-limit-snapshots-are-displayed-but-never-interpreted) | Rate-limit snapshots displayed but never interpreted | P2 | M | Partial — reject openusage's *probing*, adopt its *projection* |
+| [5.9](#59-rate-limit-snapshots-are-displayed-but-never-interpreted) | Rate-limit snapshot, projection, history, and staleness ship on `ListProviders` / `GetRateLimitHistory`; the telemetry stream still has no rate-limit case | P2 | M | Partial — reject openusage's *probing*, adopt its *projection* |
 | [5.10](#510-budget-windows-are-calendar-month-only) | Budget windows are calendar-month only | P2 | M | No |
 | [5.11](#511-a-truncated-capture-loses-usage-silently) | Truncated capture loses usage silently | P2 | M | **Yes** — `UsageExtractor`'s "single-shot is simpler and lower-risk" |
 | [5.12](#512-no-export-surface) | No export surface (CSV/JSON/OTel) | P2 | M | No |
@@ -791,30 +794,36 @@ this reason: it is high-value but only for a subset of deployments.
 
 > **Correction (2026-08-07).** An earlier revision of this finding claimed the captured headers were
 > "never parsed" and never reached the GUI. That was stale: the typed-parse and display layers shipped
-> with [`anthropic-reported-usage-plan.md`](anthropic-reported-usage-plan.md) Phases 2–3. The finding
-> below is re-scoped to what is actually still missing.
+> with [`anthropic-reported-usage-plan.md`](anthropic-reported-usage-plan.md) Phases 2–3.
+>
+> **Correction (2026-10-21, #315).** The transport and the "never interpreted" sentences below were
+> stale as well. There is no `GET /admin/providers`. The snapshot, `IsStale`, and exhaustion
+> projections ride `ProviderAdminService.ListProviders` on the web listener, port **47104**. History
+> for the chart rides `GetRateLimitHistory`. `telemetry.proto` still has no rate-limit event.
 
-**Current behavior.** `RateLimitHeaderCapture` is well-engineered *plumbing* — bounded channel, single
-consumer, non-blocking `TryWrite`, drain-on-dispose — persisting verbatim rows into a per-provider
-snapshot table plus a minute-bucketed, 30-day-pruned history table.
-[`RateLimitSnapshotParser`](../../src/TotallyHotArcRouter/PriceCatalog/RateLimitSnapshotParser.cs) then
-projects those rows into a typed `RateLimitSnapshotView` — Anthropic's standard dimension trios, the
-unified 5-hour/weekly windows, and OpenAI's reversed-order `x-ratelimit-*` family including its Go-style
-relative reset durations — and `ManagementFacade` exposes it as `ProviderRateLimitView` (snapshot +
-`ObservedAtUtc`) on `GET /admin/providers`, which `ProvidersAdmin.razor` renders as the provider card's
-"Reported by Anthropic" block with an "As of" footer.
+**Current behavior.** `RateLimitHeaderCapture` persists verbatim rows into a per-provider snapshot
+table plus a minute-bucketed history table.
+[`RateLimitSnapshotParser`](../../src/TotallyHotArcRouter/PriceCatalog/RateLimitSnapshotParser.cs)
+projects those rows into a typed `RateLimitSnapshotView`. `ManagementFacade.BuildRateLimitView`
+turns the latest snapshot into `ProviderRateLimitView`: the parsed snapshot, `ObservedAtUtc`,
+`IsStale` (the default threshold is 15 minutes, `ManagementFacadeDependencies.RateLimitStalenessThreshold`),
+and `BuildExhaustionProjections` from `RateLimitRepository.GetRateLimitHistory`.
+`ProviderAdminGrpcService.ListProviders` copies that view onto the provider wire (`rate_limit`).
+`ProvidersAdmin.razor` renders it on the provider card ("Reported by" the provider type), including
+a projection when one exists and an "As of" footer that appends "stale" when `IsStale` is set.
+History is a separate unary RPC, `GetRateLimitHistory`, loaded by
+`ProviderAdminStore.LoadRateLimitHistoryAsync` and drawn with `RateLimitTrendChartBuilder`.
 
-What is still missing is every layer of *interpretation* on top of that faithful display:
+What the survey below called missing has since landed, except the live telemetry push:
 
-- **No burn-rate projection.** The card says "340,000 input tokens remaining"; nothing computes "at your
-  current rate, that empties in 19 minutes" — the form of the answer an operator can act on.
-- **The history table is write-only.** `provider_rate_limit_history` exists precisely so trend charts
-  could be added "as a pure GUI change" (the plan's own words), and nothing reads it.
-- **Staleness is a timestamp, not a state.** The "As of" footer is honest, but the reader must do the
-  mental arithmetic; there is no fresh/stale threshold and no visual signal when the snapshot is old.
-- **Snapshot data only moves when the Providers card loads.** It rides the `GET /admin/providers` pull,
-  not the live telemetry stream, so nothing else in the GUI (status banner, a future usage panel) can
-  react to approaching exhaustion in real time.
+- **Burn-rate projection shipped.** `BuildExhaustionProjections` pairs the current snapshot with an
+  earlier history point and the card shows that projection next to the remaining count.
+- **The history table is read.** `GetRateLimitHistory` returns per-dimension points, and the provider
+  card charts them. It is not write-only.
+- **Staleness is a state.** `IsStale` is set from `ObservedAtUtc` and the card renders it.
+- **The snapshot still moves when the Providers card loads `ListProviders`.** It does not ride the
+  live telemetry stream (`telemetry.proto` has no rate-limit oneof), so a status banner that is not
+  the Providers card cannot see approaching exhaustion until that RPC runs.
 
 **What the sources do.**
 
@@ -827,33 +836,16 @@ What is still missing is every layer of *interpretation* on top of that faithful
 - **TokenTracker** keeps **last-good caching** so a provider that momentarily stops reporting shows its
   last known state rather than blanking to zero.
 
-**Proposed.** Interpretation only — the capture, parse, and display layers exist and stay as they are.
+**Proposed, and where it landed.** The survey sketched a public `ProjectExhaustion` helper. The
+tree does not have that method. The shipped projection is the private
+`ManagementFacade.BuildExhaustionProjections`, returned on `ListProviders` inside
+`ProviderRateLimitView.Projections`. History charts and `IsStale` shipped with it, as the current
+behavior above describes. Still open:
 
-```csharp
-/// <summary>
-/// Projects when a rate-limit dimension will be exhausted at the recently-observed consumption rate, from
-/// two observations of the same (provider, dimension) - e.g. successive <c>provider_rate_limit_history</c>
-/// minute buckets, or the previous and current snapshot. Adapted from openusage's burn-rate projection,
-/// which answers the question an operator actually has - "how long do I have" - rather than the one the
-/// headers answer directly. Returns <see langword="null"/> when consumption is flat or negative (the
-/// bucket refilled between observations), when either observation lacks <c>Remaining</c>, or when the
-/// projected exhaustion falls after the dimension's reset instant - in that last case the bucket refills
-/// before it empties, so there is nothing to warn about.
-/// </summary>
-public static DateTimeOffset? ProjectExhaustion(
-    RateLimitDimensionView earlier, DateTimeOffset earlierObservedAtUtc,
-    RateLimitDimensionView later, DateTimeOffset laterObservedAtUtc)
-```
-
-Three companion pieces, all reads over data that already exists:
-
-1. **History trend charts** on the provider card, reading `provider_rate_limit_history` — the "pure GUI
-   change" the anthropic plan explicitly deferred and provisioned for.
-2. **A staleness state** derived from `ObservedAtUtc` (fresh under a threshold, stale over it) so a frozen
-   snapshot *reads* as stale instead of as current.
-3. **Optionally, a rate-limit oneof case on the telemetry stream**, so exhaustion warnings can reach the
-   GUI's status banner without waiting for a Providers-card load. This is additive to the existing
-   `GET /admin/providers` path, not a replacement.
+1. **A rate-limit oneof on the telemetry stream**, so exhaustion warnings can reach the GUI's status
+   banner without waiting for a Providers-card `ListProviders` call. `telemetry.proto` has no such
+   case. This would be additive to `ListProviders` and `GetRateLimitHistory`, not a replacement.
+   There is no `GET /admin/providers` path to extend.
 
 **⚠ Conflicts with — partially.** openusage obtains this data by **actively probing**: "probes rate limit
 headers via test API calls." Arc Router must **not** adopt that. Synthetic upstream calls cost money, consume
@@ -1079,7 +1071,7 @@ surface:
 | **Model Distribution** tab (token volume by day, model share) + its cosmetic-only time filters | Entirely `MockData`; filters don't filter | §5.3 rollups (`P1D` buckets by provider/model) |
 | Header **ticker** (Total Saved / System Tokens / Avg. Cost Reduction) | Three hardcoded numbers | §5.2/§5.3 aggregates |
 | Spend totals anywhere cost is summed | Silently omit unpriced requests | §5.6 (`UnpricedRequests` + confidence chips: "≥ $4.10, 3 unpriced") |
-| Providers card rate-limit block | Faithful snapshot, no interpretation | §5.9 (burn-rate projection, history trends, staleness state) |
+| Providers card rate-limit block | Snapshot, exhaustion projections, `IsStale`, and a history chart, from `ListProviders` and `GetRateLimitHistory` on port 47104. Not on the telemetry stream. | §5.9 (the telemetry oneof is the part still open) |
 | Governance budget bars | Monthly window only | §5.10 (5-hour/weekly/monthly windows per cap) |
 | Governance per-model pricing/spend cards | Proposed, blocked on a ledger ([`../gui/governance-model-cards.md`](../gui/governance-model-cards.md)) | §5.2 ledger + a date-range query surface |
 

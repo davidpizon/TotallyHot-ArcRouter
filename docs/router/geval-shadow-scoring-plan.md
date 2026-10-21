@@ -491,8 +491,9 @@ one-time purge removed pre-change live learning on upgrade.
   text source; `IsExploratory` provenance precedent), trainer/artifact conventions.
 - `docs/router/regret-evaluation-harness-plan.md` — the no-fabricated-evaluation-data ground rule
   and the no-paid-backend constraint.
-- `src/TotallyHotArcRouter.Quality/Scoring/QualityScorer.cs` — now the three-axis
-  syntax/analysis/judge blend; the non-executed fold this plan's G3 addressed is gone.
+- `src/TotallyHotArcRouter.Quality/Scoring/QualityScorer.cs` — folds syntax, static analysis, the
+  judge, and extra grader scores (`result.GraderScores` via `ResolveExtraWeight`) with fixed weights.
+  A missing axis contributes zero. The non-executed fold this plan's G3 addressed is gone.
 - `src/TotallyHotArcRouter.Quality/Grading/QualityScoreAggregator.cs` — the join that makes the judge a
   co-grader without double-counting.
 - `src/TotallyHotArcRouter/Router/CompositeRouterScoreObserver.cs` — the observer seam G1 plugs

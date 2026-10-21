@@ -10,10 +10,12 @@ namespace TotallyHot.ArcRouter.Router;
 /// computation and <see cref="PendingValueCache{T}"/> exist to feed. A scored result whose
 /// correlation id has no pending embedding (never computed, already claimed, or expired) is a lost
 /// learning opportunity, not an error - logged and dropped, exactly like every other best-effort
-/// observation path in this codebase. Also stamps <see cref="MemoryEntry.IsJudgeScored"/> from
-/// <see cref="QualityResult.JudgeScore"/>'s presence: true only when the judge actually contributed
-/// (not merely when a judge grade was requested/pending), false otherwise - the judge-row provenance
-/// tracking that docs/router/geval-shadow-scoring-plan.md's G3 requires.
+/// observation path in this codebase. After issue #293 only <see cref="GradeStatus.Complete"/> grades
+/// reach the memory write, and every such row is stamped <see cref="MemoryEntry.IsJudgeScored"/>
+/// <see langword="true"/>. This observer does not consult <see cref="QualityResult.JudgeScore"/>'s
+/// <c>HasValue</c>. <see cref="TotallyHot.ArcRouter.Transcripts.TranscriptScoreObserver"/> still passes
+/// <c>result.JudgeScore.HasValue</c>. That is why docs/router/geval-shadow-scoring-plan.md's G3 is
+/// not in the tree.
 /// </summary>
 public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
 {
@@ -130,8 +132,8 @@ public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
             isExploratory: recoveredIsExploratory,
             propensity: recoveredPropensity,
             dimension: recoveredDimension,
-            // After issue #293 only Complete grades reach memory; every surviving live row is judge-grounded
-            // question-aware evidence (ADR-0026).
+            // After issue #293 only Complete grades reach this write, and every surviving row is stamped
+            // IsJudgeScored true. This call does not read JudgeScore.HasValue. TranscriptScoreObserver does.
             isJudgeScored: true).ConfigureAwait(false);
 
         if (_logger.IsEnabled(LogLevel.Information))

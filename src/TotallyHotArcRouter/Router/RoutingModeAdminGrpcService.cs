@@ -69,7 +69,8 @@ public sealed class RoutingModeAdminGrpcService : Contract.RoutingModeAdminServi
             Weight = _options.LlmRouterVoterWeight
         });
 
-        // Reported like any other voter, deliberately un-gated on RoutingOptions.AdaptiveRoutingEnabled:
+        // Reported like any other voter, deliberately un-gated on RoutingOptions.EnableAdaptiveRouting
+        // (the options property; the SQLite key remains RouterSettingsStore.AdaptiveRoutingEnabledKey):
         // this panel reports *configuration*, and EnableClusterBestVoter is meaningful independently of
         // the adaptive-routing master switch. Hiding a configured voter would trade one inaccuracy for
         // another - the panel's own contract is "what would apply if the Orchestrator were live".

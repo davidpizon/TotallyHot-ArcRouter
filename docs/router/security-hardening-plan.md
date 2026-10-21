@@ -12,9 +12,15 @@ There is no `ProviderAdminEndpoints` or `UsageAdminEndpoints` type, and no REST 
 MCP endpoint enforces the same token through `McpBearerAuthMiddleware` over TLS — which is the subject
 matter of **T-02** and **T-04** below.
 
-**Listener map corrected 2026-10-21 (#315).** §1.1 below is the current posture. Findings after §1
-that name REST `/admin/*`, port 5001, `telemetry-cert.pfx` as the live certificate, or
-`ProviderAdminEndpoints` describe the pre-gRPC surface; they are not the listener map.
+**Listener and certificate citations corrected 2026-10-21 (#315).** §1.1 below is the current
+posture, and the findings after §1 were updated the same day to match it. Management operations are
+gRPC on the web listener, port **47104**: `ProviderAdminService` (`RefreshFromEndpoint`,
+`ListProviders`, `SetSecret`, `UpsertProvider`, and the other RPCs in `admin.proto`) and the
+`telemetry.proto` services, including `ManagementTokenAdminService.RegenerateManagementToken`.
+There is no REST `/admin/*` route and no port 5001 listener. TLS material is
+`LocalCertificateAuthority`: `router-ca.pfx`, `router-leaf.pfx`, and `router-leaf-dns.pfx`, with
+passwords in `ProtectedSecretStore`. `telemetry-cert.pfx` is not a live listener certificate;
+`LegacyStorageMigration` only copies that legacy filename.
 
 **The per-finding statuses in this document have not been re-audited against that work.** Nothing here
 should be read as either confirmed-open or confirmed-fixed until someone walks each finding against the
@@ -206,11 +212,16 @@ if (!Uri.TryCreate(provider.BaseUrl, UriKind.Absolute, out _))
 ```
 
 There is no scheme restriction, no host allowlist, and no private/link-local/loopback address
-rejection. `BaseUrl` is writable from three surfaces:
+rejection. `BaseUrl` is writable from three surfaces, all of which call
+`ManagementFacade.UpsertProviderAsync`:
 
-- `PUT /admin/providers/{key}` ([`ProviderAdminEndpoints.cs:59-60`](../../src/TotallyHotArcRouter/Proxy/Management/ProviderAdminEndpoints.cs))
-- the `upsert_provider` MCP tool ([`ProviderMcpTools.cs:31-40`](../../src/TotallyHotArcRouter/Mcp/Tools/ProviderMcpTools.cs))
-- the Governance UI, which calls the same facade
+- `ProviderAdminService.UpsertProvider`, served by `ProviderAdminGrpcService` on the web listener
+  (HTTPS, port **47104**). `RefreshFromEndpoint`, `ListProviders`, and `SetSecret` are sibling RPCs
+  on that same service; `UpsertProvider` is the one that writes `BaseUrl`
+  ([`admin.proto`](../../src/Protos/admin.proto),
+  [`ProviderAdminGrpcService.cs`](../../src/TotallyHotArcRouter/Proxy/Management/ProviderAdminGrpcService.cs)).
+- the `upsert_provider` MCP tool ([`ProviderMcpTools.cs`](../../src/TotallyHotArcRouter/Mcp/Tools/ProviderMcpTools.cs))
+- the Governance UI, which calls the same facade through that gRPC service
 
 **Impact.** `ProviderOptions.Headers` resolves the credential at request time and
 `ProxyMiddleware` injects it into the outbound request
@@ -259,9 +270,9 @@ the router's network position.
 - A regression test asserts `discover_models` on a provider whose `BaseUrl` was mutated to a
   private address fails validation before any HTTP request is issued.
 
-**Tests.** New `ProviderUrlPolicyTests`; extend `ProviderAdminEndpointsTests` and
+**Tests.** New `ProviderUrlPolicyTests`; extend `ProviderAdminGrpcServiceTests` and
 `ProviderMcpToolsTests` with the rejection matrix; extend `SecretHeaderMigrationTests` with the
-credential-invalidation case.
+credential-invalidation case. There is no `ProviderAdminEndpointsTests` project.
 
 ---
 
@@ -334,16 +345,29 @@ extend the Firecracker launcher tests with the parallel case. Keep both under th
 
 **Today: High · Exposed: Critical · CWE-352, CWE-306**
 
-**Evidence.** `/admin/*` and the gRPC endpoints are token-gated. The inference path is not: it is
-the terminal middleware that handles everything unmatched by a mapped endpoint.
+**Evidence.** Management gRPC on the web listener (port **47104**) is token-gated when a management
+token provider is configured (`TelemetryAuthInterceptor`, `ProxyServer`). The inference path is not.
+A connection accepted on the proxy port (**47101**) is handed to `ProxyMiddleware` and never reaches
+the gRPC services:
 
 ```csharp
-// src/TotallyHotArcRouter/Proxy/ProxyServer.cs:301
-app.Run(context => proxyMiddleware.InvokeAsync(context, _ => Task.CompletedTask));
+// src/TotallyHotArcRouter/Proxy/ProxyServer.cs:393-400
+app.Use(async (context, next) =>
+{
+    if (context.Features.Get<ProxyPortMarker>() is not null)
+    {
+        await proxyMiddleware.InvokeAsync(context: context, next: _ => Task.CompletedTask)
+            .ConfigureAwait(false);
+        return;
+    }
+
+    await next(context).ConfigureAwait(false);
+});
 ```
 
-`ResolveModelRouteAsync` reads the body and parses it as JSON with **no `Content-Type` check**
-([`RequestInterceptor.cs:199-227`](../../src/TotallyHotArcRouter/Proxy/RequestInterceptor.cs)). A
+There is no REST `/admin/*` route and no `X-Admin-Token` header. `ResolveModelRouteAsync` reads the
+body and parses it as JSON with **no `Content-Type` check**
+([`RequestInterceptor.cs`](../../src/TotallyHotArcRouter/Proxy/RequestInterceptor.cs)). A
 repo-wide search finds no `AddCors`, `UseCors`, or antiforgery registration anywhere in `src/`.
 
 **Impact.** `Content-Type: text/plain` is a CORS *simple* request type, so a cross-origin `POST`
@@ -353,9 +377,11 @@ The Same-Origin Policy blocks the attacker from reading the response, but every 
 occurs: the operator's provider credentials are spent, usage is recorded, the sandbox verifier
 executes the resulting model output, and router memory is updated ([T-14](#t-14--router-memory-is-poisonable-by-unauthenticated-traffic)).
 
-`/admin/*` is not directly forgeable this way — the custom `X-Admin-Token` header forces a
-preflight that will fail — but it shares the same port and the same unauthenticated origin, which
-is what makes [T-03](#t-03--host-header-is-unvalidated-dns-rebinding) severe.
+That simple cross-origin POST reaches the proxy on port 47101. It does not reach management gRPC.
+`RefreshFromEndpoint`, `ListProviders`, `SetSecret`, and the other admin RPCs listen on port 47104,
+a different origin, behind `TelemetryAuthInterceptor` when a token provider is configured. The two
+listeners no longer share a port, which is what [T-03](#t-03--host-header-is-unvalidated-dns-rebinding)
+used to rely on.
 
 **Remediation.**
 
@@ -378,7 +404,7 @@ is what makes [T-03](#t-03--host-header-is-unvalidated-dns-rebinding) severe.
   request is issued.
 - A request with `Origin: https://evil.example` returns `403` regardless of content type.
 - With `RequireClientAuth` at its default, a request with no `Authorization` header returns `401`
-  in the OpenAI error envelope shape already used by `ProviderAdminEndpoints.Error`.
+  in an OpenAI-shaped error envelope. There is no `ProviderAdminEndpoints.Error` helper.
 - With `RequireClientAuth: false`, items (2) and (3) still apply.
 
 **Tests.** New `InferencePathAuthTests`; extend `ProxyInterceptionTests`' real-socket `HttpListener`
@@ -402,9 +428,12 @@ them. That yields:
 
 - Full read of `GET /v1/models` — the configured model and provider inventory.
 - Read of every routed completion response, including prompt content echoed back.
-- A path to `/admin/*` that is no longer blocked by preflight, leaving only the token as the
-  barrier — which is exactly the barrier [T-04](#t-04--management-auth-fails-open-on-a-blankmissing-token)
-  can remove.
+- A path to the management gRPC services on port **47104** (`RefreshFromEndpoint`, `ListProviders`,
+  `SetSecret`, and the other `ProviderAdminService` RPCs) if that origin is the one that rebinds.
+  Rebinding the proxy origin on 47101 does not itself open those RPCs: they are a different port.
+  The remaining barrier on 47104 is the management token, which
+  [T-04](#t-04--management-auth-fails-open-on-a-blankmissing-token) can remove when no token
+  provider is configured. There is no REST `/admin/*` route.
 
 **Remediation.**
 
@@ -510,42 +539,41 @@ launches `unshare <flags> -- <interpreter> <script>` and nothing else.
 
 **Today: High · Exposed: Critical · CWE-636, CWE-1188**
 
-**Evidence.** All three management surfaces treat a null/blank token as "no authentication"
-rather than "deny":
+**Evidence.** There is no REST `/admin/*` surface and no `ProviderAdminEndpoints` or
+`UsageAdminEndpoints` type. The gRPC host still treats a missing token provider as "no authentication"
+rather than "deny". `ProxyServer` registers `TelemetryAuthInterceptor` only when
+`managementTokenProvider` is not null; otherwise every RPC on port **47104** — `RefreshFromEndpoint`,
+`ListProviders`, `SetSecret`, `UsageAdminGrpcService`, and the rest — is mapped with no interceptor:
 
 ```csharp
-// src/TotallyHotArcRouter/Proxy/Management/ProviderAdminEndpoints.cs:43-55
-if (!string.IsNullOrWhiteSpace(managementToken))
+// src/TotallyHotArcRouter/Proxy/ProxyServer.cs:271-284
+if (managementTokenProvider is not null)
 {
-    group.AddEndpointFilter(async (context, next) => { /* verify */ });
-}
-// ...no else. A blank token means the filter is never added.
-```
-
-```csharp
-// src/TotallyHotArcRouter/Proxy/ProxyServer.cs:231-239
-if (!string.IsNullOrWhiteSpace(managementToken))
-{
-    services.AddSingleton(new TelemetryAuthInterceptor(managementToken));
+    services.AddSingleton(managementTokenProvider);
+    services.AddSingleton<ManagementSessionTicketService>();
+    services.AddSingleton<LoginRateLimiter>();
+    services.AddSingleton(sp => new TelemetryAuthInterceptor(
+        tokenProvider: sp.GetRequiredService<IManagementTokenProvider>(),
+        sessionTickets: sp.GetRequiredService<ManagementSessionTicketService>()));
     services.AddGrpc(options => options.Interceptors.Add<TelemetryAuthInterceptor>());
 }
 else
 {
-    services.AddGrpc();   // no interceptor — every RPC unauthenticated
+    services.AddGrpc();
 }
 ```
 
-`UsageAdminEndpoints` follows the same shape. `McpBearerAuthMiddleware` is the one exception: its
-constructor calls `ArgumentException.ThrowIfNullOrWhiteSpace(expectedToken)`, so it cannot be
-constructed in a bypassed state — which is the pattern the other two should adopt.
+`McpBearerAuthMiddleware` is not that shape. Its constructor calls
+`ArgumentNullException.ThrowIfNull` on `IManagementTokenProvider`; it does not take a raw token
+string and does not call `ThrowIfNullOrWhiteSpace`. MCP cannot be constructed without a provider.
+The gRPC registration can.
 
 **Impact.** In production the token is supplied by `ManagementAccessToken.GetOrCreate()`, so this
 is not currently exploitable — the severity is about the *shape of the failure*, not a live bypass.
-But the failure mode is the worst available one: any path that yields an empty string (a truncated
-token file that reads back blank, a future configuration binding, a refactor that reorders
-construction) silently disables authentication on the entire `/admin/*` surface **and** every gRPC
-method, with no log line and no startup error. The intended use — tests exercising forwarding only
-— is better served by an explicit opt-out than by an implicit one keyed on emptiness.
+But the failure mode is the worst available one: a null provider (a test double that leaked, a
+refactor that reorders construction) silently disables authentication on every gRPC method on port
+47104, with no log line and no startup error. The intended use — tests exercising forwarding only
+— is better served by an explicit opt-out than by an implicit one keyed on a null provider.
 
 **Remediation.**
 
@@ -553,22 +581,24 @@ method, with no log line and no startup error. The intended use — tests exerci
    a `ManagementAuth` type with `ManagementAuth.Required(token)` and
    `ManagementAuth.ExplicitlyDisabledForTests()`. Make the disabled variant `internal` so it cannot
    be selected from outside the test assemblies.
-2. Have the endpoint mappers throw on a blank token rather than skipping the filter, matching
-   `McpBearerAuthMiddleware`'s existing constructor contract.
+2. Have the gRPC registration throw on a missing provider rather than calling `AddGrpc()` with no
+   interceptor. `McpBearerAuthMiddleware` already refuses a null `IManagementTokenProvider`; it does
+   not reject a blank token string.
 3. Log a `Warning` at startup whenever auth is disabled, naming the surface, so the state is never
    silent even in tests.
 
 **Acceptance criteria.**
 
-- `MapProviderAdminEndpoints`, `MapUsageAdminEndpoints`, and the gRPC registration all throw
-  `ArgumentException` when handed a blank token via the production path.
+- The gRPC registration throws `ArgumentException` when the production path is handed no token
+  provider, rather than calling `services.AddGrpc()` with no interceptor. `RefreshFromEndpoint`,
+  `ListProviders`, and `SetSecret` are among the RPCs that registration covers.
 - The test-only disabled variant is not reachable from `TotallyHotArcRouter`'s public API.
 - A test asserts the startup warning is emitted when auth is disabled.
 
-**Tests.** Extend `ProviderAdminEndpointsTests`, `UsageAdminEndpointsTests`, and
-`ProxyServerTests`. Note that `MapProviderAdminEndpoints` and `MapUsageAdminEndpoints` currently
-have **no covering tests** per CodeGraph's blast-radius analysis — this phase should close that gap
-regardless.
+**Tests.** Extend `ProviderAdminGrpcServiceTests`, `UsageAdminGrpcServiceTests`, and
+`ProxyServerTests`. Those service test classes exist. There is no `ProviderAdminEndpointsTests` or
+`UsageAdminEndpointsTests` class, and no `MapProviderAdminEndpoints` or `MapUsageAdminEndpoints`
+method.
 
 ---
 
@@ -689,59 +719,69 @@ failure is what turns that finding from "contained disclosure" into "logged disc
 
 **Today: Medium · Exposed: Medium · CWE-256, CWE-732**
 
-> **Status (re-audited 2026-09-17).** The password half is **resolved**; the `.pfx` half is **open**. The
-> Evidence below quotes a `catch (PlatformNotSupportedException) { File.WriteAllText(...) }` fallback that
-> no longer exists.
+> **Status (citations corrected 2026-10-21, #315).** The password half is **resolved**; the `.pfx`
+> half is **open**. `TelemetryTlsCertificate` is gone. The live writer is
+> `LocalCertificateAuthority.PersistAndReload`.
 >
 > | Item | Status | Basis |
 > |---|---|---|
-> | Headline (password written plaintext) | **Resolved** | `StorePassword` writes only to the protected store ([`TelemetryTlsCertificate.cs:157`](../../src/TotallyHotArcRouter/Telemetry/TelemetryTlsCertificate.cs)). `TryResolvePassword` reads a legacy plaintext file once, migrates it into the store and deletes it, and its comment states it deliberately no longer catches `PlatformNotSupportedException`. Enabled by [T-09](#t-09--protectedsecretstore-is-windows-only)'s resolution: there is now a store on every platform to write to. |
-> | Remediation 1 — password through `SecureFile` | **Resolved** (superseded) | No longer applicable in the form written: the password is not in a file at all, which is stronger than the mode `0600` the acceptance criteria asked for. |
-> | Remediation 1 — `.pfx` through `SecureFile.WriteRestricted` | **Open** | [`TelemetryTlsCertificate.cs:119`](../../src/TotallyHotArcRouter/Telemetry/TelemetryTlsCertificate.cs) is still a bare `File.WriteAllBytes`. Tracked jointly with [T-10](#t-10--pfx-private-key-and-password-generation-are-inconsistent-with-the-projects-own-standard), which covers the same write plus two more `.pfx` files. |
-> | Remediation 2 — GUI pins the thumbprint | **Open, and materially de-risked** | No client pins a thumbprint; there is no `ServerCertificateCustomValidationCallback` anywhere in `src/`. But the Impact's premise — that the GUI "trusts any certificate presenting `CN=localhost`" — no longer describes the deployment: [ADR-0013](../adr/0013-name-constrained-local-ca-for-router-tls.md) has the router present a leaf chaining to a machine-trusted local CA carrying RFC 5280 name constraints, so ordinary chain validation applies. `CaThumbprint` is also already published for clients that want to pin ([`ProxyHostedService.cs:116-118`](../../src/TotallyHotArcRouter/Hosting/ProxyHostedService.cs)). Remaining pinning value is defence-in-depth against an attacker who can already install a trust-store root, which requires administrator rights. |
+> | Headline (password written plaintext) | **Resolved** | `PersistAndReload` stores the password only in `ProtectedSecretStore`, under `router-ca:cert-password`, `router-leaf:cert-password`, or `router-leaf-dns:cert-password` ([`LocalCertificateAuthority.cs`](../../src/TotallyHotArcRouter/Telemetry/LocalCertificateAuthority.cs)). There is no plaintext password file and no `PlatformNotSupportedException` fallback. |
+> | Remediation 1 — password through `SecureFile` | **Resolved** (superseded) | The password is not in a file at all. `secrets.dat` is written by `SecureFile.WriteMachineShared`. |
+> | Remediation 1 — `.pfx` through `SecureFile` | **Open** | `PersistAndReload` still calls `File.WriteAllBytes` on a temp path, then `File.Move`. That write is not `SecureFile`. The same helper covers `router-ca.pfx`, `router-leaf.pfx`, and `router-leaf-dns.pfx`. Tracked jointly with [T-10](#t-10--pfx-private-key-and-password-generation-are-inconsistent-with-the-projects-own-standard). |
+> | Remediation 2 — client pins the thumbprint | **Open** | `TelemetryChannelFactory.ValidateLoopbackCertificate` and `GrpcConversationExportRouter.ValidateLoopbackCertificate` set `ServerCertificateCustomValidationCallback`, accept a certificate whose subject is exactly `CN=localhost` on a loopback host, and ignore chain errors. Neither compares a thumbprint. `CaThumbprint` is published on `WebInterfaceDiscoveryInfo` ([`ProxyHostedService.cs`](../../src/TotallyHotArcRouter/Hosting/ProxyHostedService.cs)). The server leaf chains to the name-constrained local CA ([ADR-0013](../adr/0013-name-constrained-local-ca-for-router-tls.md)); these callbacks do not require that chain. |
 >
-> Acceptance criteria: `telemetry-cert-pwd.txt` no longer exists at all, which exceeds the "mode `0600`"
-> bar. `telemetry-cert.pfx` is **not** mode `0600`. No test asserts a client rejects a foreign
+> `telemetry-cert-pwd.txt` is not the live password store. `telemetry-cert.pfx` is not the live
+> listener certificate: `LegacyStorageMigration` still copies that legacy filename, and
+> `LocalCertificateAuthority` supersedes it. No test asserts a client rejects a foreign
 > `CN=localhost` certificate.
 
-**Evidence (as of the original audit; see status block above — the quoted fallback no longer exists).**
+**Evidence.** Current certificate persistence:
 
 ```csharp
-// src/TotallyHotArcRouter/Telemetry/TelemetryTlsCertificate.cs:139-149
-private static void StorePassword(string passwordPath, ProtectedSecretStore secretStore, string password)
+// src/TotallyHotArcRouter/Telemetry/LocalCertificateAuthority.cs — PersistAndReload
+var password = Guid.NewGuid().ToString("N");
+var certificateBytes = certificate.Export(contentType: X509ContentType.Pkcs12, password: password);
+
+var tempPath = $"{certificatePath}.{Guid.NewGuid():N}.tmp";
+File.WriteAllBytes(path: tempPath, bytes: certificateBytes);
+try
 {
-    try { secretStore.Write(PasswordSecretName, password); }
-    catch (PlatformNotSupportedException) { File.WriteAllText(passwordPath, password); }
+    secretStore.Write(name: passwordSecretName, value: password);
 }
+catch
+{
+    File.Delete(tempPath);
+    throw;
+}
+
+File.Move(sourceFileName: tempPath, destFileName: certificatePath, overwrite: true);
 ```
 
-`ProtectedSecretStore.Write` throws `PlatformNotSupportedException` on every non-Windows platform
-([`ProtectedSecretStore.cs:134-138`](../../src/TotallyHotArcRouter/Proxy/Management/ProtectedSecretStore.cs)),
-so the fallback is the *normal* path on Linux and macOS — and it uses `File.WriteAllText`, not
-`SecureFile.WriteRestricted`. The file lands with default umask permissions (typically `0644`),
-world-readable.
+The original audit quoted `TelemetryTlsCertificate.StorePassword`, including a
+`PlatformNotSupportedException` fallback to `File.WriteAllText`. That type is not in the tree.
+`ProtectedSecretStore.Write` no longer throws `PlatformNotSupportedException` off Windows
+([T-09](#t-09--protectedsecretstore-is-windows-only)). `SecureFile.WriteMachineShared` restricts
+`secrets.dat`; `PersistAndReload` does not call it for the `.pfx` bytes.
 
-`SecureFile.WriteRestricted` already implements the POSIX case correctly
-(`File.SetUnixFileMode(path, UserRead | UserWrite)`,
-[`SecureFile.cs:40`](../../src/TotallyHotArcRouter/Proxy/Management/SecureFile.cs)) — it is simply
-not called here.
-
-**Impact.** On POSIX, any local account can read the `.pfx` password. Combined with
-[T-10](#t-10--pfx-private-key-and-password-generation-are-inconsistent-with-the-projects-own-standard)
-— the `.pfx` itself is written with `File.WriteAllBytes` and is likewise unrestricted — another
-local account obtains the telemetry endpoint's TLS private key and can impersonate it to the GUI,
-which trusts any certificate presenting `CN=localhost` rather than pinning a thumbprint.
+**Impact.** The `.pfx` password is in the protected store, not in a world-readable text file. The
+`.pfx` bytes themselves are still written with `File.WriteAllBytes`, so a local account that can
+read the certificate file and the password (see
+[T-10](#t-10--pfx-private-key-and-password-generation-are-inconsistent-with-the-projects-own-standard))
+can impersonate the listener to a client that accepts any `CN=localhost` certificate. The dashboard
+channel and the conversation-export client do that today; they do not pin `CaThumbprint`.
 
 **Remediation.**
 
-1. Route both the password fallback and the `.pfx` write through `SecureFile.WriteRestricted`.
-2. Have the GUI pin the certificate thumbprint by reading the same `.pfx`'s public certificate,
-   as `TelemetryTlsCertificate`'s own remarks already propose as the stronger follow-up.
+1. Write `router-ca.pfx`, `router-leaf.pfx`, and `router-leaf-dns.pfx` through `SecureFile`. The
+   password is already in `ProtectedSecretStore`; do not reintroduce a password file.
+2. Have clients that already read `CaThumbprint` pin that thumbprint.
+   `TelemetryTlsCertificate` is not in the tree, so it has no remarks to follow.
 
 **Acceptance criteria.**
 
-- On POSIX, both `telemetry-cert-pwd.txt` and `telemetry-cert.pfx` are mode `0600` after creation.
-- A test asserts the GUI client rejects a different `CN=localhost` certificate.
+- On POSIX, `router-ca.pfx`, `router-leaf.pfx`, and `router-leaf-dns.pfx` are mode `0600` after
+  creation. Passwords stay in `ProtectedSecretStore`, not in `telemetry-cert-pwd.txt`.
+- A test asserts the dashboard client rejects a different `CN=localhost` certificate.
 
 ---
 
@@ -793,7 +833,9 @@ router's full environment, entirely bypassing the sandbox.
 
 - Every management surface throws rather than silently disabling authentication.
 - Tier 1 either enforces seccomp or no longer claims to, with docs matching.
-- `MapProviderAdminEndpoints` and `MapUsageAdminEndpoints` have direct test coverage.
+- `ProviderAdminGrpcService` and `UsageAdminGrpcService` (port 47104, including `RefreshFromEndpoint`,
+  `ListProviders`, and `SetSecret`) have direct test coverage, and the null-provider fail-open branch
+  throws instead of mapping unauthenticated RPCs.
 - Build clean, tests green, coverage ≥ 80%.
 
 ---
@@ -1047,25 +1089,30 @@ any local account on POSIX and by any process running as the user on Windows.
 
 **Today: Medium · Exposed: High · CWE-798, CWE-613**
 
-**Evidence.** `ManagementAccessToken.GetOrCreate` adopts any non-empty existing file:
+**Evidence.** `ManagementAccessToken.GetOrCreate` stores the token in `ProtectedSecretStore` under
+`management:token`. When that secret is absent it imports a legacy `management-token.txt` once, if
+the file exists and is non-empty, then deletes the file. `TryReadLegacyToken` returns that trimmed
+text with no length or entropy check and no ACL check:
 
 ```csharp
-// src/TotallyHotArcRouter/Proxy/Management/ManagementAccessToken.cs:67-74
-if (File.Exists(tokenPath))
-{
-    var existing = File.ReadAllText(tokenPath).Trim();
-    if (!string.IsNullOrEmpty(existing)) { return existing; }
-}
+// src/TotallyHotArcRouter/Proxy/Management/ManagementAccessToken.cs — TryReadLegacyToken
+if (!File.Exists(legacyTokenPath)) return null;
+
+var imported = File.ReadAllText(legacyTokenPath).Trim();
+return string.IsNullOrEmpty(imported) ? null : imported;
 ```
 
-There is no length or entropy validation on the adopted value, no check that the file's ACL is
-still restrictive, no expiry, and no rotation API.
+Rotation exists. `ManagementAccessToken.Regenerate` always mints a new token, and
+`ManagementTokenAdminService.RegenerateManagementToken` (`telemetry.proto`) exposes it on the web
+listener, port **47104**. There is no `POST /admin/token/rotate` route. There is still no expiry.
 
-**Impact.** A token planted before first run — by local malware, or by a restored/synced profile
-backup, or by a roaming profile — is adopted permanently and gates all three management surfaces.
-Because there is no rotation, a token disclosed once (a screenshot, a support log, a synced backup)
-is valid forever. The one-token-for-three-surfaces design that is a strength for consistency is a
-weakness for revocation: there is no way to invalidate it.
+**Impact.** A token planted in the legacy file before the first import — by local malware, or by a
+restored profile — is adopted into `secrets.dat` and gates the management surfaces (gRPC admin on
+47104 and MCP on 47103). Rotation can invalidate it afterwards: `RegenerateManagementToken` replaces
+the stored value, and `McpBearerAuthMiddleware` reads `IManagementTokenProvider.CurrentToken` on
+every request. The one-token-for-every-management-surface design remains a revocation coupling: one
+replacement invalidates MCP clients and the GUI together. There is no REST `/admin/*` surface to
+replay a token against.
 
 **Remediation.**
 
@@ -1073,12 +1120,14 @@ weakness for revocation: there is no way to invalidate it.
    form `GenerateToken` produces — and regenerate rather than adopt a malformed value.
 2. Verify the file's ACL/mode on read; if it is not user-restricted, log a `Warning`, regenerate,
    and re-restrict. A token file that became world-readable should not keep being trusted.
-3. Add an explicit rotation path: a `POST /admin/token/rotate` endpoint and a Governance UI action
-   that generates a new token, writes it, and returns it once. Document that connected MCP clients
-   and the GUI must be re-paired afterward.
+3. Keep rotation on `RegenerateManagementToken` (port **47104**, `ManagementTokenAdminService`),
+   which the Governance UI already calls. Do not add `POST /admin/token/rotate`. Document that
+   connected MCP clients and the GUI must be re-paired afterward.
 4. Consider per-surface derived tokens (HKDF from the root token, salted per surface) so an MCP
-   client's token cannot be replayed against `/admin/*`. This meaningfully limits the blast radius
-   of [T-01](#t-01--provider-baseurl-is-unvalidated-ssrf--credential-exfiltration)'s agent path.
+   client's token cannot be replayed against the gRPC admin services on port 47104
+   (`RefreshFromEndpoint`, `ListProviders`, `SetSecret`, and the rest). This meaningfully limits the
+   blast radius of [T-01](#t-01--provider-baseurl-is-unvalidated-ssrf--credential-exfiltration)'s
+   agent path.
 
 **Acceptance criteria.**
 
@@ -1145,45 +1194,50 @@ in `model-routing.json`.
 
 **Today: Low · Exposed: Medium · CWE-732, CWE-330**
 
-> **Status (re-audited 2026-09-17).** Both remediations are **open**, and the finding is **wider than
-> written**: it predates [ADR-0013](../adr/0013-name-constrained-local-ca-for-router-tls.md), so the same
-> two defects now apply to three `.pfx` files rather than one.
+> **Status (citations corrected 2026-10-21, #315).** Both remediations are **open**. The live files
+> are the three `LocalCertificateAuthority` writes, all through `PersistAndReload`.
+> `TelemetryTlsCertificate` is not in the tree. `telemetry-cert.pfx` is a legacy filename
+> `LegacyStorageMigration` still copies; it is not the listener certificate.
 >
 > | File | GUID-derived password | Unrestricted write |
 > |---|---|---|
-> | `telemetry-cert.pfx` | [`TelemetryTlsCertificate.cs:116`](../../src/TotallyHotArcRouter/Telemetry/TelemetryTlsCertificate.cs) | [`TelemetryTlsCertificate.cs:119`](../../src/TotallyHotArcRouter/Telemetry/TelemetryTlsCertificate.cs) |
-> | `router-ca.pfx` | [`LocalCertificateAuthority.cs:247`](../../src/TotallyHotArcRouter/Telemetry/LocalCertificateAuthority.cs) | [`LocalCertificateAuthority.cs:251`](../../src/TotallyHotArcRouter/Telemetry/LocalCertificateAuthority.cs) |
-> | `router-leaf.pfx` | same helper (`PersistAndReload`) | same helper |
+> | `router-ca.pfx` | `PersistAndReload`, `Guid.NewGuid().ToString("N")`, secret `router-ca:cert-password` | `File.WriteAllBytes` to a temp path, then `File.Move` ([`LocalCertificateAuthority.cs`](../../src/TotallyHotArcRouter/Telemetry/LocalCertificateAuthority.cs)) |
+> | `router-leaf.pfx` | same helper, secret `router-leaf:cert-password` | same helper |
+> | `router-leaf-dns.pfx` | same helper, secret `router-leaf-dns:cert-password` | same helper |
 >
-> `router-ca.pfx` is the material case and did not exist when this was filed: it is the private key of a CA
-> **trusted machine-wide**, so reading it together with its password is enough to mint a certificate any
-> client on the box will accept for `localhost`.
+> `router-ca.pfx` is the material case: it is the private key of a CA trusted machine-wide
+> ([ADR-0013](../adr/0013-name-constrained-local-ca-for-router-tls.md)), so reading it together with
+> its password is enough to mint a certificate any already-trusting client on the box will accept for
+> the names that CA may issue.
 >
-> **Partially mitigated as of [ADR-0015](../adr/0015-machine-scoped-protection-for-the-shared-secret-store.md).**
-> All three passwords live in `secrets.dat`, whose ACL is now `LocalSystem` + `Administrators` + the writing
-> account, with no `BUILTIN\Users` rule. Because `%ProgramData%`'s inherited ACL grants `Users` read, a
-> non-administrator can still read the `.pfx` bytes but can no longer read the password that opens them.
-> That moves exploitability from "any local account" to "any administrator" — a real reduction, and the
-> reason this stays **Low** today — but it is a mitigation at the wrong layer. The `.pfx` files themselves
-> are still world-readable on the machine and should carry their own restriction.
+> **Passwords, as of [ADR-0024](../adr/0024-machine-shared-secret-store-without-the-writing-account.md)
+> revising [ADR-0015](../adr/0015-machine-scoped-protection-for-the-shared-secret-store.md).** All three
+> passwords live in `secrets.dat`. `ProtectedSecretStore` persists that file through
+> `SecureFile.WriteMachineShared`, which grants `WellKnownSidType.LocalSystemSid` and
+> `BuiltinAdministratorsSid` only. ADR-0024 removed the writing-account ACE. On POSIX the store file
+> is mode `0600`. The `.pfx` bytes are not written through `SecureFile`, so this restriction does not
+> apply to them.
 >
-> Acceptance criteria: neither is met. No `.pfx` is user-restricted on either platform, and password
+> Acceptance criteria: neither is met. No live `.pfx` is written through `SecureFile`, and password
 > generation still does not share a primitive with `ManagementAccessToken.GenerateToken`
 > (`RandomNumberGenerator.GetBytes(32)` versus `Guid.NewGuid().ToString("N")`).
 
-**Evidence (as of the original audit; see status block above — now applies to three `.pfx` files, not one).**
+**Evidence.** Current persistence is `LocalCertificateAuthority.PersistAndReload` (the same helper
+quoted under [T-06](#t-06--tls-certificate-password-written-plaintext-and-unrestricted-on-posix)):
 
 ```csharp
-// src/TotallyHotArcRouter/Telemetry/TelemetryTlsCertificate.cs:95-98
+// src/TotallyHotArcRouter/Telemetry/LocalCertificateAuthority.cs — PersistAndReload
 var password = Guid.NewGuid().ToString("N");
-var certificateBytes = certificate.Export(X509ContentType.Pkcs12, password);
-File.WriteAllBytes(certificatePath, certificateBytes);
+var certificateBytes = certificate.Export(contentType: X509ContentType.Pkcs12, password: password);
+var tempPath = $"{certificatePath}.{Guid.NewGuid():N}.tmp";
+File.WriteAllBytes(path: tempPath, bytes: certificateBytes);
+// password is then secretStore.Write(...); the temp file replaces the .pfx via File.Move
 ```
 
-Two inconsistencies with the project's own established practice. `ManagementAccessToken` uses
-`RandomNumberGenerator.GetBytes(32)` — 256 bits — while this uses a v4 GUID, which carries 122
-bits in a fixed, well-known format. And `File.WriteAllBytes` bypasses `SecureFile.WriteRestricted`,
-which every other secret in this directory uses.
+Two inconsistencies with the project's own established practice. `ManagementAccessToken.GenerateToken`
+uses `RandomNumberGenerator.GetBytes(32)` — 256 bits — while this uses a v4 GUID, which carries 122
+bits in a fixed, well-known format. And `File.WriteAllBytes` bypasses `SecureFile`, which
+`secrets.dat` uses.
 
 `Guid.NewGuid()` is cryptographically random on modern .NET, so this is not a weak-RNG finding —
 it is a consistency and defense-in-depth one. The unrestricted write is the more material half.
@@ -1193,7 +1247,7 @@ it is a consistency and defense-in-depth one. The unrestricted write is the more
 1. Generate the password with `RandomNumberGenerator.GetBytes(32)`, base64url-encoded, reusing the
    same helper `ManagementAccessToken.GenerateToken` uses — extract it to a shared internal helper
    so the two cannot drift.
-2. Write the `.pfx` through `SecureFile.WriteRestricted`.
+2. Write `router-ca.pfx`, `router-leaf.pfx`, and `router-leaf-dns.pfx` through `SecureFile`.
 
 **Acceptance criteria.**
 
