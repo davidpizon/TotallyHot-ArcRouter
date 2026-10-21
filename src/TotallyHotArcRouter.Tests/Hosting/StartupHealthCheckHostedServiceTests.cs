@@ -47,8 +47,6 @@ public class StartupHealthCheckHostedServiceTests
             logger: NullLogger<PriceCatalogIngestionService>.Instance);
 
         var transcriptDb = CreateTranscriptDatabase(temp);
-        var transcriptStore = new SqliteTranscriptStore(
-            database: transcriptDb, options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions()));
         var service = new StartupHealthCheckHostedService(
             logger: NullLogger<StartupHealthCheckHostedService>.Instance,
             database: temp.Database,
@@ -66,7 +64,6 @@ public class StartupHealthCheckHostedServiceTests
             benchmarkDatabase: CreateBenchmarkDatabase(temp),
             benchmarkStatusService: CreateBenchmarkStatusService(temp),
             transcriptDatabase: transcriptDb,
-            transcriptStore: transcriptStore,
             transcriptOptions: Options.Create(new TranscriptOptions()),
             hostLifetime: CreateHostApplicationLifetime());
 
@@ -98,8 +95,6 @@ public class StartupHealthCheckHostedServiceTests
             logger: NullLogger<PriceCatalogIngestionService>.Instance);
 
         var transcriptDb = CreateTranscriptDatabase(temp);
-        var transcriptStore = new SqliteTranscriptStore(
-            database: transcriptDb, options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions()));
         var service = new StartupHealthCheckHostedService(
             logger: NullLogger<StartupHealthCheckHostedService>.Instance,
             database: temp.Database,
@@ -117,7 +112,6 @@ public class StartupHealthCheckHostedServiceTests
             benchmarkDatabase: CreateBenchmarkDatabase(temp),
             benchmarkStatusService: CreateBenchmarkStatusService(temp),
             transcriptDatabase: transcriptDb,
-            transcriptStore: transcriptStore,
             transcriptOptions: Options.Create(new TranscriptOptions()),
             hostLifetime: CreateHostApplicationLifetime());
 
@@ -204,8 +198,6 @@ public class StartupHealthCheckHostedServiceTests
             benchmarkDatabase: CreateBenchmarkDatabase(temp),
             benchmarkStatusService: CreateBenchmarkStatusService(temp),
             transcriptDatabase: transcriptDb,
-            transcriptStore: new SqliteTranscriptStore(
-                database: transcriptDb, options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions())),
             transcriptOptions: Options.Create(new TranscriptOptions()),
             hostLifetime: CreateHostApplicationLifetime(),
             priceCatalogOptions: Options.Create(new PriceCatalogOptions { StartupFetchBudgetSeconds = 1 }));
@@ -238,8 +230,6 @@ public class StartupHealthCheckHostedServiceTests
         warmupState = embeddingClient is null ? null : new EmbeddingWarmupState();
 
         var transcriptDb = CreateTranscriptDatabase(temp);
-        var transcriptStore = new SqliteTranscriptStore(
-            database: transcriptDb, options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions()));
 
         return new StartupHealthCheckHostedService(
             logger: NullLogger<StartupHealthCheckHostedService>.Instance,
@@ -258,7 +248,6 @@ public class StartupHealthCheckHostedServiceTests
             benchmarkDatabase: CreateBenchmarkDatabase(temp),
             benchmarkStatusService: CreateBenchmarkStatusService(temp),
             transcriptDatabase: transcriptDb,
-            transcriptStore: transcriptStore,
             transcriptOptions: Options.Create(new TranscriptOptions()),
             hostLifetime: CreateHostApplicationLifetime(),
             embeddingClient: embeddingClient,
@@ -355,8 +344,6 @@ public class StartupHealthCheckHostedServiceTests
             logger: NullLogger<PriceCatalogIngestionService>.Instance);
 
         var transcriptDb = CreateTranscriptDatabase(temp);
-        var transcriptStore = new SqliteTranscriptStore(
-            database: transcriptDb, options: new StaticOptionsMonitor<TranscriptOptions>(new TranscriptOptions()));
 
         using var stopCts = new CancellationTokenSource();
         stopCts.Cancel();
@@ -382,7 +369,6 @@ public class StartupHealthCheckHostedServiceTests
             benchmarkDatabase: CreateBenchmarkDatabase(temp),
             benchmarkStatusService: CreateBenchmarkStatusService(temp),
             transcriptDatabase: transcriptDb,
-            transcriptStore: transcriptStore,
             transcriptOptions: Options.Create(new TranscriptOptions()),
             hostLifetime: hostLifetime,
             embeddingClient: embeddingClient.Object,

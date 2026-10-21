@@ -35,7 +35,6 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
     /// <summary>
     /// Initializes a new instance of the <see cref="McpServer"/> class.
     /// </summary>
-    /// <param name="logger">The logger for this host.</param>
     /// <param name="managementFacade">The shared provider/model/budget management facade (also used by the gRPC-Web admin services).</param>
     /// <param name="priceSourceToggleStore">The price-source enable/disable/rank store.</param>
     /// <param name="priceCatalogIngestionService">The price-catalog ingestion cycle runner.</param>
@@ -61,7 +60,6 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
     /// tests that build a <see cref="McpServer"/> directly with no Serilog pipeline available.
     /// </param>
     public McpServer(
-        ILogger<McpServer> logger,
         ManagementFacade managementFacade,
         PriceSourceToggleStore priceSourceToggleStore,
         PriceCatalogIngestionService priceCatalogIngestionService,
@@ -76,7 +74,6 @@ public sealed class McpServer : IAsyncDisposable, IDisposable
         string bindAddress = "loopback",
         Serilog.ILogger? serilogLogger = null)
     {
-        ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(managementFacade);
         ArgumentNullException.ThrowIfNull(priceSourceToggleStore);
         ArgumentNullException.ThrowIfNull(priceCatalogIngestionService);

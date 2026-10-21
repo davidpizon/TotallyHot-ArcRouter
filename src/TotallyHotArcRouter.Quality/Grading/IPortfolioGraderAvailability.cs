@@ -21,6 +21,14 @@ public interface IPortfolioGraderAvailability
     /// same "a true that never materializes just times out" tolerance <see cref="IJudgeAvailability"/>
     /// documents applies to each key here too.
     /// </returns>
+    /// <remarks>
+    /// Reported by <c>ParameterOnlyUsedForPreconditionCheck.Global</c>: every implementation either ignores
+    /// <paramref name="result"/> or only rejects null. The parameter stays, for the same reason as
+    /// <see cref="IJudgeAvailability.WillJudge"/>: it is the per-result seam, and today's host policy is
+    /// process-wide (each grader is enabled and a backbone resolves). Removing it to satisfy the scan would
+    /// make a per-result decision a breaking change.
+    /// </remarks>
+    // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Global
     IReadOnlySet<string> DetermineGraderKeys(QualityResult result);
 }
 

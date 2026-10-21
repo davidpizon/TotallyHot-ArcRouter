@@ -215,6 +215,8 @@ which is precisely the gap `live-feedback-learning-plan.md`'s status table recor
 
 ### M1.2 Exploration — a real regression this sub-phase must not ship
 
+Exploration in this section (M1.2) is superseded, pending David's approval of the plan, by the [issue #313 plan](../plans/issue-313-lints-exploration-propensity.md).
+
 `AgentAsARouter.cs:53` is the **only** implementation of epsilon-greedy exploration in the codebase:
 
 ```csharp

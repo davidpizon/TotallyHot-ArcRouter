@@ -62,14 +62,14 @@
          dependency isn't implicit - matches TotallyHotArcRouter.Gui.csproj's explicit Grpc.Tools reference. -->
     <!-- Backs Program.cs's UseWindowsService() call (auto-update plan Phase 1) so the host can run
          under the Windows Service Control Manager; a no-op when launched any other way. -->
-    <PackageReference Include="Fido2" Version="4.3.0" />
+    <PackageReference Include="Fido2" Version="4.3.1" />
     <PackageReference Include="Google.Protobuf" Version="3.36.2" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.13" />
     <!-- Backs Program.cs's UseSystemd() call (web GUI migration plan Phase P10) so the host can run
          under systemd (sd_notify readiness/stop signaling, journal-formatted console logging); a no-op
          when launched any other way, mirroring Microsoft.Extensions.Hosting.WindowsServices above. -->
     <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.13" />
-    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.10" />
+    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.11" />
     <PackageReference Include="Grpc.AspNetCore" Version="2.84.0" />
     <PackageReference Include="Grpc.Tools" Version="2.84.0">
       <PrivateAssets>all</PrivateAssets>
@@ -100,9 +100,9 @@
          embedded in the .Data.* packages, so unlike the ONNX artifacts there is no first-run download.
          cl100k_base covers the GPT-4/3.5 family, o200k_base the GPT-4o family; Claude models are counted
          locally through these and corrected by the calibration factor, never assumed exact. -->
-    <PackageReference Include="Microsoft.ML.Tokenizers" Version="2.0.0" />
-    <PackageReference Include="Microsoft.ML.Tokenizers.Data.Cl100kBase" Version="2.0.0" />
-    <PackageReference Include="Microsoft.ML.Tokenizers.Data.O200kBase" Version="2.0.0" />
+    <PackageReference Include="Microsoft.ML.Tokenizers" Version="2.0.1" />
+    <PackageReference Include="Microsoft.ML.Tokenizers.Data.Cl100kBase" Version="2.0.1" />
+    <PackageReference Include="Microsoft.ML.Tokenizers.Data.O200kBase" Version="2.0.1" />
     <!-- Pin Microsoft.Bcl.Memory above the 9.0.4 that Microsoft.ML.Tokenizers 2.0.0 pulls transitively:
          <= 9.0.13 and <= 10.0.3 carry GHSA-73j8-2gch-69rq (.NET denial of service), patched in 9.0.14 /
          10.0.4. Same technique - and same reason - as the SQLitePCLRaw pin below: a direct reference wins
