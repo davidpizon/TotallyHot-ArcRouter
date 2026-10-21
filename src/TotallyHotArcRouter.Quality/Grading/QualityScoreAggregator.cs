@@ -65,6 +65,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     private readonly IQualityScoreObserver _observer;
 
     private readonly Dictionary<string, Entry> _pending = new(StringComparer.Ordinal);
+    private readonly QualityOptions _options;
     private readonly IQualityScorer _scorer;
     private readonly TimeProvider _timeProvider;
 
@@ -111,8 +112,9 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         _logger = logger;
         _portfolioGraderAvailability = portfolioGraderAvailability ?? new NoPortfolioGraderAvailability();
         _timeProvider = timeProvider ?? TimeProvider.System;
-        _joinTimeout = TimeSpan.FromMilliseconds(options.Value.JudgeJoinTimeoutMs);
-        _capacity = options.Value.JudgeJoinCapacity;
+        _options = options.Value;
+        _joinTimeout = TimeSpan.FromMilliseconds(_options.JudgeJoinTimeoutMs);
+        _capacity = _options.JudgeJoinCapacity;
     }
 
     /// <summary>Gets the number of results currently held awaiting a judge grade (test/diagnostic use).</summary>
@@ -139,7 +141,8 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         // skip it entirely rather than pay for a resolution whose result is about to be discarded.
         if (string.IsNullOrEmpty(result.RequestCorrelationId))
         {
-            await WriteAsync(result: result, cancellationToken: cancellationToken).ConfigureAwait(false);
+            await WriteAsync(result: result, llmGraderWasAvailable: false, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
             return;
         }
 
@@ -147,7 +150,8 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
 
         if (pendingGraders.Count == 0)
         {
-            await WriteAsync(result: result, cancellationToken: cancellationToken).ConfigureAwait(false);
+            await WriteAsync(result: result, llmGraderWasAvailable: false, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
             return;
         }
 
@@ -157,7 +161,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         // lock would race those mutations.
         var requestedGraderKeys = new HashSet<string>(pendingGraders, StringComparer.OrdinalIgnoreCase);
 
-        List<QualityResult> evicted;
+        List<Entry> evicted;
         bool stillHeld;
         lock (_lock)
         {
@@ -167,6 +171,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
             _pending[result.RequestCorrelationId] = new Entry(
                 Result: result,
                 PendingGraderKeys: pendingGraders,
+                LlmGraderWasAvailable: true,
                 ExpiresAtUtc: _timeProvider.GetUtcNow() + _joinTimeout);
             evicted = TrimToCapacityLocked();
             stillHeld = _pending.ContainsKey(result.RequestCorrelationId);
@@ -177,8 +182,10 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
             _logger.LogDebug(
                 message:
                 "Judge join table at capacity; writing the static score for correlation {CorrelationId} without a judge grade.",
-                stale.RequestCorrelationId);
-            await WriteAsync(result: stale with { DegradedReason = "judge-join-evicted" },
+                stale.Result.RequestCorrelationId);
+            await WriteAsync(
+                result: stale.Result with { DegradedReason = "judge-join-evicted" },
+                llmGraderWasAvailable: stale.LlmGraderWasAvailable,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         }
 
@@ -296,6 +303,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         CancellationToken cancellationToken)
     {
         QualityResult? toWrite = null;
+        var llmGraderWasAvailable = false;
         var found = false;
 
         lock (_lock)
@@ -303,13 +311,14 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
             if (_pending.TryGetValue(correlationId, out var entry))
             {
                 found = true;
+                llmGraderWasAvailable = entry.LlmGraderWasAvailable;
                 var updated = apply(entry.Result);
                 entry.PendingGraderKeys.Remove(graderKey);
 
                 if (entry.PendingGraderKeys.Count == 0)
                 {
                     _pending.Remove(correlationId);
-                    toWrite = updated with { UnifiedScore = _scorer.Score(result: updated, dimension: updated.Dimension) };
+                    toWrite = updated;
                 }
                 else
                 {
@@ -328,7 +337,9 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
             return false;
         }
 
-        if (toWrite is not null) await WriteAsync(result: toWrite, cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (toWrite is not null)
+            await WriteAsync(result: toWrite, llmGraderWasAvailable: llmGraderWasAvailable,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
         return true;
     }
 
@@ -351,6 +362,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
 
         QualityResult? toWrite = null;
+        var llmGraderWasAvailable = false;
         var found = false;
 
         lock (_lock)
@@ -358,6 +370,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
             if (_pending.TryGetValue(correlationId, out var entry))
             {
                 found = true;
+                llmGraderWasAvailable = entry.LlmGraderWasAvailable;
                 var reasons = new Dictionary<string, string>(entry.Result.GraderDegradedReasons,
                     StringComparer.OrdinalIgnoreCase) { [graderKey] = reason };
                 var updated = entry.Result with { DegradedReason = reason, GraderDegradedReasons = reasons };
@@ -382,14 +395,16 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
             correlationId,
             reason);
 
-        if (toWrite is not null) await WriteAsync(result: toWrite, cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (toWrite is not null)
+            await WriteAsync(result: toWrite, llmGraderWasAvailable: llmGraderWasAvailable,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
         return true;
     }
 
     /// <inheritdoc/>
     public async Task<int> SweepExpiredAsync(CancellationToken cancellationToken = default)
     {
-        List<QualityResult> expired;
+        List<Entry> expired;
         var now = _timeProvider.GetUtcNow();
 
         lock (_lock)
@@ -400,13 +415,15 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
                     expired.Add(WithRemainingReasons(entry: entry, reason: "judge-join-timeout"));
         }
 
-        foreach (var result in expired)
+        foreach (var entry in expired)
         {
             _logger.LogDebug(
                 message:
                 "Judge grade for correlation {CorrelationId} did not arrive within the join window; writing the static score alone.",
-                result.RequestCorrelationId);
-            await WriteAsync(result: result with { DegradedReason = "judge-join-timeout" },
+                entry.Result.RequestCorrelationId);
+            await WriteAsync(
+                result: entry.Result with { DegradedReason = "judge-join-timeout" },
+                llmGraderWasAvailable: entry.LlmGraderWasAvailable,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
         }
 
@@ -419,14 +436,14 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     /// so that per-grader record is as complete as the single <see cref="QualityResult.DegradedReason"/>
     /// field the caller stamps separately.
     /// </summary>
-    private static QualityResult WithRemainingReasons(Entry entry, string reason)
+    private static Entry WithRemainingReasons(Entry entry, string reason)
     {
-        if (entry.PendingGraderKeys.Count == 0) return entry.Result;
+        if (entry.PendingGraderKeys.Count == 0) return entry;
 
         var reasons = new Dictionary<string, string>(entry.Result.GraderDegradedReasons, StringComparer.OrdinalIgnoreCase);
         foreach (var key in entry.PendingGraderKeys) reasons[key] = reason;
 
-        return entry.Result with { GraderDegradedReasons = reasons };
+        return entry with { Result = entry.Result with { GraderDegradedReasons = reasons } };
     }
 
     /// <summary>Removes an entry and returns it, or null when nothing was held under that key.</summary>
@@ -438,25 +455,38 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
 
     /// <summary>Drops the oldest held results beyond capacity and returns them so the caller can still write them.</summary>
     /// <remarks>Must be called under <c>_lock</c>.</remarks>
-    private List<QualityResult> TrimToCapacityLocked()
+    private List<Entry> TrimToCapacityLocked()
     {
-        var evicted = new List<QualityResult>();
+        var evicted = new List<Entry>();
 
         while (_pending.Count > _capacity && _insertionOrder.Count > 0)
         {
             var oldest = _insertionOrder.Dequeue();
-            if (TakeLocked(oldest) is { } entry) evicted.Add(WithRemainingReasons(entry: entry, reason: "judge-join-evicted"));
+            if (TakeLocked(oldest) is { } entry)
+                evicted.Add(WithRemainingReasons(entry: entry, reason: "judge-join-evicted"));
         }
 
         return evicted;
     }
 
-    /// <summary>Hands one final result to the observer, never letting an observer failure escape.</summary>
-    private async Task WriteAsync(QualityResult result, CancellationToken cancellationToken)
+    /// <summary>
+    /// Finalizes <see cref="GradeStatus"/> and the fixed-weight unified score, then hands the result to the
+    /// observer without letting an observer failure escape.
+    /// </summary>
+    private async Task WriteAsync(QualityResult result, bool llmGraderWasAvailable, CancellationToken cancellationToken)
     {
+        var weights = _options.ResolveWeights(result.Dimension);
+        var status = GradeStatusCalculator.Calculate(result: result, weights: weights,
+            llmGraderWasAvailable: llmGraderWasAvailable);
+        var scored = result with
+        {
+            GradeStatus = status,
+            UnifiedScore = _scorer.Score(result: result, dimension: result.Dimension)
+        };
+
         try
         {
-            await _observer.ObserveAsync(result: result, cancellationToken: cancellationToken).ConfigureAwait(false);
+            await _observer.ObserveAsync(result: scored, cancellationToken: cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -464,7 +494,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
                 exception: ex,
                 message:
                 "Observing the quality score for correlation {CorrelationId} failed; the routed response was unaffected.",
-                result.RequestCorrelationId);
+                scored.RequestCorrelationId);
         }
     }
 
@@ -474,6 +504,13 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     /// The grader keys not yet resolved. Mutated in place under <c>_lock</c> as each grader completes or is
     /// abandoned; the entry is written and removed once this set is empty.
     /// </param>
+    /// <param name="LlmGraderWasAvailable">
+    /// Whether this hold expected at least one LLM grader — distinguishes StructureOnly from Incomplete.
+    /// </param>
     /// <param name="ExpiresAtUtc">The UTC instant after which the wait is abandoned regardless of what remains pending.</param>
-    private sealed record Entry(QualityResult Result, HashSet<string> PendingGraderKeys, DateTimeOffset ExpiresAtUtc);
+    private sealed record Entry(
+        QualityResult Result,
+        HashSet<string> PendingGraderKeys,
+        bool LlmGraderWasAvailable,
+        DateTimeOffset ExpiresAtUtc);
 }

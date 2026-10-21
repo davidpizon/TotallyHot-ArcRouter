@@ -63,7 +63,14 @@ public sealed class RouterMemoryScoreObserver : IQualityScoreObserver
         var dimension =
             RouterDimension.ToLiveKey(liveMemoryPrefix: _options.LiveMemoryPrefix, dimension: result.Dimension);
 
-        await _memory.AddScoreAsync(dimension: dimension, model: result.Model, score: score).ConfigureAwait(false);
+        if (result.GradeStatus == GradeStatus.Complete)
+            await _memory.AddScoreAsync(dimension: dimension, model: result.Model, score: score).ConfigureAwait(false);
+        else if (_logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug(
+                message:
+                "Skipping live router-memory observation for correlation {CorrelationId} because grade status is {GradeStatus}.",
+                result.RequestCorrelationId,
+                result.GradeStatus);
 
         if (_logger.IsEnabled(LogLevel.Information))
             _logger.LogInformation(
@@ -89,6 +96,7 @@ public sealed class RouterMemoryScoreObserver : IQualityScoreObserver
                 JudgeScore: result.JudgeScore,
                 UnifiedScore: score,
                 DegradedReason: result.DegradedReason,
+                GradeStatus: result.GradeStatus,
                 TimestampUtc: DateTimeOffset.UtcNow);
 
             await _telemetryPublisher.PublishQualitySignalAsync(signal: signal, cancellationToken: cancellationToken)

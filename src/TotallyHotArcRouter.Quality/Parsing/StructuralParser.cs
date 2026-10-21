@@ -52,8 +52,10 @@ public sealed class StructuralParser : IStructuralParser
             .ToList();
 
         return errors.Count == 0
-            ? SyntaxVerdict.Valid(language: CodeLanguage.CSharp, true)
-            : SyntaxVerdict.Invalid(language: CodeLanguage.CSharp, true, errors: errors);
+            ? SyntaxVerdict.Valid(language: CodeLanguage.CSharp, true,
+                confidence: SyntaxVerdict.AuthoritativeConfidence)
+            : SyntaxVerdict.Invalid(language: CodeLanguage.CSharp, true,
+                confidence: SyntaxVerdict.AuthoritativeConfidence, errors: errors);
     }
 
     /// <summary>
@@ -73,14 +75,16 @@ public sealed class StructuralParser : IStructuralParser
         try
         {
             parser.ParseModule(code);
-            return SyntaxVerdict.Valid(language: CodeLanguage.JavaScript, true);
+            return SyntaxVerdict.Valid(language: CodeLanguage.JavaScript, true,
+                confidence: SyntaxVerdict.AuthoritativeConfidence);
         }
         catch (ParseErrorException moduleError)
         {
             try
             {
                 parser.ParseScript(code);
-                return SyntaxVerdict.Valid(language: CodeLanguage.JavaScript, true);
+                return SyntaxVerdict.Valid(language: CodeLanguage.JavaScript, true,
+                    confidence: SyntaxVerdict.AuthoritativeConfidence);
             }
             catch (ParseErrorException scriptError)
             {
@@ -89,6 +93,7 @@ public sealed class StructuralParser : IStructuralParser
                 return SyntaxVerdict.Invalid(
                     language: CodeLanguage.JavaScript,
                     true,
+                    confidence: SyntaxVerdict.AuthoritativeConfidence,
                     errors: [scriptError.Message, moduleError.Message]);
             }
         }
@@ -101,10 +106,13 @@ public sealed class StructuralParser : IStructuralParser
     private static SyntaxVerdict CheckHeuristic(string code, CodeLanguage language)
     {
         if (string.IsNullOrWhiteSpace(code))
-            return SyntaxVerdict.Invalid(language: language, false, errors: ["Snippet is empty."]);
+            return SyntaxVerdict.Invalid(language: language, false,
+                confidence: SyntaxVerdict.GenericHeuristicConfidence, errors: ["Snippet is empty."]);
 
         return DelimiterBalance.IsBalanced(code: code, error: out var error)
-            ? SyntaxVerdict.Valid(language: language, false)
-            : SyntaxVerdict.Invalid(language: language, false, errors: [error!]);
+            ? SyntaxVerdict.Valid(language: language, false,
+                confidence: SyntaxVerdict.GenericHeuristicConfidence)
+            : SyntaxVerdict.Invalid(language: language, false,
+                confidence: SyntaxVerdict.GenericHeuristicConfidence, errors: [error!]);
     }
 }

@@ -394,15 +394,11 @@ public sealed class RoutingOptions
     /// Gets how <see cref="Router.Orchestrator.MemoryKnnVoter"/>, the <c>logreg</c>/cluster trainers, and
     /// <see cref="Router.Orchestrator.ClusterLedger"/> treat a <see cref="Router.MemoryEntry"/> whose score
     /// came from the G-Eval judge (<see cref="Router.MemoryEntry.IsJudgeScored"/>) rather than from
-    /// <c>QualityScorer</c>'s static signals alone. Defaults to
-    /// <see cref="Models.JudgeRowPolicy.DownWeight"/> - the judge is a real opinion, not ground truth, and
-    /// G-Eval's own analysis shows LLM judges systematically over-score LLM-generated text - so a
-    /// judge-scored row still teaches the router something but counts for less than an execution/heuristic
-    /// row until G2's calibration data says otherwise. This closes docs/router/geval-shadow-scoring-plan.md's
-    /// G3 "still owed" item: the policy was promised in the same phase that promoted the judge to a
-    /// co-grader, and did not land until now.
+    /// execution or heuristic signals alone. Defaults to <see cref="Models.JudgeRowPolicy.Include"/> after
+    /// issue #293: only <see cref="TotallyHot.ArcRouter.Quality.GradeStatus.Complete"/> grades enter live memory, and every
+    /// surviving row is judge-scored question-aware evidence (ADR-0026).
     /// </summary>
-    public JudgeRowPolicy JudgeScoredRowPolicy { get; init; } = JudgeRowPolicy.DownWeight;
+    public JudgeRowPolicy JudgeScoredRowPolicy { get; init; } = JudgeRowPolicy.Include;
 
     /// <summary>
     /// Gets the multiplier applied to a judge-scored row's contribution when

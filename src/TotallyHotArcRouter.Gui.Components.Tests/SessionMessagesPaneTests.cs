@@ -78,6 +78,27 @@ public sealed class SessionMessagesPaneTests
         cut.Markup.Should().Contain("No response captured");
     }
 
+    /// <summary>
+    /// The Sessions response row is where a non-complete grade becomes visible: the chip text is the
+    /// label <see cref="LiveDataStore"/> stores for StructureOnly and Incomplete.
+    /// </summary>
+    [Fact]
+    public void Response_row_shows_structure_only_learning_paused_chip()
+    {
+        using var ctx = NewContext();
+        var turn = MakeConversation().Turns[0] with
+        {
+            QualityGradeLabel = "structure only / learning paused"
+        };
+        var conversation = MakeConversation() with { Turns = [turn] };
+
+        var cut = ctx.Render<SessionMessagesPane>(p => p.Add(c => c.Conversation, conversation));
+
+        cut.FindAll(".ls-msg-response .ls-msg-chip").Select(chip => chip.TextContent)
+            .Should().Contain("structure only / learning paused");
+        cut.Find(".ls-msg-request").TextContent.Should().NotContain("structure only / learning paused");
+    }
+
     [Fact]
     public void Row_click_selects_turn_and_side()
     {

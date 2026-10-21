@@ -38,7 +38,20 @@ public static class QualityServiceCollectionExtensions
 
         services.AddOptions<QualityOptions>()
             .Configure<IConfiguration>((options, configuration) =>
-                configuration.GetSection(QualityOptions.SectionName).Bind(options));
+                configuration.GetSection(QualityOptions.SectionName).Bind(options))
+            .Validate(options =>
+            {
+                try
+                {
+                    options.EnsureDimensionWeightsSumToOne();
+                    return true;
+                }
+                catch (InvalidOperationException)
+                {
+                    return false;
+                }
+            }, failureMessage: "Quality:DimensionWeights (and the default) must each sum to 1.0.")
+            .ValidateOnStart();
 
         services.TryAddSingleton<IStructuralParser, StructuralParser>();
         services.TryAddSingleton<IQualityScorer, QualityScorer>();

@@ -426,11 +426,11 @@ A system that grades itself should be candid about what it doesn't yet measure.
   the weakest link in the static axis.
 - **The judge grades what it grades.** Probability-weighted G-Eval is a real improvement over sampling one
   digit, but it is still one model opinion of another work, with whatever blind spots that implies.
-- **The graders still cannot see the question.** The prompt now travels with the request as far as the
-  grader (and the saved-receipt sweep above supplies it for history too), but nothing *reads* it yet: the
-  parser checks the code, and the judge is handed the answer alone. So a complete, well-formed, entirely
-  correct-looking snippet that answers a **different question** still scores as well as one that answers
-  this one. The plumbing is in place; the graders that use it are not built yet.
+- **Grades now judge against the question (issue #293).** LLM graders read a bounded conversation window
+  (newest user message plus a few earlier text turns) and score against relevance, correctness, and
+  completeness. Only `Complete` grades train the router; structure-only or incomplete grades are kept for
+  the dashboard and audit (`grade_receipts`) but do not move live memory. When the judge is off, the
+  dashboard shows **structure only / learning paused**.
 - **The judge calibration against the static grader is not yet analysed.** Both scores are recorded side
   by side in `judge_shadow_scores` for exactly that purpose. The analysis has not been done.
 

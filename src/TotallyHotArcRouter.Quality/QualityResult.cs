@@ -9,13 +9,12 @@ public sealed record QualityResult
 {
     /// <summary>The schema version of this result's shape, stamped onto telemetry for forward compatibility.</summary>
     /// <remarks>
-    /// Bumped to <c>2.0</c> when execution-derived fields (tier, exit code, timeout/OOM/seccomp flags,
-    /// captured output, wall-clock, peak memory) were removed along with the executing verifier itself.
-    /// A consumer reading <c>1.0</c> rows out of historical telemetry must not expect these fields.
-    /// No C# caller reads it; it exists to be serialized, which the scan cannot see.
+    /// Bumped to <c>3.0</c> with issue #293: <see cref="GradeStatus"/>, fixed weights, and
+    /// <see cref="SyntaxConfidence"/> change what a score means. A consumer reading <c>2.x</c> rows must
+    /// not assume those fields.
     /// </remarks>
     // ReSharper disable once UnusedMember.Global
-    public string SchemaVersion { get; init; } = "2.0";
+    public string SchemaVersion { get; init; } = "3.0";
 
     /// <summary>Correlation id tying this result back to its <c>RoutingTelemetryEvent</c>.</summary>
     public string RequestCorrelationId { get; init; } = string.Empty;
@@ -36,16 +35,33 @@ public sealed record QualityResult
     public bool SyntaxValid { get; init; }
 
     /// <summary>
-    /// Whether <see cref="SyntaxValid"/> came from a real parser for this language rather than the
-    /// delimiter-balance heuristic. Consumers segmenting on signal strength need this: a non-authoritative
-    /// verdict is a cheap guess, not a compiler's answer.
+    /// Whether <see cref="SyntaxValid"/> came from a real parser for this language rather than a heuristic.
     /// </summary>
     public bool SyntaxAuthoritative { get; init; }
 
     /// <summary>
-    /// The composed static-analysis score in [0,1], or <see langword="null"/> when no analyzer could
-    /// contribute a finding for this snippet. Null drops the analysis axis from the score's normalization
-    /// rather than scoring it zero.
+    /// How sure the syntax checker is, in <c>[0, 1]</c>. Below
+    /// <see cref="Grading.GradeStatusCalculator.MinimumSyntaxConfidenceForComplete"/> the grade cannot be
+    /// <see cref="GradeStatus.Complete"/>.
+    /// </summary>
+    public double SyntaxConfidence { get; init; } = 1.0;
+
+    /// <summary>
+    /// Whether a non-empty user/task question was available when this result was graded. Required for
+    /// <see cref="GradeStatus.Complete"/>.
+    /// </summary>
+    public bool QuestionPresent { get; init; }
+
+    /// <summary>
+    /// Whether this grade may train the router. Only <see cref="GradeStatus.Complete"/> does
+    /// (ADR-0026).
+    /// </summary>
+    public GradeStatus GradeStatus { get; init; } = GradeStatus.Incomplete;
+
+    /// <summary>
+    /// The composed static-analysis score in <c>[0, 1]</c>, or <see langword="null"/> when no analyzer could
+    /// contribute. A missing analysis axis with nonzero weight yields <see cref="GradeStatus.Incomplete"/>;
+    /// the scorer still contributes <c>0</c> for that axis rather than renormalizing.
     /// </summary>
     public double? AnalysisScore { get; init; }
 
@@ -53,32 +69,28 @@ public sealed record QualityResult
     public IReadOnlyList<string> AnalysisFindings { get; init; } = [];
 
     /// <summary>
-    /// The G-Eval judge's grade in [0,1], or <see langword="null"/> when the judge was disabled, abstained,
-    /// or did not answer before the join timeout. Null drops the judge axis from the normalization.
+    /// The G-Eval judge's grade in <c>[0, 1]</c>, or <see langword="null"/> when the judge was disabled,
+    /// abstained, or did not answer before the join timeout.
     /// </summary>
     public double? JudgeScore { get; init; }
 
-    /// <summary>The unified score u_i in [0,1] that the router's memory learns from.</summary>
+    /// <summary>
+    /// The unified score <c>u_i</c> in <c>[0, 1]</c>: the fixed-weight sum. Display-only unless
+    /// <see cref="GradeStatus"/> is <see cref="GradeStatus.Complete"/>.
+    /// </summary>
     public double UnifiedScore { get; init; }
 
     /// <summary>Why this result carries less signal than a full grading would, or null when it is complete.</summary>
     public string? DegradedReason { get; init; }
 
     /// <summary>
-    /// Contributions from graders beyond the three built-in axes (<see cref="SyntaxValid"/>,
-    /// <see cref="AnalysisScore"/>, <see cref="JudgeScore"/>), keyed by grader name and empty until a future
-    /// grader (Phase Q3: CodeJudge, ICE-Score, RACE) populates it. <see cref="IQualityScorer"/> adds each
-    /// entry present here to its blend using <see cref="DimensionWeightOptions.ExtraWeights"/>, so a new
-    /// grader is wired in by registering it and adding one configuration entry, not by editing the scorer.
+    /// Contributions from graders beyond the three built-in axes, keyed by grader name.
     /// </summary>
     public IReadOnlyDictionary<string, double> GraderScores { get; init; } =
         new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Per-grader reasons an extra grader (see <see cref="GraderScores"/>) abstained or did not answer,
-    /// keyed by grader name. Distinct from the single <see cref="DegradedReason"/> field, which can only
-    /// ever hold one cause: a request can have its syntax verdict come from a heuristic *and* separately
-    /// have an extra grader time out, and both should be recoverable rather than one overwriting the other.
+    /// Per-grader reasons an extra grader abstained or did not answer, keyed by grader name.
     /// </summary>
     public IReadOnlyDictionary<string, string> GraderDegradedReasons { get; init; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

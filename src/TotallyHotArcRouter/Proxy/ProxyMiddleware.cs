@@ -270,6 +270,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             pendingResponseTextCache: dependencies?.PendingResponseTextCache,
             pendingResponseLengthCache: dependencies?.PendingResponseLengthCache,
             pendingPromptCache: dependencies?.PendingPromptCache,
+            pendingConversationWindowCache: dependencies?.PendingConversationWindowCache,
             transcriptStore: dependencies?.TranscriptStore,
             routingOptionsMonitor: dependencies?.RoutingOptionsMonitor,
             judgeOptionsMonitor: dependencies?.JudgeOptionsMonitor,

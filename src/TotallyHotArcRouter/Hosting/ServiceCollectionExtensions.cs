@@ -118,7 +118,8 @@ public static class ServiceCollectionExtensions
                 // mirroring RouterMemoryScoreObserver above - it is as cheap and depends on no feature
                 // flag, since GraderKeys.Analysis always fires regardless of which (if any) LLM grader
                 // is live.
-                sp.GetRequiredService<GraderScoreRecordObserver>()
+                sp.GetRequiredService<GraderScoreRecordObserver>(),
+                sp.GetRequiredService<GradeReceiptRecordObserver>()
             };
 
             return new CompositeRouterScoreObserver(observers: observers,
@@ -208,6 +209,14 @@ public static class ServiceCollectionExtensions
             maxRows: static o => o.GraderScoreMaxRows,
             retentionDays: static o => o.GraderScoreRetentionDays,
             tableLabel: "Grader-score"));
+        services.AddSingleton<IHostedService>(sp => new ScoreTableRetentionService(
+            logger: sp.GetRequiredService<ILogger<ScoreTableRetentionService>>(),
+            store: sp.GetRequiredService<IGradeReceiptStore>(),
+            options: sp.GetRequiredService<IOptionsMonitor<JudgeOptions>>(),
+            isEnabled: static _ => true,
+            maxRows: static o => o.GraderScoreMaxRows,
+            retentionDays: static o => o.GraderScoreRetentionDays,
+            tableLabel: "Grade-receipt"));
 
         // docs/router/self-organizing-classification-plan.md Phase T4: drains the comparison queue on a
         // timer. Deliberately off the request path - a comparison needs both a verifier score and a

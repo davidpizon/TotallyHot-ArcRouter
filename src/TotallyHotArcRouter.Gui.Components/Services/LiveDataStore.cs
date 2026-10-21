@@ -241,10 +241,24 @@ public sealed class LiveDataStore : IAsyncDisposable
             case Contract.TelemetryEvent.EventOneofCase.LogLine:
                 OnLogLineReceived(MapToDto(telemetryEvent.LogLine));
                 break;
+            case Contract.TelemetryEvent.EventOneofCase.QualitySignal:
+                OnQualitySignalReceived(telemetryEvent.QualitySignal);
+                break;
             case Contract.TelemetryEvent.EventOneofCase.None:
             default:
                 break;
         }
+    }
+
+    /// <summary>Dashboard label for grades that did not train the router (issue #293 phase 6).</summary>
+    internal const string StructureOnlyLearningPausedLabel = "structure only / learning paused";
+
+    /// <summary>Maps a wire quality signal to the dashboard label stored on the matching turn.</summary>
+    private static string? MapQualityGradeLabel(Contract.QualitySignalEvent signal)
+    {
+        if (!signal.HasGradeStatus) return null;
+
+        return signal.GradeStatus is "StructureOnly" or "Incomplete" ? StructureOnlyLearningPausedLabel : null;
     }
 
     /// <summary>
@@ -324,7 +338,7 @@ public sealed class LiveDataStore : IAsyncDisposable
             }
 
             entry.Events.Add(dto);
-            var aggregated = ConversationAggregator.Aggregate(entry.Events)[0];
+            var aggregated = ConversationAggregator.Aggregate(entry.Events, entry.QualityGradeLabelByCorrelation)[0];
             entry.LastTimestampUtc = aggregated.LastTimestampUtc;
             entry.Model = LiveConversationMapper.ToModel(aggregated);
 
@@ -345,6 +359,40 @@ public sealed class LiveDataStore : IAsyncDisposable
         Changed?.Invoke();
     }
 
+    /// <summary>Records one off-path quality signal against its correlation id.</summary>
+    /// <param name="signal">The wire quality signal from the telemetry stream.</param>
+    internal void OnQualitySignalReceived(Contract.QualitySignalEvent signal)
+    {
+        ArgumentNullException.ThrowIfNull(signal);
+        if (string.IsNullOrEmpty(signal.CorrelationId)) return;
+
+        var label = MapQualityGradeLabel(signal);
+        var separator = signal.CorrelationId.LastIndexOf(':');
+        if (separator <= 0) return;
+
+        var sessionId = signal.CorrelationId[..separator];
+        lock (_lock)
+        {
+            if (!_sessions.TryGetValue(key: sessionId, value: out var entry)) return;
+
+            if (label is null)
+                entry.QualityGradeLabelByCorrelation.Remove(signal.CorrelationId);
+            else
+                entry.QualityGradeLabelByCorrelation[signal.CorrelationId] = label;
+
+            if (entry.Events.Count == 0) return;
+
+            entry.Model = LiveConversationMapper.ToModel(
+                ConversationAggregator.Aggregate(entry.Events, entry.QualityGradeLabelByCorrelation)[0]);
+            _conversations = [.. _sessions.Values
+                .OrderByDescending(e => e.LastTimestampUtc)
+                .ThenBy(e => e.FirstSeenOrder)
+                .Select(e => e.Model!)];
+        }
+
+        Changed?.Invoke();
+    }
+
     /// <summary>
     /// One session's retained events plus its cached aggregation, so an arriving event re-aggregates only
     /// the session it belongs to.
@@ -354,6 +402,10 @@ public sealed class LiveDataStore : IAsyncDisposable
     {
         /// <summary>Gets the session's events in arrival order.</summary>
         public List<RoutingTelemetryEventDto> Events { get; } = [];
+
+        /// <summary>Gets quality labels keyed by correlation id for turns in this session.</summary>
+        public Dictionary<string, string> QualityGradeLabelByCorrelation { get; } =
+            new(StringComparer.Ordinal);
 
         /// <summary>Gets or sets the timestamp of the session's most recent turn.</summary>
         public DateTimeOffset LastTimestampUtc { get; set; }
@@ -414,7 +466,8 @@ public sealed class LiveDataStore : IAsyncDisposable
 
                 if (entry.Events.Count == 0) continue;
 
-                entry.Model = LiveConversationMapper.ToModel(ConversationAggregator.Aggregate(entry.Events)[0]);
+                entry.Model = LiveConversationMapper.ToModel(
+                    ConversationAggregator.Aggregate(entry.Events, entry.QualityGradeLabelByCorrelation)[0]);
             }
 
             _conversations = [.. _sessions.Values

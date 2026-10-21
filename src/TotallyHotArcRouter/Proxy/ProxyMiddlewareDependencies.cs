@@ -203,6 +203,13 @@ public sealed record ProxyMiddlewareDependencies
     public PendingPromptCache? PendingPromptCache { get; init; }
 
     /// <summary>
+    /// Optional bridge holding the bounded <see cref="Telemetry.ConversationWindowResult"/> for grade
+    /// receipts and per-grader HMAC columns (issue #293). Populated alongside
+    /// <see cref="PendingPromptCache"/> when any LLM grader is live.
+    /// </summary>
+    public PendingConversationWindowCache? PendingConversationWindowCache { get; init; }
+
+    /// <summary>
     /// Optional opt-in transcript store (docs/router/self-organizing-classification-plan.md Phase
     /// T1a/T1b). When supplied and transcript capture is enabled, one row is inserted per served request
     /// with the prompt/response text, classification, cost, and provenance already in scope at this

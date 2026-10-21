@@ -63,6 +63,7 @@ public class TelemetryBroadcasterTests
             JudgeScore: judgeScore,
             0.87,
             null,
+            GradeStatus: Quality.GradeStatus.Complete,
             TimestampUtc: new DateTimeOffset(2026, 7, 9, 15, 0, 0, offset: TimeSpan.Zero));
     }
 
