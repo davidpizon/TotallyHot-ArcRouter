@@ -74,7 +74,6 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         BenchmarkDatabase benchmarkDatabase,
         BenchmarkDataStatusService benchmarkStatusService,
         TranscriptDatabase transcriptDatabase,
-        ITranscriptStore transcriptStore,
         IOptions<TranscriptOptions> transcriptOptions,
         IHostApplicationLifetime hostLifetime,
         IEmbeddingClient? embeddingClient = null,
@@ -98,7 +97,6 @@ public sealed class StartupHealthCheckHostedService : IHostedService
         ArgumentNullException.ThrowIfNull(benchmarkDatabase);
         ArgumentNullException.ThrowIfNull(benchmarkStatusService);
         ArgumentNullException.ThrowIfNull(transcriptDatabase);
-        ArgumentNullException.ThrowIfNull(transcriptStore);
         ArgumentNullException.ThrowIfNull(transcriptOptions);
         ArgumentNullException.ThrowIfNull(hostLifetime);
 

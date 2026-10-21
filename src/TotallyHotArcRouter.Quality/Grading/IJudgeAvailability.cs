@@ -19,6 +19,14 @@ public interface IJudgeAvailability
     /// write the static score immediately. A <see langword="true"/> that never materializes is safe - the
     /// join times out and writes static-only - but a <see langword="false"/> is final.
     /// </returns>
+    /// <remarks>
+    /// Reported by <c>ParameterOnlyUsedForPreconditionCheck.Global</c>: every implementation either ignores
+    /// <paramref name="result"/> or only rejects null. The parameter stays. It is the per-result seam the
+    /// aggregator passes so an implementation can decide from the graded result; today's host policy is
+    /// process-wide (the judge is enabled and a backbone resolves) and does not read the result. Removing
+    /// the parameter to satisfy the scan would make that per-result decision a breaking change.
+    /// </remarks>
+    // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Global
     bool WillJudge(QualityResult result);
 }
 
