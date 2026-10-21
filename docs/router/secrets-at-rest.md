@@ -158,13 +158,11 @@ best-effort capability scan or dialect detection for a provider whose credential
 store may report the endpoint as unreachable rather than probing it with the real key. This does not
 affect real request routing, which always resolves through the store.
 
-## 6. The management token is deliberately not covered
+## 6. The management token lives in the secret store
 
-`management-token.txt` stays as it is. See
-[`signalr-hub-security.md`](signalr-hub-security.md) for the reasoning: `TotallyHot.ArcRouter.Gui.Admin`
-deliberately does not reference the router project, and folding the token into the shared store would
-mean either duplicating it into `Gui.Admin` or introducing a shared assembly - a bigger change than
-warranted for the one secret in the inventory that is already ACL-restricted.
+The management token lives in `ProtectedSecretStore` (`secrets.dat`). A legacy `management-token.txt` is imported once by `ManagementAccessToken.GetOrCreate` and then not used: the plaintext file is deleted only after the imported value is confirmed in the store. `TotallyHot.ArcRouter.Gui.Admin` still does not reference the router project. The GUI reads and rotates the token through gRPC (`ManagementTokenAdminService`), not by opening `management-token.txt`.
+
+The earlier version of this section said the token was deliberately not covered and that `management-token.txt` stays. That was the pre-P9 rule. §1 is the store-of-record statement and is unchanged.
 
 ## 7. Admin key sourcing and reported usage (Phases 4-6)
 

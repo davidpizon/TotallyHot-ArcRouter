@@ -1,6 +1,8 @@
 # 0004. Surface out-of-credits provider failures on the Providers tab
 
-**Status:** proposed <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
+**Status:** accepted
+
+> **Accepted 2026-10-21 ([#315](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/315)).** `OutOfCreditsClassifier` classifies the provider body. `ProxyMiddleware.ApplyHealthSignal` records `ProviderInteractionKind.OutOfCredits` on a provider-wide out-of-credits verdict and trips the provider circuit, so a later router-chosen candidate can fail over. An explicit selection whose circuit is already open is still not substituted (ADR-0005).
 **Date:** 2026-09-01
 **Deciders:** David Pizon
 
@@ -222,11 +224,12 @@ retried across providers whenever a different-provider candidate exists.
 
 ## More Information
 
-This ADR documents the intended design only; no implementation has landed yet. Open follow-up for
-the implementing PR: confirm the exact per-provider error-body parsing rules (OpenAI's
-`insufficient_quota` error code vs. Anthropic's message-substring match vs. a generic keyword
-fallback for providers with neither) against live provider responses, since the two known providers
-already disagree on both status code and error shape.
+The implementation has landed (`OutOfCreditsClassifier`, `ProxyMiddleware.ApplyHealthSignal`). The
+open follow-up from the original note — confirm the exact per-provider error-body parsing rules
+(OpenAI's `insufficient_quota` error code vs. Anthropic's message-substring match vs. a generic
+keyword fallback for providers with neither) against live provider responses — is unchanged: the two
+known providers already disagree on both status code and error shape. The sentence that no
+implementation had landed described this ADR before #315.
 
 [ADR-0005](0005-protect-explicit-provider-selections-from-silent-substitution-on-any-circuit-trip.md)
 extends this ADR's explicit-selection protection (part 2 above) from "out of credits only" to every

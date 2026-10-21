@@ -117,11 +117,12 @@ The investigation added tests that pin each step. All of them pass today.
 
 ### 4.1 Contract (`telemetry.proto`, additive only)
 
+> **Amendment (2026-10-21, [#315](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/315)).** Fields 6 and 7 are not 2,000-character previews on `ListPersistedSessions`. ADR-0019's session files exist, so ADR-0023's chosen option is E: the list returns lengths and metadata and does not set `PromptText`, `ResponseText`, or the truncation flags. Previews are `GetTurnTexts`. The proto sketch below is the 2026-10-03 proposal; do not read the preview comment as the current contract.
+
 ```proto
 message PersistedTranscript {
-  // ... fields 1-11 unchanged. prompt_text (6) and response_text (7) become previews: at most
-  // TextTruncator.DefaultMaxLength (2,000) UTF-16 code units, plus "…" when cut - the same preview the
-  // live RoutingTelemetryEvent carries.
+  // ... fields 1-11 unchanged. 2026-10-03 proposal, superseded: prompt_text (6) and response_text (7)
+  // were going to become 2,000-character previews. They are not set on the list.
   int64 transcript_id = 12;                 // request_transcripts.id, what #176's GetTurnTexts takes
   optional int32 prompt_text_length = 13;   // stored length in characters (SQLite count); displayed, never compared
   optional int32 response_text_length = 14;

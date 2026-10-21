@@ -270,20 +270,19 @@ defaults for the same underlying data.
 
 > **Revised — this is now a gRPC RPC, not a REST endpoint.** Earlier drafts of this section specified
 > `GET /governance/model-spend` and left the choice open ("whichever of the two mechanisms gets
-> implemented first"). That is settled: the query is
-> [`../router/grpc-migration.md`](../router/grpc-migration.md) §3.2's **`GetModelSpend`** unary RPC,
-> which that doc already describes as "a direct, one-to-one translation" of the endpoint this section
-> used to propose. Both were always blocked on `IUsageLedger`
-> ([`../router/agent-cost-tracking.md`](../router/agent-cost-tracking.md)), which still doesn't exist —
-> what changed is which one gets built when it does. The reasoning below (why *some* request/response
-> mechanism is needed, as opposed to another push) is unchanged and was never the contested part.
+> implemented first"). The query this section proposes is
+> [`../router/grpc-migration.md`](../router/grpc-migration.md) §3.2's **`GetModelSpend`** unary RPC.
+> That RPC is not in `telemetry.proto`. `UsageLedger` exists
+> ([`../router/agent-cost-tracking.md`](../router/agent-cost-tracking.md)); `GetModelSpend` does not.
+> The reasoning below (why *some* request/response mechanism is needed, as opposed to another push)
+> is unchanged and was never the contested part.
 
 The model list (section 2) is a natural **push**: the server has one fixed answer ("here's what's
 configured") and hands it to every connecting client once. Spend-for-a-range is different - it's a
 **parameterized, on-demand query** driven by the user changing the date picker, with no single
-"current" answer to push. So this needs a request/response mechanism, and
-`TelemetryGrpcService` is push-only today (`StreamEvents` is its only RPC - see
-[`telemetry.md`](../router/telemetry.md#transport-grpc)).
+"current" answer to push. So this needs a request/response mechanism.
+`TelemetryService`'s RPCs are `StreamEvents`, `ListPersistedSessions`, and `GetTurnTexts` (see
+[`telemetry.md`](../router/telemetry.md#transport-grpc)). `GetModelSpend` is not one of them.
 
 **Prefer gRPC over REST for internal communication where strict, language-agnostic contracts matter.**
 That applies squarely here, and three things decide it:
@@ -297,11 +296,12 @@ That applies squarely here, and three things decide it:
    preference — [D5](../router/model-price-catalog.md#d5-price-data-must-never-be-exposed-via-a-public-api--licensing)
    forbids price on any HTTP surface on the proxy's port. A REST spend endpoint would leave one card
    assembling from two transports for no reason other than which doc specified which half.
-3. **No new public surface.** A `/governance/*` path on :5001 is another unauthenticated endpoint on the
+3. **No new public surface.** A `/governance/*` path on the HTTPS proxy (port 47101) is another unauthenticated endpoint on the
    proxy's listening port (see Known limitations). The RPC adds no new listener.
 
-**The cost, stated plainly:** `TelemetryGrpcService` gains its first non-streaming method, so it stops
-being purely push-only. This section previously treated that as the reason to prefer HTTP — "a larger
+**The cost, stated plainly:** this proposal would add `GetModelSpend` to `TelemetryService`. That
+service already has `ListPersistedSessions` and `GetTurnTexts` beside `StreamEvents`; it is not
+push-only. This section previously treated a new unary method as the reason to prefer HTTP — "a larger
 change to that service's shape than adding a plain HTTP endpoint alongside it." That was an argument
 about effort, not correctness, and `grpc-migration.md` §3.2 undercuts it by scoping the work as a
 one-to-one translation. Adding a unary RPC to an existing service is a smaller structural change than
@@ -345,7 +345,7 @@ per card.
     change is also the more efficient split — but efficiency is no longer what decides it. **Price data
     must not be served from an HTTP endpoint on the proxy's listening port**, per
     [`../router/model-price-catalog.md`](../router/model-price-catalog.md)'s D5: that is a licensing
-    constraint on redistributing aggregated third-party pricing, and anything reachable on port 5001 is
+    constraint on redistributing aggregated third-party pricing, and anything reachable on the HTTPS proxy port (47101) is
     a public surface regardless of intent. The loopback telemetry push to this GUI is the user reading
     their own catalog and is fine. What was an open efficiency question is therefore now closed on
     other grounds: **push, never a second HTTP call.**
@@ -380,7 +380,7 @@ per card.
   eventual protection as the telemetry stream it shares a service with, not a separate bespoke scheme —
   which is one more argument for it living there rather than on its own transport.
 - **Moving spend to gRPC removed a licensing forcing-function; the split is now a design choice.**
-  While spend was a `:5001` HTTP endpoint, [D5](../router/model-price-catalog.md#d5-price-data-must-never-be-exposed-via-a-public-api--licensing)
+  While spend was an HTTP endpoint on the proxy port, [D5](../router/model-price-catalog.md#d5-price-data-must-never-be-exposed-via-a-public-api--licensing)
   made "spend only, never price" a **hard rule** — anything on the proxy's listening port is a public
   surface. The RPC is on the local telemetry channel, which D5's table explicitly permits for price
   ("loopback, same machine, same OS user — the user reading their own catalog"). So price on this RPC
@@ -392,10 +392,10 @@ per card.
   inheriting a constraint that no longer applies.
 - **This is the first client-initiated, on-demand query in the GUI.** Every other GUI data source
   today is push-only over the telemetry gRPC stream (`Changed`, `LogLinesChanged`, and now
-  `ModelListChanged`), and `TelemetryGrpcService` has only ever had the one server-streaming RPC. The
+  `ModelListChanged`). `TelemetryService` also has `ListPersistedSessions` and `GetTurnTexts`. The
   spend query's request/response-on-user-interaction shape is a genuinely different integration pattern
-  from the rest of the app, not just "one more stream event" — this is the real cost of the gRPC
-  decision in section 4.2, and it is a change to that service's shape, not merely an addition to it.
+  from the push stream. `GetModelSpend` is still only a proposal; it is not a fourth `TelemetryService`
+  RPC.
 - **No budget cap at the model level.** Explicitly out of scope per section 1 - if wanted later, it's
   a distinct follow-on design, not an extension bolted onto this doc.
 

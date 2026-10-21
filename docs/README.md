@@ -77,7 +77,7 @@ paths so existing links resolve.
 |---|---|---|
 | [`router/coderouterbench-sqlite-migration-plan.md`](router/coderouterbench-sqlite-migration-plan.md) | Benchmark corpus sync into SQLite, checksums, row counts | Shipped (all six phases) |
 | [`router/regret-evaluation-harness-plan.md`](router/regret-evaluation-harness-plan.md) | PLAN.md Phase N: `CumReg`/`AvgPerf`/`TotTok`/`$Total`/`Perf/$`, replay engine, comparison baselines, Orchestrator arm | N1–N6 shipped (N5 exit criterion measured, not met); Q5 evidence-blocked |
-| [`router/geval-shadow-scoring-plan.md`](router/geval-shadow-scoring-plan.md) | G-Eval shadow judge, then judge-as-verifier for non-executable dimensions | G1–G3 shipped |
+| [`router/geval-shadow-scoring-plan.md`](router/geval-shadow-scoring-plan.md) | G-Eval shadow judge, then judge-as-verifier for non-executable dimensions | G1–G2 shipped. G3 is not in the tree: `EmbeddingMemoryScoreObserver` stamps `is_judge_scored` true for every `GradeStatus.Complete` row and does not use `JudgeScore.HasValue` |
 | [`router/grader-reliability-plan.md`](router/grader-reliability-plan.md) | Q4 inter-grader agreement CLI (`--run-grader-reliability-report`) | Shipped, CLI only; gRPC/GUI deferred |
 | [`router/quality-verifier-architecture.md`](router/quality-verifier-architecture.md) | The Verifier: static analysis + G-Eval judge scoring (no code execution) | Implemented |
 
@@ -113,13 +113,14 @@ paths so existing links resolve.
 | [`router/secrets-at-rest.md`](router/secrets-at-rest.md) | The protected secret store as built | Reference (as-built) |
 | [`archive/router/secrets-at-rest-plan.md`](archive/router/secrets-at-rest-plan.md) | Generic protected store plan | Archived — see secrets-at-rest.md |
 | [`router/security-hardening-plan.md`](router/security-hardening-plan.md) | Threat model and prioritized remediation findings | Action list — per-finding status unverified |
-| [`router/serilog-logging-guide.md`](router/serilog-logging-guide.md) | Config-driven Serilog setup and sink options | Partially implemented — Console sink only |
+| [`router/serilog-logging-guide.md`](router/serilog-logging-guide.md) | Serilog sinks and the proposed EventLog target | Console, rolling file, Console-tab sink, and body sink attached in code; EventLog proposed |
 | [`router/system-proxy-architecture.md`](router/system-proxy-architecture.md) | OS-level proxy registration and upstream chaining | Proposed — not implemented |
 | [`router/proxy-coexistence.md`](router/proxy-coexistence.md) | Detecting, backing up, and restoring existing proxy settings | Proposed — not implemented |
 | [`router/packaging-and-distribution.md`](router/packaging-and-distribution.md) | MSI, tarballs, GHCR, tagged releases | Implemented |
 | [`router/version-compatibility.md`](router/version-compatibility.md) | Router ↔ tray ↔ WASM lockstep versioning | Implemented |
 | [`router/client-tls-setup.md`](router/client-tls-setup.md) | Trusting the router local CA in browsers | Reference |
 | [`router/code-smell-refactoring-plan.md`](router/code-smell-refactoring-plan.md) | Mechanical extracts; closes on golden-path smoke | In progress (smoke outstanding) |
+| [`router/codebase-health-survey-2026-09-28.md`](router/codebase-health-survey-2026-09-28.md) | Point-in-time survey, 2026-09-28, with its own implementation-status table. Source of the HS items. Not a living spec and not a stub | Point-in-time (2026-09-28) |
 | [`router/admin-slice-consolidation-plan.md`](router/admin-slice-consolidation-plan.md) | Shared admin seams; closes on golden-path smoke | Implementation shipped; smoke outstanding |
 | [`router/counterfactual-token-estimation-plan.md`](router/counterfactual-token-estimation-plan.md) | Per-request ROI baseline token estimate | Phases 0–3 shipped; 4–6 open |
 

@@ -45,10 +45,10 @@ decision changes, write a new ADR and set the old one's status to `superseded by
 | # | Title | Status |
 |---|-------|--------|
 | [0001](0001-git-blob-sha1-checksums-for-coderouterbench-sync.md) | Use git blob SHA-1, not MD5, to verify synced CodeRouterBench files | accepted |
-| [0002](0002-store-probed-model-context-windows-in-their-own-table.md) | Store probed model context windows in their own table | proposed |
+| [0002](0002-store-probed-model-context-windows-in-their-own-table.md) | Store probed model context windows in their own table | accepted |
 | [0003](0003-declare-tool-support-for-emulated-and-unclassified-models.md) | Declare tool support for emulated and unclassified models | proposed |
-| [0004](0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md) | Surface out-of-credits provider failures on the Providers tab | proposed |
-| [0005](0005-protect-explicit-provider-selections-from-silent-substitution-on-any-circuit-trip.md) | Protect explicit provider selections from silent substitution on any circuit trip | proposed |
+| [0004](0004-surface-out-of-credits-provider-failures-on-the-providers-tab.md) | Surface out-of-credits provider failures on the Providers tab | accepted |
+| [0005](0005-protect-explicit-provider-selections-from-silent-substitution-on-any-circuit-trip.md) | Protect explicit provider selections from silent substitution on any circuit trip | accepted |
 | [0006](0006-split-managementfacade-along-crud-aggregate-boundaries.md) | Split ManagementFacade along CRUD-aggregate boundaries, not its public surface | accepted |
 | [0007](0007-provider-admin-client-stays-on-http.md) | ProviderAdminClient stays on HTTP; document the split instead of migrating it | superseded by ADR-0011 |
 | [0008](0008-codegraph-serena-dual-engine-code-smell-pipeline.md) | Adopt CodeGraph + Serena as the standing dual-engine code-smell pipeline | accepted; [Amendment 2](0008-codegraph-serena-dual-engine-code-smell-pipeline.md#amendment-2-2026-10-07-scheduled-audits-that-do-not-churn) allows scheduled audits that only file issues |
@@ -58,15 +58,15 @@ decision changes, write a new ADR and set the old one's status to `superseded by
 | [0012](0012-loopback-session-auth-and-token-in-secret-store.md) | Loopback session-cookie auth for the web GUI; management token moves into the encrypted secret store | accepted |
 | [0013](0013-name-constrained-local-ca-for-router-tls.md) | Router-generated, name-constrained local CA for trusted HTTPS on every listener | accepted |
 | [0014](0014-cross-platform-service-layout-and-secret-backend.md) | Cross-platform data paths, machine-wide service layout, and a non-Windows secret backend | accepted |
-| [0015](0015-machine-scoped-protection-for-the-shared-secret-store.md) | Machine-scoped protection and an administrator-only ACL for the shared secret store | accepted |
-| [0016](0016-remove-authheadername-and-mark-secrets-per-header.md) | Remove `AuthHeaderName`; mark secret headers per header and strip every configured header name | proposed |
+| [0015](0015-machine-scoped-protection-for-the-shared-secret-store.md) | Machine-scoped protection and an administrator-only ACL for the shared secret store | superseded by [ADR-0024](0024-protect-the-machine-shared-data-directory-and-make-deletion-final.md) |
+| [0016](0016-remove-authheadername-and-mark-secrets-per-header.md) | Remove `AuthHeaderName`; mark secret headers per header and strip every configured header name | accepted |
 | [0017](0017-pin-auto-routed-requests-only-when-they-carry-backend-specific-features.md) | Constrain auto-routed requests by per-model capability and conversation affinity | proposed |
 | [0018](0018-persist-request-telemetry-off-the-request-path-via-a-bounded-channel.md) | Persist request telemetry off the request path via a bounded channel | accepted |
 | [0019](0019-store-conversation-text-in-encrypted-per-session-files.md) | Store conversation text in encrypted per-session files, with SQLite as a text-free index | accepted |
 | [0020](0020-require-passkey-verification-for-conversation-content.md) | Require passkey user verification before conversation content leaves the router | accepted; [Amendment 1](0020-require-passkey-verification-for-conversation-content.md#amendment-1-2026-10-10-the-cli-hands-export-approval-off-to-the-dashboard) has the export CLI hand its approval off to the dashboard on every platform; [Amendment 2](0020-require-passkey-verification-for-conversation-content.md#amendment-2-2026-10-11-the-import-is-approved-against-a-staged-copy-of-the-zip) approves an import against a router-made staged copy of the zip |
 | [0021](0021-carry-the-subagent-routing-signal-on-the-telemetry-wire-as-an-optional-field.md) | Carry the subagent routing signal on the telemetry wire as an optional field | accepted |
 | [0022](0022-route-harness-subagent-and-helper-traffic-by-kind.md) | Route harness subagent and helper traffic by kind | accepted |
-| [0023](0023-send-display-previews-under-a-byte-budget-on-the-persisted-session-list.md) | Send display previews under a byte budget on the persisted-session list | accepted |
-| [0024](0024-protect-the-machine-shared-data-directory-and-make-deletion-final.md) | Protect the machine-shared data directory with one inherited DACL, and make deletion final | proposed |
-| [0025](0025-serve-persisted-turn-details-and-a-session-aggregate-on-a-metadata-only-rpc.md) | Serve persisted turn details and a session aggregate on a metadata-only RPC | accepted; [Amendment 1](0025-serve-persisted-turn-details-and-a-session-aggregate-on-a-metadata-only-rpc.md#amendment-1-2026-10-13-record-whether-a-reply-carried-tool-calls) (accepted) records tool calls on the transcript row |
+| [0023](0023-send-display-previews-under-a-byte-budget-on-the-persisted-session-list.md) | Send display previews under a byte budget on the persisted-session list | accepted; amended 2026-10-21 ([#315](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/315)): the list is metadata-only (option E) |
+| [0024](0024-protect-the-machine-shared-data-directory-and-make-deletion-final.md) | Protect the machine-shared data directory with one inherited DACL, and make deletion final | accepted |
+| [0025](0025-serve-persisted-turn-details-and-a-session-aggregate-on-a-metadata-only-rpc.md) | Serve persisted turn details and a session aggregate on a metadata-only RPC | accepted, not yet in the tree ([#176](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/176) phase 2); [Amendment 1](0025-serve-persisted-turn-details-and-a-session-aggregate-on-a-metadata-only-rpc.md#amendment-1-2026-10-13-record-whether-a-reply-carried-tool-calls) (accepted) records tool calls on the transcript row, not on a `SessionTurnDetail` wire message |
 | [0026](0026-grade-a-response-only-against-its-question-and-learn-only-from-complete-grades.md) | Grade a response against its question, and learn only from complete grades | proposed |

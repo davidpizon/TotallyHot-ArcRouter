@@ -288,9 +288,10 @@ repo queries a provider's own billing API for real, provider-reported spend. Wha
 is aggregate, not per-request: per-provider monthly spend rows (`provider_spend`, backing the
 Governance budget bars — see [`anthropic-reported-usage-plan.md`](anthropic-reported-usage-plan.md)),
 the append-only `spend_log.jsonl` (written by `SpendTracker`, read by nothing), and per-provider
-rate-limit header snapshots/history. A **per-request** usage ledger still doesn't exist — each
-`RoutingTelemetryEvent` is broadcast once and gone when no dashboard is listening. See
-[`agent-cost-tracking.md`](agent-cost-tracking.md) for the original ledger/reconciliation design and
+rate-limit header snapshots/history. The per-request usage ledger is on the request path:
+`UsageLedger` (`src/TotallyHotArcRouter/Telemetry/`) records each served request, and
+`CostReconciliationAdminService` exposes `GetCostReconciliationStatus` and `RunCostReconciliationNow`.
+See [`agent-cost-tracking.md`](agent-cost-tracking.md) for the original ledger/reconciliation design and
 [`token-tracking-improvements.md`](token-tracking-improvements.md) §5.2/§5.8 (executed by
 [`token-tracking-implementation-plan.md`](token-tracking-implementation-plan.md)) for the adopted,
 current version of it.
@@ -332,28 +333,41 @@ both numbers can say so. Summing them at the source would make that unrecoverabl
 > and `ModelListEvent` stream case were **not** part of what shipped - see its status banner. Everything
 > in this section describes what's actually implemented today.
 
-`ProxyServer` adds a second Kestrel listener, on a **separate, dedicated port**
-(`ProxyServer.DefaultGrpcPort`, 5002) from the LLM-forwarding proxy's port (5001) - not a second
-protocol sharing the same port. `app.UseRouting()` + `app.UseEndpoints(e => e.MapGrpcService<TelemetryGrpcService>())`
-is registered via `services.AddGrpc()` on the **inner** Kestrel host's DI container (not the outer
-application container `ProxyMiddleware` is constructed in — these are deliberately separate; see the
-code comment on `ProxyHostedService` warning about a prior unbounded-recursion bug), same pipeline
-shared across both ports. `TelemetryGrpcService.StreamEvents` (the sole RPC on `TelemetryService`,
-defined in `src/Protos/telemetry.proto`) is push-only in effect - the client sends an empty
-`StreamEventsRequest` and then only ever receives - though unlike a SignalR hub it's technically a
-server-streaming RPC the client calls once, not a persistent hub connection with named methods.
+LLM forwarding is HTTPS on `ProxyListenerOptions.Port` (default **47101**). `ProxyServer` calls
+`UseHttps` on that listener. There is no `DefaultGrpcPort`. Telemetry and admin gRPC are mapped on the
+web listener, also `UseHttps`, on `WebInterfaceOptions.Port` (default **47104**). The dashboard and
+gRPC share that port. `TelemetryChannelFactory.DefaultServerAddress` is `https://localhost:47104`.
+TLS is the router listener's HTTPS (the local CA), not a private h2c port and not a certificate bound
+only to a dedicated gRPC port. `LegacyStorageMigration` still knows the old `telemetry-cert.pfx` file
+name; that file is not the listener.
 
-**Transport is TLS (HTTPS/2 via ALPN), not unencrypted h2c.** An earlier version of this shipped as
-unencrypted HTTP/2 (h2c) on the *same* port as the proxy, per the original design in
-[`grpc-migration.md`](grpc-migration.md); that had to be reverted after real-world use found it
-unreliable - on at least one managed/corporate Windows machine, every connection attempt failed with
-the HTTP/2-level `HTTP_1_1_REQUIRED` error, consistent with something on the network path (VPN
-client, endpoint security agent, TLS-inspecting proxy) not understanding or mangling the h2c
-connection preface, even on loopback. `Telemetry/TelemetryTlsCertificate.cs` generates and persists a
-self-signed certificate (`%LOCALAPPDATA%\TotallyHotArcRouter\telemetry-cert.pfx`, random per-installation
-password stored alongside it) bound to the dedicated gRPC port via Kestrel's `UseHttps(certificate)`;
-the client trusts it by subject name (`CN=localhost`) rather than a blanket accept-all or a pinned
-thumbprint - see [`grpc-migration.md`](grpc-migration.md)'s section 2 for the full story.
+`TelemetryService` (`src/Protos/telemetry.proto`, implemented by `TelemetryGrpcService`) has exactly
+three RPCs: `StreamEvents`, `ListPersistedSessions`, and `GetTurnTexts`. That is the whole of
+`TelemetryService`. It is not the whole listener. `StreamEvents` is push-only in effect — the client
+sends an empty `StreamEventsRequest` and then only receives — though unlike a SignalR hub it is a
+server-streaming RPC the client calls once.
+
+The same web listener also maps the other services in `src/Protos/telemetry.proto`, from `ProxyServer`
+and `ProxyServerDependencies`: `PriceSourceAdminService`, `BenchmarkDataAdminService`,
+`LlmRouterModelAdminService`, `RoutingModeAdminService`, `RoutingGateAdminService`,
+`ManagementTokenAdminService`, `PasskeyAdminService`, `RouterSettingsAdminService`,
+`ClusterModelAdminService`, `RouterModelAdminService` (implemented by `LogRegModelAdminGrpcService`),
+`RegretHarnessAdminService`, `JudgeCalibrationAdminService`, `UpdateAdminService`,
+`CostReconciliationAdminService`, and `ConversationAdminService` (implemented by
+`Sessions.Export.ConversationAdminGrpcService`). It also maps `src/Protos/admin.proto`:
+`ProviderAdminService` (`ProviderAdminGrpcService`) and `UsageAdminService`
+(`UsageAdminGrpcService`). gRPC is registered on the inner Kestrel host's DI container (not the outer
+application container `ProxyMiddleware` is constructed in — these are deliberately separate; see the
+code comment on `ProxyHostedService` warning about a prior unbounded-recursion bug).
+
+An earlier version of this shipped as unencrypted HTTP/2 (h2c) on the same port as the proxy, per the
+original design in [`grpc-migration.md`](grpc-migration.md); that had to be reverted after real-world
+use found it unreliable — on at least one managed/corporate Windows machine, every connection attempt
+failed with the HTTP/2-level `HTTP_1_1_REQUIRED` error, consistent with something on the network path
+(VPN client, endpoint security agent, TLS-inspecting proxy) not understanding or mangling the h2c
+connection preface, even on loopback. See [`grpc-migration.md`](grpc-migration.md)'s section 2 for
+that history. The client trusts the router's local CA rather than a blanket accept-all or a pinned
+thumbprint.
 
 **Security note:** authentication is enforced — every call carries the `ManagementAccessToken` as
 per-call metadata, checked server-side by `TelemetryAuthInterceptor` and attached client-side by
@@ -413,12 +427,13 @@ machine. Every capability the GUI has goes through the proxy - today that's the
 services on the same origin); any future GUI-facing surface must be served *by the proxy*, not bypass
 it. This keeps the proxy as the
 single point that holds credentials, talks to providers, and owns persistence, and the GUI as a thin,
-credential-free client of it. Proposed features that add new GUI-facing surfaces -
-[`agent-cost-tracking.md`](agent-cost-tracking.md) (SQLite ledger + provider reconciliation) and
-[`../gui/governance-model-cards.md`](../gui/governance-model-cards.md) (model pricing/spend cards) -
-both call this out explicitly at the point they introduce a new surface, precisely because it would be
-easy to accidentally design around the proxy instead of through it (e.g. having the GUI open the
-ledger's `.db` file directly, since it's "just a file on the same machine").
+credential-free client of it. The SQLite usage ledger (`UsageLedger`) and provider reconciliation
+(`CostReconciliationService`, reached from the GUI through `CostReconciliationAdminService`) are
+served by the proxy; they are not a proposed GUI-side file open. A design that still adds a new
+GUI-facing surface — [`../gui/governance-model-cards.md`](../gui/governance-model-cards.md)'s model
+pricing/spend cards, including a `GetModelSpend` RPC that is not in `telemetry.proto` — still has to
+go through the proxy, precisely because it would be easy to design around it instead (for example
+having the GUI open the ledger's `.db` file directly, since it's "just a file on the same machine").
 
 `TotallyHot.ArcRouter.Gui.Telemetry.ConversationAggregator.Aggregate` (pure, unit-tested) groups a flat
 list of `RoutingTelemetryEventDto`s into `LiveConversation`/`LiveConversationTurn` records by

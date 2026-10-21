@@ -10,8 +10,13 @@
 > See `docs/router/quality-verifier-architecture.md` for the current component list.
 
 Status: **G1 shipped** (shadow judge observer, ephemeral response-text cache, `judge_shadow_scores` side
-table, `is_judge_scored` provenance columns). **G2 proposed**, gated on accumulated shadow data. **G3 shipped**
-(judge-row provenance and configurable learning-layer policy — see Phase G3 below).
+table, `is_judge_scored` provenance columns). **G2 shipped** (`QualityScorer` folds `result.JudgeScore`
+into the weighted total; judge calibration is the Governance surface `JudgeCalibrationAdmin` plus the
+CLI/report path). **G3 is not in the tree.** `EmbeddingMemoryScoreObserver` stamps `is_judge_scored`
+true for every `GradeStatus.Complete` row and does not use `JudgeScore.HasValue`.
+`TranscriptScoreObserver` still passes `JudgeScore.HasValue`. The blend, the row-weight policy, and
+the superseded non-executable-only scope are in the Phase G3 section; the provenance flag on the
+embedding-memory path is the missing piece (checked 2026-10-21, #315).
 **Ordering** (per `src/PLAN.md`'s "Remaining work, in order"): G1 lands after the
 `self-organizing-classification-plan.md` T phases and *before* PLAN.md Phase N — the shadow table costs
 nothing on the hot path and G2's gate needs volume, so agreement data accumulates passively while the
@@ -180,8 +185,8 @@ late that they can't.
 | Phase | Deliverable | Depends on | Status |
 |---|---|---|---|
 | G1 | Shadow judge observer, `PendingResponseTextCache`, `judge_shadow_scores` side table, `is_judge_scored` columns (always 0) | none (T1 optional) | **Shipped** |
-| G2 | Agreement/calibration analysis surface over the shadow table; go/no-go criteria for G3 | G1 + accumulated shadow data | **Shipped** (as a standing check, not a gate — G3 already shipped) |
-| G3 | Judge as scorer of record for non-executable dimensions; first `is_judge_scored = 1` rows | G2 gate passed | Proposed |
+| G2 | Agreement/calibration analysis surface over the shadow table; go/no-go criteria for G3 | G1 + accumulated shadow data | **Shipped** (as a standing check, not a gate) |
+| G3 | Judge as scorer of record for non-executable dimensions; first `is_judge_scored = 1` rows | G2 gate passed | **Not in the tree.** `EmbeddingMemoryScoreObserver` stamps `is_judge_scored` true for every `GradeStatus.Complete` row and does not use `JudgeScore.HasValue` |
 
 ---
 
@@ -333,8 +338,8 @@ meaningless correlation. `used_logprobs` deserves the same treatment: rows score
 single-sample fallback carry exactly the quantization noise probability weighting exists to remove, so
 they are not comparable with logprob-weighted rows.
 
-> **Status: shipped, 2026-09-10 — as a standing regression check rather than a gate.** G3 shipped before
-> this phase did, so there is nothing left to gate; what remains worth having is a repeatable answer to
+> **Status: shipped, 2026-09-10 — as a standing regression check rather than a gate.** The original G3
+> gate is moot (Phase G3 is superseded, and G3 is not in the tree — see the header). What remains worth having is a repeatable answer to
 > "is the already-promoted judge still saying anything, and is it playing favourites?" Delivered as a full
 > vertical slice: `IJudgeCalibrationAnalyzer`/`JudgeCalibrationAnalyzer` over a new
 > `IJudgeShadowScoreStore.GetAllAsync` bulk read, `JudgeCalibrationReportFormatter` (one Markdown
@@ -435,17 +440,19 @@ the judge cleanly reverts non-executable dimensions to today's Tier-0 behavior.
 Shipped: the judge contributes to `u_i` on every graded request, blended with the static score rather than
 replacing it, with exactly-once write semantics and graceful static-only degradation.
 
-**Both items below shipped** (previously tracked here as outstanding):
+The learning-layer policy below shipped. The provenance bullet did not survive issue #293 on the
+embedding-memory path (amended 2026-10-21, #315). G3 is not in the tree for that reason. The header
+and the phase table say the same thing.
 
-- ~~**`is_judge_scored` provenance is not being set on blended rows.**~~ **Shipped.** Defined as "the judge
-  contributed at all": `EmbeddingMemoryScoreObserver.ObserveAsync` now stamps
-  `MemoryEntry.IsJudgeScored`/`memory_entries.is_judge_scored` from `QualityResult.JudgeScore.HasValue` —
-  `true` only when a judge grade actually reached the blend, not merely when one was requested or pending
-  (a held result that times out or whose judge abstains writes static-only and is correctly `false`). The
-  narrower of the two definitions this section originally posed ("contributed at all" vs. "contributed more
-  than X of the weight") was chosen because the blend weight itself is a `QualityOptions`/
-  `DimensionWeightOptions` configuration detail that changes independently of provenance — a boolean tied to
-  a specific weight threshold would silently mean something different after any weight retune.
+- **`is_judge_scored` on blended rows.** `TranscriptScoreObserver` still passes
+  `QualityResult.JudgeScore.HasValue`. `EmbeddingMemoryScoreObserver.ObserveAsync` does not. After
+  issue #293 it writes `isJudgeScored: true` for every row that reaches memory, which is only a
+  `GradeStatus.Complete` grade (see the paragraph below). A Complete grade with no `JudgeScore` is
+  still stamped true on that path. The class comment still describes the `HasValue` rule; the call
+  does not. The narrower of the two definitions this section originally posed ("contributed at all"
+  vs. "contributed more than X of the weight") was the `HasValue` rule, because the blend weight
+  itself is a `QualityOptions`/`DimensionWeightOptions` configuration detail that changes
+  independently of provenance.
 - ~~**The learning-layer policy was never implemented.**~~ **Shipped.** A new `JudgeRowPolicy` enum
   (`Include`/`Exclude`/`DownWeight`) and `RoutingOptions.JudgeScoredRowPolicy`/`JudgeScoredRowWeight`
   (default **`Include`** since issue #293 / ADR-0026; `DownWeight` at `0.5` remains a knob) are applied

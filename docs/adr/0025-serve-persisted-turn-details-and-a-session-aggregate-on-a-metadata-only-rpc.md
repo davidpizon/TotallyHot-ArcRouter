@@ -1,6 +1,9 @@
 # 0025. Serve persisted turn details and a session aggregate on a metadata-only RPC
 
 **Status:** accepted (accepted by David Pizon on 2026-10-13)
+
+> **Not yet in the tree (2026-10-21, [#315](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/315)).** `GetSessionTurnDetails`, `GetSessionTurnDetailsRequest`, `GetSessionTurnDetailsResponse`, and `SessionTurnDetail` are not in `src/Protos/telemetry.proto` yet. [#176](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/176) phase 2 builds them. Amendment 1 stays accepted: `request_transcripts.has_tool_calls` is written by the transcript store. That is a transcript-row fact, not a claim that a wire message named `SessionTurnDetail` exists.
+
 **Date:** 2026-10-13
 **Deciders:** David Pizon
 

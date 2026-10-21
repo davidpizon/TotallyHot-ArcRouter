@@ -175,7 +175,7 @@ Source: [gateway compatibility guide](https://code.claude.com/docs/en/llm-gatewa
 
 All **[Code]**, checked 2026-10-02 on `feature/163-subagent-aware-routing`.
 
-- `RoutingCandidateBuilder.GetEligibleRoutes` (`src/TotallyHotArcRouter/Proxy/RoutingCandidateBuilder.cs:226`) filters
+- `RoutingCandidateBuilder.GetEligibleRoutes` (`src/TotallyHotArcRouter/Proxy/RoutingCandidateBuilder.cs:274`) filters
   only on circuit state and operator stop/disable. Its two production callers are `RankEligibleModels` (failover) and
   `RequestInterceptor.BuildRoutingCandidates` (the policy's menu).
 - `AnthropicPayloadTranslator.ShouldTranslate` skips `/v1/messages`, so a native Messages body reaches the `anthropic`

@@ -5,10 +5,16 @@ A prioritized, multi-phase remediation plan for the TotallyHot Arc Router threat
 **Status:** Proposed, with a stale blanket claim now qualified. This plan was written as a pure
 action list, and its original wording — "no code has been changed" — is **no longer true as a blanket
 statement**: [`mcp-endpoint-plan.md`](mcp-endpoint-plan.md) subsequently shipped and overlaps this
-plan's management-authentication surface. Concretely, `Proxy/Management/ManagementAccessToken.cs` now
-backs an `X-Admin-Token` header that `ProviderAdminEndpoints` and `UsageAdminEndpoints` require on every
-`/admin/*` request, and the MCP endpoint enforces the same token through `McpBearerAuthMiddleware` over
-TLS — which is the subject matter of **T-02** and **T-04** below.
+plan's management-authentication surface. Concretely, `ManagementAccessToken` is the shared management
+token. Admin operations are gRPC on the web listener (`ProviderAdminGrpcService`,
+`UsageAdminGrpcService`, and the other services `ProxyServer` and `ProxyServerDependencies` map).
+There is no `ProviderAdminEndpoints` or `UsageAdminEndpoints` type, and no REST `/admin/*` route. The
+MCP endpoint enforces the same token through `McpBearerAuthMiddleware` over TLS — which is the subject
+matter of **T-02** and **T-04** below.
+
+**Listener map corrected 2026-10-21 (#315).** §1.1 below is the current posture. Findings after §1
+that name REST `/admin/*`, port 5001, `telemetry-cert.pfx` as the live certificate, or
+`ProviderAdminEndpoints` describe the pre-gRPC surface; they are not the listener map.
 
 **The per-finding statuses in this document have not been re-audited against that work.** Nothing here
 should be read as either confirmed-open or confirmed-fixed until someone walks each finding against the
@@ -31,13 +37,13 @@ description of it — where the two disagree, that disagreement is itself record
 
 ### 1.1 Deployment posture
 
-Every listener binds loopback only:
+Defaults are loopback. `BindAddress` on the proxy, web, and MCP options can widen those three listeners. The opt-in plain-HTTP listener cannot.
 
 | Listener | Bind | Transport | Source |
 |---|---|---|---|
-| Proxy `/v1/*` + `/admin/*` | `ListenLocalhost` / `IPAddress.Loopback` | Plain HTTP/1.1 | [`ProxyServer.cs:176-187`](../../src/TotallyHotArcRouter/Proxy/ProxyServer.cs) |
-| Telemetry + price-source gRPC | `ListenLocalhost` / `IPAddress.Loopback` | TLS + HTTP/2 (ALPN) | [`ProxyServer.cs:198-213`](../../src/TotallyHotArcRouter/Proxy/ProxyServer.cs) |
-| MCP endpoint (:5003) | `ListenLocalhost` / `IPAddress.Loopback` | TLS | [`McpServer.cs:85-93`](../../src/TotallyHotArcRouter/Mcp/McpServer.cs) |
+| LLM proxy (`/v1/*`) | `ProxyListenerOptions.BindAddress`, default `loopback` | HTTPS. `ProxyServer` calls `UseHttps`. Default port `ProxyListenerOptions.Port` **47101**. REST `/admin/*` is not registered. Opt-in plain HTTP is `PlainHttpListenerOptions` port **47105**, off by default, always loopback. | `ProxyServer`, `ProxyListenerOptions` |
+| Web dashboard and management gRPC | `WebInterfaceOptions.BindAddress`, default `loopback` | HTTPS (`UseHttps`). Default port `WebInterfaceOptions.Port` **47104**. The dashboard and gRPC share that port. Admin operations are gRPC: `ProviderAdminGrpcService` (`RefreshFromEndpoint`, `ListProviders`, `SetSecret`, `SetProviderBudget`, and the other `ProviderAdminService` RPCs) and `UsageAdminGrpcService`, plus the `telemetry.proto` services mapped from `ProxyServer` and `ProxyServerDependencies`. There is no `ProviderAdminEndpoints` or `UsageAdminEndpoints` type. TLS is the router local CA. | `ProxyServer`, `WebInterfaceOptions` |
+| MCP | `McpOptions.BindAddress`, default `loopback` | HTTPS. Default port `McpOptions.Port` **47103**, the same value as `appsettings.json` `Mcp:Port` and `McpServer`'s constructor default. | `McpServer`, `McpOptions` |
 
 The governing assumption for this plan, per the scoping decision that produced it: **loopback-only
 today, but "someone binds this to `0.0.0.0`, puts it behind a tunnel, or runs it on a shared host"
@@ -59,7 +65,7 @@ flowchart TB
 
     subgraph ROUTER["Router process — holds every provider credential"]
         V1["/v1/* inference path<br/>NO AUTHENTICATION"]
-        ADMIN["/admin/* REST<br/>X-Admin-Token"]
+        ADMIN["gRPC admin services<br/>management token"]
         GRPC["gRPC telemetry<br/>x-admin-token + TLS"]
         MCP["MCP tools<br/>Bearer + TLS"]
         FWD["ProxyMiddleware<br/>credential injection + forwarding"]
@@ -73,9 +79,9 @@ flowchart TB
     end
 
     subgraph SECRETS["Secrets at rest — %LOCALAPPDATA%"]
-        TOK["management-token.txt"]
-        SEC["secrets.dat (DPAPI, Windows only)"]
-        PFX["telemetry-cert.pfx"]
+        TOK["management token in secrets.dat"]
+        SEC["secrets.dat (protected store)"]
+        PFX["router local CA"]
         DB["agent_telemetry.db<br/>prompt + response text"]
     end
 
@@ -104,12 +110,13 @@ a later change does not undo them by accident.
   ([`ManagementAccessToken.cs:103-117`](../../src/TotallyHotArcRouter/Proxy/Management/ManagementAccessToken.cs)).
 - **Strong token generation.** 32 bytes from `RandomNumberGenerator`, base64url-encoded
   ([`ManagementAccessToken.cs:120-124`](../../src/TotallyHotArcRouter/Proxy/Management/ManagementAccessToken.cs)).
-- **One token, three surfaces.** REST, MCP, and gRPC all verify through the same primitive, so
-  there is a single place to strengthen rather than three that can drift.
-- **Write-only secret surface.** There is deliberately no `GET /admin/secrets/{name}` — the
-  invariant that a secret reaching the protected store is never readable back through any
-  management API is enforced by omission, not by masking
-  ([`ProviderAdminEndpoints.cs:144-152`](../../src/TotallyHotArcRouter/Proxy/Management/ProviderAdminEndpoints.cs)).
+- **One token, management surfaces.** MCP and the gRPC admin services verify through
+  `ManagementAccessToken`, so there is a single place to strengthen rather than two that can drift.
+  There is no REST `/admin` surface.
+- **Write-only secret surface.** `ProviderAdminGrpcService.SetSecret` writes a secret. The list
+  projection (`ManagementFacade.BuildProvidersResponse`, also the MCP `list_providers` path) drops a
+  locked header's value. A secret that reaches the protected store is not readable back through that
+  projection.
 - **Ordered secure-file writes.** `SecureFile.WriteRestricted` creates the file, applies the
   ACL/mode, and only then writes content — the secret is never briefly readable under an
   inherited ACL ([`SecureFile.cs:24-46`](../../src/TotallyHotArcRouter/Proxy/Management/SecureFile.cs)).
@@ -341,7 +348,7 @@ repo-wide search finds no `AddCors`, `UseCors`, or antiforgery registration anyw
 
 **Impact.** `Content-Type: text/plain` is a CORS *simple* request type, so a cross-origin `POST`
 carrying a JSON body under that content type is dispatched by the browser **without a preflight**.
-Any web page the user visits can therefore drive `http://127.0.0.1:5001/v1/chat/completions`.
+Any web page the user visits can therefore drive `https://127.0.0.1:47101/v1/chat/completions`.
 The Same-Origin Policy blocks the attacker from reading the response, but every side effect still
 occurs: the operator's provider credentials are spent, usage is recorded, the sandbox verifier
 executes the resulting model output, and router memory is updated ([T-14](#t-14--router-memory-is-poisonable-by-unauthenticated-traffic)).
@@ -413,7 +420,7 @@ them. That yields:
 
 - A request with `Host: evil.example` to the proxy port returns `400` before reaching
   `ProxyMiddleware`.
-- A request with `Host: localhost:5001` succeeds.
+- A request with `Host: localhost:47101` succeeds.
 - Startup throws when `AllowedHosts` is `*` and the configured bind address is not loopback.
 
 **Tests.** New `HostFilteringTests`; extend `ProxyServerTests` with the startup-assertion case.

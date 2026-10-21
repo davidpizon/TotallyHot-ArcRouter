@@ -213,10 +213,12 @@ flowchart TD
      Methodology link vouching for how they were computed.
 
 3. **Model Distribution** (`ModelDistribution.razor`) - a time-range filter bar (Day/Month/3-Month/
-   6-Month/Year - visual only, does not currently refilter data) with From/To text inputs, above:
-   - A grouped bar chart of prompt vs. completion token volume by day (`MockData.TokenBuckets`).
-   - A donut chart of model market share by execution volume (`MockData.ModelShares`), with a custom
-     HTML legend below it.
+   6-Month/Year) with From/To text inputs. The filter calls `UsageStore.LoadRollupAsync`. Charts are
+   not fed from `MockData.TokenBuckets` / `MockData.ModelShares` on the live path. `MockData` is the
+   empty-corpus fallback. The component comment says the filter drives a real rollup call.
+   - A grouped bar chart of prompt vs. completion token volume by day, from that rollup.
+   - A donut chart of model market share by execution volume, from that rollup, with a custom HTML
+     legend below it.
 
 4. **Report Card** (`LearningReportCard.razor`, GitHub issue #111) - one local view of spend by model,
    observed-score grade mix, and quality-score delta versus the frozen untrained baseline. Fed from
@@ -246,9 +248,9 @@ flowchart TD
      per
      [`../router/model-price-catalog.md`](../router/model-price-catalog.md)'s D5 licensing rule. The
      toggle writes `aggregator_sources.enabled` and takes effect live, including cancelling a fetch
-     already in flight (D6); up/down rank controls write `priority_score` and immediately re-run an
-     ingestion cycle so a contested price re-resolves under the new order rather than waiting for the
-     next scheduled poll. The header carries a **countdown to the next automatic pull** ("Next pull in
+     already in flight (D6). Reorder is a drag of the grip handle (`grip-vertical` in
+     `PriceSourcesAdmin.razor`), which is what [`DESIGN.md`](DESIGN.md) §5.3 describes. There are no
+     up/down rank controls writing `priority_score`. The header carries a **countdown to the next automatic pull** ("Next pull in
      3h 12m", hovering for the absolute time) - one clock for the panel, not one per card, because a
      cycle refreshes every enabled source together. The router reports the cadence and the interval's
      anchor; the panel adds them and re-renders once a minute, and never polls the router on a timer of
@@ -407,9 +409,8 @@ These match the source design as received and are called out so they aren't mist
 
 - Governance's per-provider budget caps are persisted to SQLite and enforced live in routing (breached
   providers are skipped; an all-breached request gets a 402). Spend is real per-provider, current-month.
-- Cost Analytics' $0-$160 savings scale is still pinned to the mock data's range. (Model
-  Distribution's token histogram now derives its ceiling from the rendered data via
-  `GroupedBarsModel.DynamicYMax`, and the Cost Analytics explorer auto-scales its axes.)
+- Model Distribution's token histogram derives its ceiling from the rendered data via
+  `GroupedBarsModel.DynamicYMax`, and the Cost Analytics explorer auto-scales its axes.
 - The chart tooltips are custom dark-themed HTML built in `wwwroot/js/echarts-interop.js` to match the
   card styling; minor visual differences from the original React implementation are expected there.
 - The telemetry gRPC-Web server address is no longer a separately configurable setting: since the

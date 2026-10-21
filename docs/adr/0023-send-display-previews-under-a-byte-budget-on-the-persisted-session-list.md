@@ -36,7 +36,7 @@ show truncated or load-on-demand text, which he prefers for performance.
 
 ## Considered Options
 
-- A. Server-side previews plus a response byte budget, reusing fields 6 and 7 for previews
+- A. Server-side previews plus a response byte budget, reusing fields 6 and 7 for previews. Interim chosen on 2026-10-03; ADR-0019 replaced it with option E.
 - A2. Like A, but with new preview fields beside fields 6 and 7, which would stay full text
 - B. Lower the GUI's row limit
 - C. Paginate the list
@@ -45,29 +45,27 @@ show truncated or load-on-demand text, which he prefers for performance.
 
 ## Decision Outcome
 
-Chosen option: "A. Server-side previews plus a response byte budget, reusing fields 6 and 7", because it is
-the only option available now that satisfies **Bounded message** for any input. The 2,000-character preview
-(`TextTruncator.DefaultMaxLength`, the same cap live telemetry uses) keeps the typical list small. The
-3 MiB budget (`3 * 1024 * 1024`, counted with `CodedOutputStream.ComputeMessageSize` per row) is the hard
-guarantee, and it covers CJK text and client-supplied metadata strings that a character cap alone misses.
-It meets **Full text stays stored** because truncation happens only in `TelemetryGrpcService`'s mapping
-of the response. Reusing fields 6 and 7 meets **Small, compatible change**: no field sits unused, and no
-deployed GUI reads full text from them that a router of another version could disagree with.
+> **Amendment (2026-10-21, [#315](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/315)).** ADR-0019's encrypted per-session files exist. The chosen option is **E**, not A. Option A was the interim this ADR accepted on 2026-10-03; it stays in [Considered Options](#considered-options), labeled as that interim. The rule below is what a reader should follow. The 2026-10-03 text is kept after it as history.
 
-The contract gains, additively:
+**Chosen option: E. Metadata-only list.** `ListPersistedSessions` returns lengths and metadata. `TelemetryGrpcService.ToContract` does not set `PromptText`, `ResponseText`, or the truncation flags. Previews are `GetTurnTexts`. `StreamEvents` is grant-filtered (`ApplyContentGate`). `SqliteTranscriptStore.ListSessionsAsync` selects `prompt_text_length` and `response_text_length`, not the text columns. The list does not read each row's full text from SQLite and cut it into fields 6 and 7.
+
+`telemetry.proto` documents the list as metadata-only and points previews at `GetTurnTexts`.
+
+### What this ADR chose on 2026-10-03 (interim, replaced by ADR-0019)
+
+Chosen option at that date: "A. Server-side previews plus a response byte budget, reusing fields 6 and 7", because it was the only option available then that satisfied **Bounded message** for any input. The 2,000-character preview (`TextTruncator.DefaultMaxLength`, the same cap live telemetry uses) was meant to keep the typical list small. The 3 MiB budget (`3 * 1024 * 1024`, counted with `CodedOutputStream.ComputeMessageSize` per row) was the hard guarantee. That contract is not what the router serves now.
+
+The additive fields that landed with option A, and that option E still uses for metadata, are:
 
 - On `PersistedTranscript`: `transcript_id` (12), `prompt_text_length` (13), `response_text_length` (14),
   `prompt_truncated` (15), and `response_truncated` (16).
   - The lengths are SQLite `length()` character counts. They are displayed, never compared.
-  - The explicit flags, not a length comparison, say whether a preview was cut.
+  - The list does not set the truncation flags. They are not how a reader tells whether a preview was cut; the list does not carry a preview.
 - On `ListPersistedSessionsResponse`: `has_more` (3). It is set when the limit or the budget left out
   older rows.
 
 `ListPersistedSessionsRequest.limit` is clamped: 0 becomes 500, and anything else is clamped to
 [1, 2,000].
-
-Option E stays the end state. Once ADR-0019's encrypted per-session files exist, the list sends metadata
-only, and a session's text is read from its file when the session is opened.
 
 ### Consequences
 
@@ -81,10 +79,8 @@ only, and a session's text is read from its file when the session is opened.
 - Bad, because the budget can hide older rows on histories heavy in non-ASCII text. `has_more` and a
   visible "Showing the newest N persisted turns." line report it. In the worst case about 258 rows
   still fit.
-- Bad, because the router still reads each row's full text from SQLite before cutting it. That is
-  today's read cost, kept for simplicity (plan decision 9).
-- Neutral, because fields 6 and 7 now carry previews. Anything that needs the stored text must use a
-  bounded per-row RPC or #165's archive, never this list. The proto comments say so.
+- The 2026-10-03 note that the router reads each row's full text from SQLite before cutting it described option A. It is not the current read. `ListSessionsAsync` selects the length columns.
+- Neutral, because anything that needs stored text uses `GetTurnTexts` or #165's encrypted session files, never this list. Fields 6 and 7 are not previews on the list. The proto comments say so.
 
 ## Pros and Cons of the Options
 

@@ -19,8 +19,10 @@ The router only runs correctly on Windows today. Three independent things assume
    a per-user directory off Windows (an inconsistent, ad hoc fix), and several options classes
    (`EmbeddingOptions`, `LlmRouterOptions`) still contain literal `%LOCALAPPDATA%` tokens.
 2. **Process hosting.** `Program.cs` calls `UseWindowsService()` only; there is no `UseSystemd()`
-   equivalent, and the Serilog file sink path (`C:\Logs\ArcRouter\...` in `appsettings.json`) is a
-   hard-coded Windows path.
+   equivalent, and the Serilog file sink path (`C:\Logs\ArcRouter\...` in `appsettings.json`) was a
+   hard-coded Windows path. Amended 2026-10-21 (#315): `Program.cs` calls `UseSystemd()` as well as
+   `UseWindowsService()`, and the file sink directory is `AppDataPaths.ResolveLogsDirectory()`
+   (`LOGS_DIRECTORY` when set, otherwise `<machine-shared-data>/logs`), not `C:\Logs\ArcRouter`.
 3. **Secret storage.** `ProtectedSecretStore` wraps Windows DPAPI (`System.Security.Cryptography.ProtectedData`,
    `DataProtectionScope.CurrentUser`) to encrypt provider credentials and (per ADR-0012) the management
    token at rest. Off Windows, `ProtectedData` throws `PlatformNotSupportedException`; the store already

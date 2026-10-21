@@ -88,55 +88,12 @@ falsifiable claim it makes (regret *ordering* vs. the baselines) is measured off
 ## 2. Why this phase exists
 
 PLAN.md Phase L shipped a four-voter ensemble. `live-feedback-learning-plan.md` Phases 1–3 shipped the
-feedback capture those voters read. Neither is reachable from a live request — not because of the
-named-model question above, but because of a single DI registration.
-
-### 2.1 Verified in the code today
-
-| Claim | Evidence |
-|---|---|
-| `CompositeRoutingPolicy`, not `OrchestratorRoutingPolicy`, is the registered `IRoutingPolicy` | [`Hosting/ServiceCollectionExtensions.cs:171`](../../src/TotallyHotArcRouter/Hosting/ServiceCollectionExtensions.cs:171) |
-| `CompositeRoutingPolicy` does not override the `RoutingSignals` overload, so the interface default silently discards the task text and embedding the interceptor computed | [`Router/CompositeRoutingPolicy.cs:25`](../../src/TotallyHotArcRouter/Router/CompositeRoutingPolicy.cs:25), [`Router/IRoutingPolicy.cs:30`](../../src/TotallyHotArcRouter/Router/IRoutingPolicy.cs:30) |
-| Telemetry's `RequestedModel` is the **post-routing** primary candidate, not the client's literal `model` string — so today's substitutions are already misreported | [`Proxy/ProxyMiddleware.cs:259`](../../src/TotallyHotArcRouter/Proxy/ProxyMiddleware.cs:259) — `candidates[0].Route.ModelName` |
-| No telemetry field carries the router-facing *chosen* model name; `ResolvedModel` is the upstream provider's id | [`Telemetry/RoutingTelemetryEvent.cs:21`](../../src/TotallyHotArcRouter/Telemetry/RoutingTelemetryEvent.cs:21), set from `route.ProviderModelId` at [`ProxyMiddleware.cs:1525`](../../src/TotallyHotArcRouter/Proxy/ProxyMiddleware.cs:1525) |
-| The GUI's routing-step list flags fallback routing only — there is no substitution step | [`Gui.Components/Services/LiveConversationMapper.cs`](../../src/TotallyHotArcRouter.Gui.Components/Services/LiveConversationMapper.cs) |
-| Epsilon-greedy exploration has exactly one consumer, and it is the policy M1 replaces | [`Router/AgentAsARouter.cs:53`](../../src/TotallyHotArcRouter/Router/AgentAsARouter.cs:53) — `OrchestratorRoutingPolicy` has no exploration |
-| `RoutingOptions.PolicyName` (`"hierarchical"`) is **dead configuration** — set in `appsettings.json:22`, read by nothing but its own unit tests | [`Models/RoutingOptions.cs:48`](../../src/TotallyHotArcRouter/Models/RoutingOptions.cs:48), [`Models/RouterConstants.cs:23`](../../src/TotallyHotArcRouter/Models/RouterConstants.cs:23) |
-
-The consequence: in production today, `dim_best` is the only voter that can influence anything, and
-only on the §1.1 paths. `memory_kNN`, `logreg`, and `llm_router` abstain on every live request because
-the signals they need are discarded one layer above them.
-
-```mermaid
-flowchart LR
-    subgraph today["Today"]
-        A1[auto / unknown / unhealthy] --> B1[ResolveAgenticRouteAsync]
-        B1 --> C1[CompositeRoutingPolicy]
-        C1 -->|signals discarded| D1[UtilityRoutingPolicy<br/>or AgentRouterPolicy]
-        D1 --> E1[Chosen model]
-        F1["OrchestratorRoutingPolicy<br/>4 voters, never called"]:::dead
-    end
-    classDef dead fill:#3a1f1f,stroke:#a33,color:#f2c2c2
-```
-
-```mermaid
-flowchart LR
-    subgraph after["After Phase M"]
-        A2[auto / unknown / unhealthy] --> B2[ResolveAgenticRouteAsync]
-        B2 --> C2[CompositeRoutingPolicy]
-        C2 -->|IsUtility| D2[UtilityRoutingPolicy<br/>cost-aware]
-        C2 -->|"general + RoutingSignals"| E2[OrchestratorRoutingPolicy]
-        E2 --> F2[dim_best]
-        E2 --> G2[memory_kNN]
-        E2 --> H2[logreg]
-        E2 --> I2[llm_router]
-        F2 & G2 & H2 & I2 --> J2[Weighted argmax]
-        J2 --> K2[Chosen model]
-        D2 --> K2
-        K2 --> L2[Telemetry: requested vs routed]
-        L2 --> M2g[GUI substitution step]
-    end
-```
+feedback capture those voters read. When this section was written, neither was reachable from a live
+request, because of a single DI registration. That gap is closed. The status banner at the top of this
+file (M1–M4 shipped) is the current rule: `CompositeRoutingPolicy` forwards non-utility traffic into
+`OrchestratorRoutingPolicy`, and telemetry's requested model is the client string captured before
+substitution. The inventory that used to follow here, titled "Verified in the code today," was deleted
+on 2026-10-21 (#315) because those claims no longer match the tree.
 
 ---
 

@@ -43,8 +43,8 @@ flowchart LR
   its lookup whenever the version advances, so edits take effect **without restarting the proxy**.
 - **`ProviderAdminService`** (`src/Protos/admin.proto`, implemented by
   `src/TotallyHotArcRouter/Proxy/Management/ProviderAdminGrpcService.cs`) is mapped on the router's single
-  web port, wrapped in gRPC-Web so the browser dashboard can call it directly - there is no separate REST
-  `/admin/*` API any more (deleted in Phase P2). RPCs: `ListProviders`, `UpsertProvider`/`RemoveProvider`,
+  web port, wrapped in gRPC-Web so the browser dashboard can call it directly. The REST admin routes
+  were deleted in Phase P2. RPCs: `ListProviders`, `UpsertProvider`/`RemoveProvider`,
   `UpsertModel`/`RemoveModel`, `SetModelEnabled` (per-model Start/Stop, the model-level twin of
   `SetProviderEnabled`), and three related model-discovery RPCs: `DiscoverModels` and `ScanCapabilities`
   are independently callable building blocks, while `RefreshFromEndpoint` is the one the GUI actually
@@ -68,10 +68,11 @@ flowchart LR
   logic, unit-tested in CI. **`ProviderAdminStore`** (`TotallyHot.ArcRouter.Gui.Components`, also plain
   `net10.0` - cross-platform since Phase P5) is the thin singleton the UI binds to, mirroring
   `LiveDataStore`.
-- **A failed refresh/scan/discovery is visible, not silent.** `RefreshFromEndpointAsync` still returns
-  `200 OK` even when the provider rejected the request outright (e.g. an expired API key) - the model
-  list reconciliation and capability scan are independent of whether discovery itself succeeded, so
-  the request as a whole "succeeds" with nothing changed. `ProviderInteractionStatusStore`
+- **A failed refresh/scan/discovery is visible, not silent.** `RefreshFromEndpointAsync` is a gRPC
+  call: `ProviderAdminGrpcService.RefreshFromEndpoint` returns `ProviderListResponse`. It is not an
+  HTTP status. The model list reconciliation and capability scan are independent of whether discovery
+  itself succeeded, so a rejected provider (for example an expired API key) still comes back as that
+  list with nothing changed. `ProviderInteractionStatusStore`
   (in-memory, keyed by provider, reset on router restart) separately records the outcome of each
   admin-initiated interaction and is surfaced as `ProviderView.LastInteraction` /
   `ProviderAdminView.LastInteraction`. The Governance card shows a persistent amber warning icon and

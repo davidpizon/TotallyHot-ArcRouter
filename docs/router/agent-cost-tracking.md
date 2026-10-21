@@ -26,28 +26,28 @@
 
 ## Why this exists
 
-Asked directly, the honest current answer is: **no, this project does not pull cost from providers.**
-`EstimatedCostUsd` on every `RoutingTelemetryEvent` is `0` when the resolved route's provider is
-flagged free (`ProviderOptions.IsFree`) and `null` for everything else — never a number reported by
-OpenAI/Anthropic/etc.'s own billing. Two separate gaps follow from that:
+Asked when this document was written, the honest answer was that the project did not pull cost from
+providers and had no price data and no ledger. That is history. The banner above is the current rule
+(amended 2026-10-21, #315): the price catalog, `IModelPriceCatalog` /
+`PriceCatalogRepository.GetFreshPrice`, `UsageLedger`, and `CostReconciliationService` exist.
+`appsettings.json` has no `Pricing` seed. `model-price-catalog.md` is the catalog spec, and it is not
+proposed. `EstimatedCostUsd` is still a local estimate (token counts × a catalog price, or zero for an
+`IsFree` provider, or null when no fresh price resolves). Provider-reported spend is the reconciliation
+half, not that estimate.
 
-1. **There is no price data at all.** TotallyHotArcRouter used to carry a hand-maintained `Pricing`
-   dictionary in `appsettings.json`, re-edited by hand whenever a provider changed prices, whose own
+The two gaps this design was written to close:
+
+1. **Price data was a hand-maintained `Pricing` dictionary** in `appsettings.json`, whose own
    `_comment` admitted the values were unverified placeholders. It was **deleted** rather than
    maintained (see [`pricing-seed-removal.md`](pricing-seed-removal.md)), because a fabricated cost is
-   indistinguishable from a real one at the point someone reads it. So a paid model reports no cost
-   today, honestly, rather than a wrong one.
-2. **Nothing is persisted.** `RoutingTelemetryEvent`s are broadcast live over the telemetry hub (see
-   [`telemetry.md`](telemetry.md)) and then gone - there's no historical ledger, so there's no way to
-   answer "how much has this model cost over the last 24 hours" without having kept every GUI session
-   open the whole time.
+   indistinguishable from a real one at the point someone reads it.
+2. **Live telemetry was not a historical ledger.** `RoutingTelemetryEvent`s are still broadcast (see
+   [`telemetry.md`](telemetry.md)). The per-request record is `usage_ledger`, written by `UsageLedger`.
 
-**This design closes gap 2 only.** Gap 1 is closed by
-[`model-price-catalog.md`](model-price-catalog.md), which this document consumes rather than
-re-specifies (see §3.2) — and which is a **prerequisite** for a cost number existing at all, not an
-upgrade to an estimate that already works. Until it lands, this design's ledger would persist a column
-of `null`s for every paid model. On top of gap 2, this design adds a third capability the estimate-only
-approach can never provide on its own:
+**This design's ledger half is the second gap.** The catalog
+([`model-price-catalog.md`](model-price-catalog.md)) is what supplies a cost number, and this document
+consumes it rather than re-specifying it (see §3.2). On top of the ledger, this design adds a third
+capability the estimate-only approach can never provide on its own:
 
 3. **Reconciliation against real provider-reported spend.** OpenAI and Anthropic both expose
    organization-level Costs/Usage APIs that report their own actual billed spend. Periodically
@@ -467,7 +467,7 @@ purely client-side... needs a real place to write to"). Once this ledger exists,
 tracking and Cost Analytics' cumulative-savings chart both have a genuine historical data source to
 read from, instead of `MockData`. Wiring the GUI to actually call this is separate follow-on work, not
 covered by this document - see [`../gui/governance-model-cards.md`](../gui/governance-model-cards.md)
-for a proposed (also not yet implemented) design that consumes both `model_prices` and `usage_ledger`
+for a design that consumes both `model_prices` and `usage_ledger`
 to add per-model pricing/spend cards to the Governance tab.
 
 ---

@@ -1,28 +1,23 @@
 # Serilog Logging Configuration Guide
 
-> **Status: Partially implemented.** The config-driven approach described here is real —
-> `Program.cs` calls `UseSerilog((context, services, cfg) => cfg.ReadFrom.Configuration(...))`,
-> and `appsettings.json`'s `Serilog` section is genuinely read at startup. `Console` and `File`
-> sinks are both configured (`"WriteTo": [{ "Name": "Console" }, { "Name": "File", ... }]`), and
-> `Serilog`, `Serilog.Extensions.Hosting`, `Serilog.Settings.Configuration`, `Serilog.Sinks.Console`,
-> and `Serilog.Sinks.File` are all referenced in `TotallyHotArcRouter.csproj`. The `File` sink
-> writes to `C:\Logs\ArcRouter\arcrouter-.log`, rolling daily with a 30-day retention window. What's **not**
-> implemented: the `EventLog` sink and package below — still the **proposed** target configuration,
-> not what's installed today. There's also a separate bootstrap logger in `Program.cs`
-> (`Log.Logger = new LoggerConfiguration()...WriteTo.Console()`, used only before the host is
-> built) that is hardcoded, not config-driven.
->
-> One additional sink beyond the config-driven `Console` sink *is* wired up in code (not via
-> `appsettings.json`): `TelemetryLogEventSink`, added with `.WriteTo.Sink(...)` directly in
-> `Program.cs`, forwards every log event to the dashboard Console tab over the telemetry gRPC-Web
-> stream. See [`../gui/dashboard.md`](../gui/dashboard.md) and
-> [`telemetry.md`](telemetry.md)'s "Transport: gRPC" section.
+> **Status: sinks are attached in code. EventLog is proposed.** `Program.cs` calls `UseSerilog` and
+> reads `appsettings.json`'s `Serilog` section for `MinimumLevel` and `Enrich` only.
+> `SerilogConfigurationWithoutWriteTo` strips every `Serilog:WriteTo` entry so an overlay cannot add
+> an unfiltered sink that would let `ConversationBody` events escape `bodies-*.log`. The
+> `_comment_WriteTo` key in `appsettings.json` says the same thing. The process then attaches four
+> sinks in code: Console, a rolling File sink (`arcrouter-.log`, retained file count 30),
+> `TelemetryLogEventSink` (the dashboard Console tab), and `DeferredBodyLogSink` (conversation-body
+> events only). There is no EventLog sink. The EventLog sections below are the **proposed** target,
+> not the live host. A bootstrap logger in `Program.cs` (`Log.Logger` → Console) runs only before the
+> host is built.
 
 ## Router logs; the dashboard is a browser
 
 The Router is the process that logs. It runs as `LocalSystem` (Windows Service), a systemd/LaunchDaemon
-unit, or a console host. Configure Serilog in `src/TotallyHotArcRouter/appsettings.json`. The File sink
-writes to `C:\Logs\ArcRouter\arcrouter-.log` on Windows (rolling daily, 30-day retention).
+unit, or a console host. The file sink's directory is `AppDataPaths.ResolveLogsDirectory()`:
+`LOGS_DIRECTORY` when that variable is set (systemd's `LogsDirectory=`), otherwise a `logs`
+subdirectory of the machine-shared data directory. The file name is `arcrouter-.log`, rolling daily,
+30 files retained. `appsettings.json` does not set that path.
 
 The dashboard is Blazor WebAssembly in the operator's browser (`TotallyHotArcRouter.Gui.Web`) — there is
 no MAUI/`TotallyHotArcRouter.Gui` process, no WebView2, and no `GuiLogging.cs`. Diagnose a blank
@@ -36,7 +31,14 @@ routing, service status, MSI apply. It is not the dashboard host.
 
 ## Overview
 
-This document describes the target Serilog logging configuration for the TotallyHotArcRouter .NET 10 application. Serilog provides structured logging with flexible output destinations (file and Windows Event Viewer) configured via `appsettings.json`.
+> **Proposed EventLog target, not the live configuration (amended 2026-10-21, #315).** From here
+> through the end of this guide, the `WriteTo` JSON and the Windows Event Viewer sections are a
+> proposed design. They are not how the process attaches sinks. `Program.cs` strips `Serilog:WriteTo`.
+> The file sink, the Console sink, the Console-tab sink, and the body sink are attached in code, as
+> the status banner describes. EventLog stays proposed: the live host does not reference
+> `Serilog.Sinks.EventLog`.
+
+This document describes a target Serilog logging configuration for the TotallyHotArcRouter .NET 10 application, including a Windows Event Viewer sink that is not installed. The live minimum level and enrichers are still in `appsettings.json`. Output destinations are not.
 
 ---
 
@@ -44,7 +46,7 @@ This document describes the target Serilog logging configuration for the Totally
 
 - ✅ **Structured Logging:** Captures context via named properties, not just strings
 - ✅ **Multiple Sinks:** Output to file, Event Viewer, console, cloud services simultaneously
-- ✅ **Configuration-Driven:** All settings in `appsettings.json` (no code changes needed)
+- ✅ **Levels and enrichers in config:** `MinimumLevel` and `Enrich` stay in `appsettings.json`. Sinks are attached in `Program.cs`, as the status banner describes. The EventLog `WriteTo` examples below are the proposed target.
 - ✅ **Performance:** Minimal overhead, async-first design
 - ✅ **Rich Context:** Enrichers add machine name, thread ID, correlations automatically
 - ✅ **Enterprise-Ready:** Widely used in production .NET applications
@@ -53,7 +55,9 @@ This document describes the target Serilog logging configuration for the Totally
 
 ## Installation
 
-Add the required NuGet packages:
+Proposed packages for the EventLog target below. The live host does not reference `Serilog.Sinks.EventLog`. `Program.cs` does not read a `WriteTo` list from `appsettings.json`.
+
+Add the packages this proposed target would use:
 
 ```bash
 dotnet add package Serilog

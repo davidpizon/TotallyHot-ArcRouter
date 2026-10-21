@@ -1,6 +1,8 @@
 # 0002. Store probed model context windows in their own table
 
-**Status:** proposed
+**Status:** accepted
+
+> **Accepted 2026-10-21 ([#315](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/315)).** The probed context windows are in `model_context_windows`, read and written by `ToolCallCapabilityRepository`.
 **Date:** 2026-08-29
 **Deciders:** David Pizon
 
