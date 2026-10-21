@@ -7,9 +7,9 @@ using TotallyHot.ArcRouter.Tests.TestSupport;
 namespace TotallyHot.ArcRouter.Tests.Judge;
 
 /// <summary>
-/// Covers <see cref="PortfolioGraderAvailability"/>: a grader is held open only when its own flag is on
-/// <em>and</em> a backbone is actually resolvable - the same two-part test <see cref="JudgeAvailability"/>
-/// applies for the G-Eval judge.
+/// Covers <see cref="PortfolioGraderAvailability"/>: a grader is held open only when the result has a
+/// correlation id, its own flag is on, <em>and</em> a backbone is actually resolvable - the same test
+/// <see cref="JudgeAvailability"/> applies for the G-Eval judge.
 /// </summary>
 public class PortfolioGraderAvailabilityTests
 {
@@ -60,6 +60,19 @@ public class PortfolioGraderAvailabilityTests
         var availability = new PortfolioGraderAvailability(options: AllEnabled(), modelSelector: SelectorOver(paidOnly));
 
         var keys = availability.DetermineGraderKeys(new QualityResult { RequestCorrelationId = "corr-1" });
+
+        Assert.Empty(keys);
+    }
+
+    [Fact]
+    public void DetermineGraderKeys_NoCorrelationId_ReturnsEmptyWithoutResolvingABackbone()
+    {
+        // A resolver that would throw if ever queried - the missing correlation id must answer before
+        // any backbone work, matching JudgeAvailability.
+        var availability = new PortfolioGraderAvailability(options: AllEnabled(),
+            modelSelector: SelectorOver(new ThrowingResolver()));
+
+        var keys = availability.DetermineGraderKeys(new QualityResult());
 
         Assert.Empty(keys);
     }
