@@ -108,7 +108,7 @@ public sealed class QualityOptions
 public sealed class DimensionWeightOptions
 {
     /// <summary>Absolute tolerance when checking that weights sum to 1.</summary>
-    public const double SumTolerance = 1e-9;
+    private const double SumTolerance = 1e-9;
 
     /// <summary>
     /// The default judge-heavy weighting used when a dimension has no explicit configuration
@@ -150,7 +150,7 @@ public sealed class DimensionWeightOptions
 
     /// <summary>Sum of syntax, analysis, judge, and every extra weight.</summary>
     /// <returns>The total weight.</returns>
-    public double TotalWeight()
+    private double TotalWeight()
     {
         var total = Syntax + Analysis + Judge;
         foreach (var weight in ExtraWeights.Values) total += weight;

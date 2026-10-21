@@ -35,7 +35,7 @@ public class GradeReceiptStoreTests
         var database = new RouterMemoryDatabase(Options.Create(new RoutingOptions { EmbeddingMemoryDatabasePath = path }));
         database.EnsureCreated();
 
-        var store = new SqliteGradeReceiptStore(database);
+        IGradeReceiptStore store = new SqliteGradeReceiptStore(database);
         var windowCache = new PendingConversationWindowCache(Options.Create(new JudgeOptions()));
         var secretPath = Path.Combine(Path.GetDirectoryName(path)!, "secrets.dat");
         var hasher = new QuestionHmacHasher(new ProtectedSecretStore(secretPath));
@@ -74,14 +74,14 @@ public class GradeReceiptStoreTests
         Assert.DoesNotContain(question, roundTrip.QuestionHmac, StringComparison.Ordinal);
         Assert.DoesNotContain(question, roundTrip.AbstainedGraders, StringComparison.Ordinal);
 
-        using var connection = database.OpenConnection();
-        using var scan = connection.CreateCommand();
+        await using var connection = database.OpenConnection();
+        await using var scan = connection.CreateCommand();
         scan.CommandText = """
                            SELECT correlation_id, dimension, model, grade_status, question_hmac, scorer_version,
                                   prompt_version, weights_version, abstained_graders
                            FROM grade_receipts;
                            """;
-        using var reader = scan.ExecuteReader();
+        await using var reader = scan.ExecuteReader();
         Assert.True(reader.Read());
         for (var i = 0; i < reader.FieldCount; i++)
         {

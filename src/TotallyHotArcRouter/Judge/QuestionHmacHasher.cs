@@ -12,7 +12,7 @@ namespace TotallyHot.ArcRouter.Judge;
 public sealed partial class QuestionHmacHasher
 {
     /// <summary>Secret-store entry holding the 256-bit HMAC key.</summary>
-    public const string SecretKeyName = "grading.question-hmac-key";
+    private const string SecretKeyName = "grading.question-hmac-key";
 
     private readonly ProtectedSecretStore _store;
 
@@ -42,7 +42,7 @@ public sealed partial class QuestionHmacHasher
     }
 
     /// <summary>Collapses all whitespace runs to a single ASCII space.</summary>
-    internal static string NormalizeWhitespace(string text) =>
+    private static string NormalizeWhitespace(string text) =>
         WhitespaceCollapse().Replace(input: text, replacement: " ");
 
     private byte[] GetOrCreateKey()

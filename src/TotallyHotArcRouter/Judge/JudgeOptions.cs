@@ -126,6 +126,12 @@ public sealed class JudgeOptions
     /// Gets how many earlier text messages <see cref="Telemetry.ConversationWindow"/> may keep before the
     /// newest user message. Defaults to 6 (about three exchanges); issue #293 plan D1.
     /// </summary>
+    /// <remarks>
+    /// Stays public. <c>AddOptions&lt;JudgeOptions&gt;().ValidateDataAnnotations()</c> validates only public
+    /// properties, and this is a plan D1 bound set through an options initializer. Callers read the value
+    /// from <see cref="ToConversationWindowOptions"/>, which is why a scan sees no other C# use.
+    /// </remarks>
+    // ReSharper disable once MemberCanBePrivate.Global
     [Range(0, 64)]
     public int ConversationWindowEarlierMessages { get; init; } = 6;
 
@@ -133,6 +139,11 @@ public sealed class JudgeOptions
     /// Gets the total character budget for the conversation window sent to LLM graders. Defaults to
     /// 16,384; issue #293 plan D2.
     /// </summary>
+    /// <remarks>
+    /// Stays public for the same reason as <see cref="ConversationWindowEarlierMessages"/>: data-annotation
+    /// validation and options initializers only see a public property.
+    /// </remarks>
+    // ReSharper disable once MemberCanBePrivate.Global
     [Range(256, 10_000_000)]
     public int ConversationWindowMaxChars { get; init; } = 16_384;
 
@@ -140,6 +151,11 @@ public sealed class JudgeOptions
     /// Gets the maximum characters kept from the newest user message inside the conversation window.
     /// Defaults to 12,288; longer text is cut head-and-tail so a trailing instruction survives (D2).
     /// </summary>
+    /// <remarks>
+    /// Stays public for the same reason as <see cref="ConversationWindowEarlierMessages"/>: data-annotation
+    /// validation and options initializers only see a public property.
+    /// </remarks>
+    // ReSharper disable once MemberCanBePrivate.Global
     [Range(64, 10_000_000)]
     public int ConversationWindowMaxNewestUserChars { get; init; } = 12_288;
 

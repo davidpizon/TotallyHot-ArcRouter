@@ -199,6 +199,6 @@ public static class ConversationAggregator
         if (qualityGradeLabelByCorrelation is null) return null;
 
         var correlationId = FormattableString.Invariant($"{sessionId}:{turnNumber}");
-        return qualityGradeLabelByCorrelation.TryGetValue(key: correlationId, value: out var label) ? label : null;
+        return qualityGradeLabelByCorrelation.GetValueOrDefault(correlationId);
     }
 }

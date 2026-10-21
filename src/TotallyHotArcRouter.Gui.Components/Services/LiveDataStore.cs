@@ -254,7 +254,7 @@ public sealed class LiveDataStore : IAsyncDisposable
     internal const string StructureOnlyLearningPausedLabel = "structure only / learning paused";
 
     /// <summary>Maps a wire quality signal to the dashboard label stored on the matching turn.</summary>
-    internal static string? MapQualityGradeLabel(Contract.QualitySignalEvent signal)
+    private static string? MapQualityGradeLabel(Contract.QualitySignalEvent signal)
     {
         if (!signal.HasGradeStatus) return null;
 
