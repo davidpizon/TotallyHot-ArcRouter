@@ -6,9 +6,10 @@ namespace TotallyHot.ArcRouter.Judge;
 
 /// <summary>
 /// The host's <see cref="IPortfolioGraderAvailability"/>: tells the quality aggregator to hold a static
-/// verdict open for each of CodeJudge/ICE-Score/RACE only when that grader is switched on <em>and</em> a
-/// backbone is actually resolvable - the exact same two-part test <see cref="JudgeAvailability"/> applies
-/// for the G-Eval judge, since all four graders share <see cref="JudgeModelSelector"/>.
+/// verdict open for each of CodeJudge/ICE-Score/RACE only when the result carries a correlation id, that
+/// grader is switched on, <em>and</em> a backbone is actually resolvable - the same test
+/// <see cref="JudgeAvailability"/> applies for the G-Eval judge, since all four graders share
+/// <see cref="JudgeModelSelector"/>.
 /// </summary>
 public sealed class PortfolioGraderAvailability : IPortfolioGraderAvailability
 {
@@ -33,6 +34,10 @@ public sealed class PortfolioGraderAvailability : IPortfolioGraderAvailability
         ArgumentNullException.ThrowIfNull(result);
 
         var pending = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Same join rule as JudgeAvailability: no correlation id means no grade can be attached.
+        if (string.IsNullOrEmpty(result.RequestCorrelationId)) return pending;
+
         var current = _options.CurrentValue;
 
         // The backbone check is resolved at most once, and only if at least one flag is on - an operator
