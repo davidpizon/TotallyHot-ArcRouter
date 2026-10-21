@@ -69,7 +69,7 @@ otherwise.
 
 `%ProgramData%\TotallyHotArcRouter\` holds `agent_telemetry.db` (usage ledger, provider spend, price
 catalog), `coderouterbench.db`, `transcripts.db`, the two trained voter model artifacts,
-`routing-gate.json`, and `management-token.txt`. The MSI never removes it, and that is a decision rather
+`routing-gate.json`, and `secrets.dat` (the protected secret store, which holds the management token). The MSI never removes it, and that is a decision rather
 than an omission: the usage ledger and provider-spend history are the operator's own billing-reconciliation
 record and are not re-derivable from anywhere. A `RemoveFolderEx` would additionally have to run during a
 **major upgrade**, since `MajorUpgrade` performs an internal uninstall of the previous version — so

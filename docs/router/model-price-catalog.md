@@ -15,7 +15,7 @@
 > currently "a source wrote something," not "a source wrote something *different*," which is coarser than
 > the designed eviction signal but never serves a stale value.
 >
-> `IModelPriceLookup` → `PriceCatalogModelPriceLookup` → `PriceCatalogRepository.GetFreshPrice` remains
+> `IModelPriceLookup` → `PriceCatalogModelPriceLookup` → `PriceRepository.GetFreshPrice` remains
 > the narrow per-request seam `ProxyMiddleware` uses for telemetry costing (a direct SQLite read, with the
 > D1 24-hour floor). It is deliberately kept rather than folded into the catalog: that caller wants
 > standard rates for one key and has no `PriceContext` opinion to express. Sections still describing
@@ -241,16 +241,16 @@ why the panel and the model cards are allowed to exist at all. What is forbidden
 TotallyHotArcRouter starts *serving* prices onward to other callers, because at that point it has become an
 aggregator republishing someone else's aggregation.
 
-Concretely, for a proxy that already runs an OpenAI-compatible HTTP surface on port 5001:
+Concretely, for a proxy that already runs an OpenAI-compatible HTTPS surface on port 47101:
 
 | Surface | Price data allowed? | Why |
 |---|---|---|
-| `GET /v1/models` (`RequestInterceptor.ListAvailableModels`) | ❌ **Never** | This is the proxy's public-shaped API. Any IDE, extension, or script that can reach :5001 reads it. Adding a price field here republishes the catalog. |
+| `GET /v1/models` (`RequestInterceptor.ListAvailableModels`) | ❌ **Never** | This is the proxy's public-shaped API. Any IDE, extension, or script that can reach :47101 reads it. Adding a price field here republishes the catalog. |
 | Any new proxy HTTP endpoint | ❌ **Never** | Same reasoning. There is no "internal-only" HTTP endpoint on a listening port. |
 | Local telemetry channel → `TotallyHot.ArcRouter.Gui` | ✅ | Loopback, same machine, same OS user — this is the user reading their own catalog, not redistribution. Must stay loopback-bound (see [`signalr-hub-security.md`](signalr-hub-security.md), whose concerns apply to the current gRPC transport). |
 | Governance model cards | ✅ | Same local channel; the display surface [`../gui/governance-model-cards.md`](../gui/governance-model-cards.md) specifies. |
 | `PriceSourceAdminService` (Governance → Price Sources) | ✅ | Same loopback gRPC channel, and it carries **no price values at all** — only feed metadata: source name, enabled flag, rank, row counts, error strings, and the poll schedule (interval + anchor) the panel's countdown renders. Permitted because it is operator control over the user's own ingestion, not price distribution. **Not a licence to add a price field**: "the transport happens to be local" is not the test — see the rule above. |
-| The SQLite file on disk | ✅ | Local storage under the machine-wide `%ProgramData%\TotallyHotArcRouter\`, readable by local `Users` (see [`agent-cost-tracking.md`](agent-cost-tracking.md) §4's shared `Storage:DatabasePath`). |
+| The SQLite file on disk | ✅ | Local storage under the machine-wide data directory. It is not readable by local `Users`. The production directory policy is `SYSTEM` and `Administrators` only on Windows (`WindowsDataDirectorySecurity`), and owner-only `0700` for Unix state directories (`DataDirectoryBootstrap`). |
 
 This also means the catalog **must not** become a feature of the proxy's OpenAI-compatible surface even
 if a client would find it useful, and any future "expose pricing to the IDE" request has to be refused

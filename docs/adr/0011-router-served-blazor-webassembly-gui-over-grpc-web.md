@@ -69,7 +69,7 @@ in TLS/auth/firewall lockstep with the first, and CodeGraph shows nothing produc
 5002 once the web port carries gRPC too.
 
 Concretely:
-- New `WebInterface` router config section: `Port` (default `5004`), `BindAddress` (default loopback).
+- New `WebInterface` router config section: `Port` (default `47104`, `WebInterfaceOptions.Port`), `BindAddress` (default loopback).
 - The web port serves: the WASM static bundle, `UseGrpcWeb()`-wrapped gRPC services (every
   `IAdminServiceModule`, telemetry, provider/usage admin), and the auth endpoints from ADR-0012.
 - Port 5002 (native gRPC) is retired once the cutover (`web-gui-migration-plan.md` P9) completes.

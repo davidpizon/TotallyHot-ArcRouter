@@ -1,6 +1,8 @@
 # 0024. Protect the machine-shared data directory with one inherited DACL, and make deletion final
 
-**Status:** proposed <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
+**Status:** accepted
+
+> **Accepted 2026-10-21 ([#315](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/315)).** The code already enforces this policy, and #184 is closed. `WindowsDataDirectorySecurity.Machine` grants `SYSTEM` and `Administrators` only. Unix state directories are owner-only `0700` (`DataDirectoryBootstrap`). [`packaging-and-distribution.md`](../router/packaging-and-distribution.md) §3.1 treats that DACL as current.
 **Date:** 2026-10-03
 **Deciders:** David Pizon
 

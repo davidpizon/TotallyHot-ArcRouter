@@ -21,24 +21,13 @@ goal's text but is now part of this plan.
 
 ### 1.1 Current state — verified against the code, not assumed
 
-`ProxyMiddleware.InvokeAsync` (`src/TotallyHotArcRouter/Proxy/ProxyMiddleware.cs`) forwards the client's
-request body essentially byte-for-byte: `RequestInterceptor.ResolveModelRouteAsync` parses the JSON
-body only far enough to read and rewrite the top-level `model` field, then the rest of the body is
-forwarded unchanged to whichever provider `ModelRouteResolver` resolves it to. There is **no
-request/response payload translation for any provider today** — including the two providers that
-already work, OpenAI and Anthropic:
-
-- The **OpenAI** path works because OpenAI's API already matches the shape TotallyHotArcRouter forwards.
-- The **Anthropic** path works today only because the real client (Claude Code) already sends
-  Anthropic-shaped requests (`x-api-key` auth, `messages` array, Anthropic's own tool-use
-  conventions) — the proxy never converts an OpenAI-shaped request into Anthropic's shape or back.
-  `OpenAiUsageParser`/`OpenAiResponseTextParser`/`AnthropicUsageParser`/`AnthropicResponseTextParser`
-  (`src/TotallyHotArcRouter/Telemetry/`) parse **responses already in each provider's native shape** to
-  extract usage/text for telemetry — this is response *parsing* for observability, not request/response
-  *translation* for the forwarded call itself. Do not confuse the two when picking this back up.
-
-So "Unified API Translation" is genuinely unbuilt end-to-end: no provider today lets a client send
-one OpenAI-shaped request and reach an arbitrary configured backend.
+`ProxyServiceCollectionExtensions.AddTelemetryAndTranslation` registers five `IPayloadTranslator`
+singletons: `GeminiPayloadTranslator`, `AnthropicPayloadTranslator`, `AnthropicOnBedrockPayloadTranslator`,
+`TitanPayloadTranslator`, and `LlamaPayloadTranslator`. Gemini and the three Bedrock translators always
+translate (`ShouldTranslate` returns true). Anthropic translates when `ShouldTranslate` says so; a
+native `/v1/messages` request can pass through. Ollama and OpenAI-compatible providers have no
+translator and pass through. Response parsers (`OpenAiUsageParser`, `AnthropicUsageParser`, and the
+text parsers) are still observability, not the translation seam.
 
 ## 2. Scope agreed for this plan
 
@@ -120,8 +109,10 @@ shape today, not a gap.
 1. Added `ollama` to `ModelRoutingOptions:Providers` (`appsettings.json`), base URL
    `http://localhost:11434/v1`, no auth header configured.
 2. Added an example `ModelRouting:ModelList` entry (`llama3`, `Provider: ollama`).
-3. Added `IPayloadTranslator` (`src/TotallyHotArcRouter/Proxy/Translation/IPayloadTranslator.cs`) as an
-   interface only, not yet consumed by anything — the real seam PR 2/3/4 will implement against.
+3. Added `IPayloadTranslator` (`src/TotallyHotArcRouter/Proxy/Translation/IPayloadTranslator.cs`).
+   Ollama itself still has no translator (its endpoint is already OpenAI-shaped). The seam is consumed:
+   Gemini and the three Bedrock translators always translate, and Anthropic translates when
+   `ShouldTranslate` allows it.
 4. Tests (`src/TotallyHotArcRouter.Tests/Proxy/OllamaProviderTests.cs`): an in-process `HttpMessageHandler`
    stub (matching `ProxyMiddlewareTests`' `DelegatingHandlerStub` pattern) returning Ollama-shaped
    fixture responses — both a non-streaming JSON body and an SSE stream — confirming the *existing*

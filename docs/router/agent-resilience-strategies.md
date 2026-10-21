@@ -8,9 +8,9 @@
 > provider + base URL + provider model id, `TotallyHot.ArcRouter.Proxy.CircuitBreakerTargetKey`, not per
 > client-facing model name) is tracked by `TotallyHot.ArcRouter.Proxy.CircuitBreaker`; when one trips OPEN, the
 > next-best agent is selected instead - ranked by `RouterMemory` score via
-> `RequestInterceptor.RankEligibleModels`, reusing the exact same ranking mechanism as
+> `RoutingCandidateBuilder.RankEligibleModels`, reusing the exact same ranking mechanism as
 > [`utility-model-routing.md`](utility-model-routing.md)'s unresolved-model fallback
-> (`TryAgenticallyRouteUnresolvedModel`), not a separate mechanism. Tuning knobs
+> (`RequestInterceptor.ResolveAgenticRouteAsync`), not a separate mechanism. Tuning knobs
 > (`FailureThreshold`/`BaseCooldown`/`MaxCooldown`) are configurable via the `CircuitBreaker` appsettings
 > section (`TotallyHot.ArcRouter.Models.CircuitBreakerOptions`), registered as one DI singleton shared by
 > `RequestInterceptor` and `ProxyMiddleware` (see `ServiceCollectionExtensions`) since the latter is what
@@ -29,7 +29,7 @@
 > timeouts/5xx/429) and per-provider (a bare provider key string, for 401). `RecordProviderFailure` trips
 > **immediately** on a single 401 - unlike the per-target path, it does not wait for `FailureThreshold`
 > occurrences, since one bad credential is already decisive. A provider-wide trip is checked everywhere a
-> per-target one is (`RequestInterceptor.RankEligibleModels`'s eligibility filter and primary-substitution
+> per-target one is (`RoutingCandidateBuilder.RankEligibleModels`'s eligibility filter and primary-substitution
 > check; `ProxyMiddleware`'s pre-attempt bypass gate), and a successful call clears both the target's and
 > its provider's state (`ICircuitBreaker.RecordSuccess`). Failover to a 401'd target's own provider is
 > still refused (a same-provider backup shares the identical bad credential); only a *different*-provider

@@ -1,6 +1,8 @@
 # 0005. Protect explicit provider selections from silent substitution on any circuit trip
 
-**Status:** proposed <!-- proposed | accepted | rejected | deprecated | superseded by ADR-NNNN -->
+**Status:** accepted
+
+> **Accepted 2026-10-21 ([#315](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/315)).** An explicit selection whose target or provider circuit is already open is not substituted. `RoutingCandidateBuilder` sets `ExplicitCircuitTripBlockMessage`, and `ProxyMiddleware` returns 503 with substitution reason `CircuitOpen` before the candidate loop.
 **Date:** 2026-09-01
 **Deciders:** David Pizon
 

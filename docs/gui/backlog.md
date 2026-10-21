@@ -18,12 +18,12 @@ statements in [`dashboard.md`](dashboard.md)'s "Known gaps" section and deferred
 
 ### 1. Extend live telemetry to the rest of the dashboard
 
-Sessions and Cost Analytics' Token Compounding chart now read live data (see "Recently
-completed" below and [`../router/telemetry.md`](../router/telemetry.md)); everything else still
-reads `MockData` because no telemetry source exists for it yet. Most of the items below (cache hit
-rate, Model Distribution, the header ticker, functional time filters) are scheduled with concrete
-data sources in
-[`../router/token-tracking-implementation-plan.md`](../router/token-tracking-implementation-plan.md):
+Sessions, Cost Analytics' Token Compounding chart, and Model Distribution now read live data (see
+"Recently completed" below and [`../router/telemetry.md`](../router/telemetry.md)). Model Distribution's
+time-range filter calls `UsageStore.LoadRollupAsync`; `MockData` is the empty-corpus fallback, not the
+live path. Other surfaces called out below still fall back to `MockData` where this item says so.
+Most of the items below (cache hit rate, the header ticker) were scheduled with concrete data sources
+in [`../router/token-tracking-implementation-plan.md`](../router/token-tracking-implementation-plan.md):
 
 - **Cost Analytics — real values behind the metric explorer.** The tab is a metric explorer (see
   "Recently completed" below) whose corpus is now real, rollup-backed history
@@ -50,9 +50,8 @@ data sources in
   `dim_best` voter alone would have chosen, which the router already decides on every request and now
   persists (`request_transcripts.dim_best_model`). `TaxonomyComparisonService` prices that
   counterfactual from the baseline model's own observed-average token counts and stores the net figure;
-  the tab polls the `UsageAdminService.GetRoutingRoi` gRPC call every 30 seconds (the plain-HTTP
-  `/admin/usage/*` REST surface this originally shipped on has since been replaced by
-  `UsageAdminGrpcService`). Two fabricated inputs were deleted with it — the baseline reconstructed
+  the tab polls the `UsageAdminService.GetRoutingRoi` gRPC call every 30 seconds (`UsageAdminGrpcService`
+  replaced the plain-HTTP usage routes this chart originally shipped on). Two fabricated inputs were deleted with it — the baseline reconstructed
   from a cost-reduction percentage, and the invented `$2.50/M` remediation rate for turns reporting no
   ROI. Every figure is labeled an estimate in its own tooltip,
   since the counterfactual model's real token count for a given request is never observed; a turn with
@@ -65,10 +64,11 @@ data sources in
   From/To inputs now actually refilter, falling back to `MockData` only when there's nothing live to
   show.
 - ~~**Governance** — real per-provider budget/spend data.~~ **Done.** Budget Cap edits persist
-  through `ProviderAdminClient.SetBudgetAsync` → the proxy's `/admin/providers/{key}/budget`
-  endpoint → `ProviderBudgetStore` (SQLite `provider_budgets`/`provider_spend` tables, with
-  per-provider `BudgetWindow` support), tested by `ProviderBudgetStoreTests`/
-  `ProviderAdminEndpointsTests` — they survive a refresh and a GUI restart. (This corrects an
+  through `ProviderAdminClient.SetBudgetAsync`, which calls `ProviderAdminService.SetProviderBudget`
+  on `ProviderAdminGrpcService`, into `ProviderBudgetStore` (SQLite `provider_budgets`/`provider_spend`
+  tables, with per-provider `BudgetWindow` support), tested by `ProviderBudgetStoreTests` and
+  `ProviderAdminGrpcServiceTests`. There is no `ProviderAdminEndpointsTests` project. Budget edits
+  survive a refresh and a GUI restart. (This corrects an
   earlier version of this bullet, which described the input as purely client-side; that was already
   stale by the time of writing.) [`../router/agent-cost-tracking.md`](../router/agent-cost-tracking.md)'s
   deeper per-request usage ledger (`UsageLedger`/`IUsageLedger`) is also implemented, separately
@@ -85,8 +85,7 @@ data sources in
   was outside that phase's scope. This is now a small, unblocked follow-up rather than a deferred one.
 - ~~**Dynamic chart axis ranges**~~ **Done** for Model Distribution's token histogram
   (`GroupedBarsModel.DynamicYMax`, Phase 4 §5.15) — computed from the actual data with headroom
-  instead of a hardcoded 6M ceiling. The $0–$160 Cost Analytics savings scale is unaffected (that
-  chart is unrelated to this plan) and remains pinned to the mock data's range.
+  instead of a hardcoded 6M ceiling. Cost Analytics auto-scales its axes; there is no `$160` pin.
 - ~~**Settings modal actions**~~ **Done.** Reset Stats calls `LiveDataStore.ClearEvents()`; Clear
   History also clears the log buffer (`ClearLogLines()`). Both act on this session's live view only —
   the proxy's own durable history is untouched by design (see `LiveDataStore.ClearEvents`'s remarks).
@@ -99,16 +98,13 @@ data sources in
 
 ### ✅ 2. Authenticate the telemetry gRPC stream
 
-Encryption in transit is real (`Telemetry/TelemetryTlsCertificate.cs`, a self-signed cert on a
-dedicated port - see [`../router/grpc-migration.md`](../router/grpc-migration.md)'s section 2), fixing
-half of what [`../router/signalr-hub-security.md`](../router/signalr-hub-security.md) originally
-proposed, via a different, gRPC-native mechanism rather than that doc's SignalR-era sketch.
-**Authentication is now done too.** `Telemetry/TelemetryAuthInterceptor` gates every call to the
-telemetry gRPC endpoint (`TelemetryGrpcService`'s `StreamEvents` and `PriceSourceAdminGrpcService`,
-which share the TLS port) behind the shared per-user management token, presented in the
-`x-admin-token` metadata entry and verified against `ManagementAccessToken` — the same shared secret
-that already gates the REST `/admin/*` API and the MCP endpoint, so every management surface uses one
-identical check. It overrides all four gRPC call shapes (unary, server-streaming, client-streaming,
+Encryption in transit is the router local CA on the web listener (`WebInterfaceOptions.Port`, default
+47104). `LegacyStorageMigration` still knows the old `telemetry-cert.pfx` name; that file is not the
+listener. See [`../router/telemetry.md`](../router/telemetry.md).
+**Authentication is now done too.** `TelemetryAuthInterceptor` gates calls on that listener behind the
+shared per-user management token, presented in the `x-admin-token` metadata entry and verified against
+`ManagementAccessToken` — the same secret that gates the gRPC admin services and the MCP endpoint, so
+every management surface uses one identical check. It overrides all four gRPC call shapes (unary, server-streaming, client-streaming,
 duplex), not just the ones this service currently uses, so a future streaming admin RPC doesn't
 silently reopen the gap. `TelemetryAuthClientInterceptor` attaches the token client-side;
 `TelemetryChannelFactory.Authenticated` builds the channel with it wired in, used by both
@@ -171,11 +167,12 @@ renders bar charts, but they're driven entirely by the proxy's own internal requ
   Anthropic's reported numbers are only trustworthy as of the moment they were pulled. This is
   additive, not a replacement: Anthropic's API has no endpoint to read back a spend *limit*, so it
   can't drive the existing local $/token cap-utilization bars, which stay exactly as they are.
-- **Secret handling**: the Admin key itself is written through `PUT /admin/secrets/{name}`
-  (`ManagementFacade.SetSecret`, restricted to `reconciliation:{openai|anthropic}:admin-key`) into the
-  protected secret store (`docs/router/secrets-at-rest.md`) rather than `model-routing.json` - there is
-  deliberately no `GET` counterpart on that route; `GET /admin/providers` exposes only a
-  `HasStoredAdminKey` boolean.
+- **Secret handling**: the Admin key itself is written through gRPC `SetSecret`
+  (`ProviderAdminGrpcService` → `ManagementFacade.SetSecret`, restricted to
+  `reconciliation:{openai|anthropic}:admin-key`) into the protected secret store
+  (`docs/router/secrets-at-rest.md`) rather than `model-routing.json`. Reads of the provider list go
+  through gRPC `ListProviders`, which exposes a `HasStoredAdminKey` boolean and does not return the
+  stored secret.
 
 ## Recently completed
 

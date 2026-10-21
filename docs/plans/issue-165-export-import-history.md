@@ -33,13 +33,15 @@ Later the same day:
 
 ## What is stored today
 
-**Full request and response bodies are not stored.** Nothing on disk can reconstruct the HTTP request a harness sent or the HTTP response the client received. An export of today's tables would be a metadata-and-extract archive, not a replayable conversation.
+> **Amendment (2026-10-21, [#315](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/315)).** Full bodies are the encrypted per-session files (ADR-0019). The SQLite text columns are not the live store. `ListPersistedSessions` does not return `prompt_text` / `response_text`. The paragraphs below that say bodies are not stored, and that the transcript table keeps `prompt_text` / `response_text` as the live text, describe the tree before those files. Section 11 is the later implementation note. Follow this amendment and section 11.
+
+**Before ADR-0019, full request and response bodies were not stored.** Nothing on disk could reconstruct the HTTP request a harness sent or the HTTP response the client received from the SQLite tables alone. An export of those tables was a metadata-and-extract archive, not a replayable conversation. That is no longer the storage rule: the session file holds the bodies.
 
 Durable stores, and what each one actually keeps:
 
 | Store | File / table | What is kept | What is absent |
 |---|---|---|---|
-| Transcript store | `transcripts.db` → `request_transcripts` (`TranscriptDatabase`, `SqliteTranscriptStore`) | Newest user-message **text** (`prompt_text`), extracted assistant **text** (`response_text`), correlation id `{sessionId}:{turn}`, `session_id`, timestamps, requested model, routed model, heuristic dimension / difficulty / language / utility, score, estimated cost, exploratory flag, propensity, input/output token counts, `memory_entry_id`, `dim_best_model`, untrained-baseline model and predicted score, `is_judge_scored`, `scorer_version` | Raw JSON, system prompt, prior turns, tool definitions, tool calls and tool results, images, reasoning / thinking blocks, headers, harness, provider, resolved provider model id, cache tokens, HTTP status, latency, streaming flag, substitution reason |
+| Transcript store | `transcripts.db` → `request_transcripts` (`TranscriptDatabase`, `SqliteTranscriptStore`) is the index. Full bodies are the encrypted per-session files (ADR-0019), not the SQLite text columns. | Correlation id `{sessionId}:{turn}`, `session_id`, timestamps, requested model, routed model, heuristic dimension / difficulty / language / utility, score, estimated cost, exploratory flag, propensity, input/output token counts, `memory_entry_id`, `dim_best_model`, untrained-baseline model and predicted score, `is_judge_scored`, `scorer_version`, and the length columns. Inserts write `NULL` for `prompt_text` and `response_text` (section 11). | The SQLite row is not the live body store. |
 | Usage ledger | price-catalog SQLite → `usage_ledger` (`UsageLedger`) | `session_id`, `turn_number`, provider, requested model, resolved model, prompt / completion / cache-creation / cache-read tokens, estimated cost, `cost_confidence`, `occurred_at_utc`, dedup key | Any body or text. No status, latency, or harness |
 | Learned memory | `memory_entries` (`MemoryEntry`) | Embedding vector, chosen model, score, cost, verifier trace, exploratory provenance | Prompt and response text |
 | Live telemetry | in-memory `RoutingTelemetryEvent` only | The fields above plus fallback, streaming, latency, duration, status, substitution reason, router tokens/cost, and summaries truncated to 2,000 characters (`TextTruncator.DefaultMaxLength`) | Not written to SQLite. Lost on process exit |
@@ -59,7 +61,7 @@ How the transcript text is produced:
 Existing "export" and "replay" machinery does not cover this:
 
 - `UsageAdminService.ExportUsageRollup` streams aggregated `usage_rollup` buckets (counts, tokens, cost). No conversation text.
-- `TelemetryService.ListPersistedSessions` returns recent `prompt_text` / `response_text` rows for the Sessions tab, capped by the caller's limit. It is a UI read, not an archive.
+- `TelemetryService.ListPersistedSessions` returns lengths and metadata for the Sessions tab, capped by the caller's limit. It does not return `prompt_text` / `response_text`. It is a UI read, not an archive. Previews are `GetTurnTexts`.
 - `RouterSettings` `ClearTranscripts` wipes `request_transcripts`. There is no import.
 - CodeRouterBench (`benchmark_id_tasks`, `benchmark_ood_tasks`) stores the published Hugging Face corpus. `raw_json` has a benchmark `prompt` string. Sync replaces those tables. The regret harness replays that corpus (`--run-regret-harness`). It does not read live traffic.
 - `RecordedModelTranscripts` / `RecordedStreamTranscripts` are hand-recorded translation fixtures checked into the test project. They are the closest pattern for "a real reply, replayed in a test," and they hold a full response envelope because a human put it there.

@@ -10,7 +10,7 @@ from the OpenAI chat-completions path. The Copilot extension notes below are unc
 
 ## Context
 
-The `oai-compatible-copilot` extension registers a **single** language-model chat provider (vendor `oaicopilot`) that exposes one model to GitHub Copilot Chat and forwards its traffic to the Agentic Router proxy at `http://127.0.0.1:5001/v1`. From VS Code's perspective this single model is a **BYOK (Bring Your Own Key)** main agent.
+The `oai-compatible-copilot` extension registers a **single** language-model chat provider (vendor `oaicopilot`) that exposes one model to GitHub Copilot Chat and forwards its traffic to the Agentic Router proxy at `https://127.0.0.1:47101/v1`. From VS Code's perspective this single model is a **BYOK (Bring Your Own Key)** main agent.
 
 When that BYOK model is selected as the main agent, VS Code Copilot Chat shows:
 
@@ -128,7 +128,7 @@ flowchart TD
     VSC -->|"background / utility request<br/>mainAgent mirror: agentic-router<br/>or fallback: copilot-utility / copilot-utility-small"| EXT
     EXT -->|"POST /v1/chat/completions with model = alias"| RI
 
-    subgraph PROXY["Agentic Router proxy :5001"]
+    subgraph PROXY["Agentic Router proxy :47101"]
         RI["RequestInterceptor.ResolveModelRouteAsync"]
         DEC{"alias kind?"}
         STATIC["existing static allowlist lookup<br/>unchanged"]
@@ -204,13 +204,14 @@ The critical structural point: **selection is decoupled from generation.** The e
   > (`KeywordDimensionInferrer`, now covering all nine research-doc §4.4 dimensions including
   > `multi_language`) so the pre-route and post-response verifier paths can never classify the same
   > prompt differently. `IsUtility` uses this section's exact payload heuristics (small `max_tokens`,
-  > short prompt naming a title/summary/commit-message-style workflow) but is **not yet consumed by any
-  > routing decision** — that wiring, plus the dedicated `"utility"` dimension and the alias-based
-  > `isUtility` signal (B1), lands with B3/B4 below. `Difficulty` (`easy`/`medium`/`hard`, research doc's
+  > short prompt naming a title/summary/commit-message-style workflow). `CompositeRoutingPolicy`
+  > dispatches `context.IsUtility` to `UtilityRoutingPolicy` (non-utility traffic goes to
+  > `OrchestratorRoutingPolicy`). The dedicated `"utility"` dimension and the alias-based `isUtility`
+  > signal (B1) are the parts of this bullet that did not ship as written. `Difficulty` (`easy`/`medium`/`hard`, research doc's
   > few-shot example vocabulary) is additional Phase H scope beyond this section's original `{ dimension,
   > isUtility }` shape, added because PLAN.md's classifier contract also includes it for the
-  > LinUCB/LinTS one-hot context (§5's baselines) — it is likewise unconsumed until a later phase reads
-  > it.
+  > LinUCB/LinTS one-hot context (§5's baselines). The classifier records it on the transcript; those
+  > baselines are not this utility path.
 
 ### B3. Selection-only routing policy
 
@@ -264,7 +265,7 @@ The critical structural point: **selection is decoupled from generation.** The e
 
 #### B3a. Price catalog dependency
 
-The cost term requires `IModelPriceCatalog` — designed but **not implemented**. Its plan is [`model-price-catalog.md`](model-price-catalog.md), the single canonical doc for price data (it supersedes the earlier single-source sketch that lived in `agent-cost-tracking.md` §3.2). Read it for the aggregator set, the schema, units, and failover rules — noting its current scope: **LiteLLM is the only active source**, and the multi-source machinery (priority ranking, cascade failover) is deferred until a second one exists. That does not weaken this plan's dependency: the κ term needs *a* fresh price, not several sources' worth. It does mean a LiteLLM outage has nothing to fail over to, so cold-start behavior is reached more often than the multi-source design implies. This plan **pulls that component into scope**; what utility routing specifically depends on:
+The cost term uses `IModelPriceCatalog`, which is registered (`ProxyServiceCollectionExtensions`) and live. `GetFreshPrice` (`PriceRepository` / `PriceCatalogModelPriceLookup`) and `GetFreshPriceForRouting` (`UtilityRoutingPolicy` / `IModelPriceCatalog`) are both on the tree. The catalog's plan is [`model-price-catalog.md`](model-price-catalog.md), the single canonical doc for price data (it supersedes the earlier single-source sketch that lived in `agent-cost-tracking.md` §3.2). Read it for the aggregator set, the schema, units, and failover rules. Active sources are LiteLLM and OpenRouter, not LiteLLM alone. Cost on the normal orchestrator path is still absent; that gap is open issue #291 and [`../how-it-learns.md`](../how-it-learns.md), not this utility path. What utility routing specifically depends on:
 
 - **Only the catalog is required here.** The `usage_ledger` / provider-reconciliation halves of [`agent-cost-tracking.md`](agent-cost-tracking.md) are **not** needed for utility routing and stay out of scope.
 - **Never block the hot path**: `GetFreshPriceForRouting` — this consumer's method, and the only one that applies D1's 24h floor — is an in-memory read; refresh is the background ingestion service's job. (Its display-side sibling `GetBestPriceForModel` is too, but that one serves stale rows and must never back the cost term.) This matters more for routing than for telemetry — selection runs *inline with the request*, unlike `PublishTelemetryAsync` which runs after the response is forwarded. A catalog miss must degrade to cold-start behavior, never to an awaited network fetch. This is why the catalog's in-memory cache (its Phase 4) is a correctness enabler for *this* consumer, not a perf tweak.
@@ -464,8 +465,8 @@ allows.
   - a candidate served by a provider flagged **`IsFree`** *is* cost-ranked, at κ = 0, and is **not** excluded by the freshness gate — assert this explicitly. Its price was never fetched, so it can never be fresh, and a naive reading of the gate would permanently exclude `llama3`: the one model whose cost is certain. This test is what stops the gate from being "fixed" in the wrong direction;
   - a candidate with `s == null` is not gate-dropped (unobserved ≠ bad) — note the polarity is the **inverse** of the price rule above, and deliberately so: an unobserved model may still be good, whereas an unpriced one cannot be cost-compared.
 - Feedback loop: after a utility request completes, a score is written to `RouterMemory` under the utility dimension (otherwise the policy is frozen at cold start forever).
-- End-to-end: `POST http://localhost:5001/v1/chat/completions` with `{"model":"copilot-utility-small", ...}` and with `{"model":"agentic-router", ...}` both return 200 and (via logs/telemetry) show selection of a cheap backend — not an HTTP 400.
-- `GET http://localhost:5001/v1/models` lists the router alias (and utility aliases when enabled).
+- End-to-end: `POST https://127.0.0.1:47101/v1/chat/completions` with `{"model":"copilot-utility-small", ...}` and with `{"model":"agentic-router", ...}` both return 200 and (via logs/telemetry) show selection of a cheap backend — not an HTTP 400.
+- `GET https://127.0.0.1:47101/v1/models` lists the router alias (and utility aliases when enabled).
 
 **Extension (`@vscode/test-electron`):**
 - On activate with the Agentic Router model selected and no user utility setting, the reconciler sets `byokUtilityModelDefault: "mainAgent"` (or writes the fallback settings when the key is absent) and does **not** overwrite a pre-existing user value.

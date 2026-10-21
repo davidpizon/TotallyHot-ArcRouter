@@ -646,8 +646,11 @@ grows it. `<main>` keeps its original `p-3`, and `.ds-card-stack` was eventually
 
 **The sanctioned exception to §5.4.** An element may render outside its parent container — and must
 then not be clipped by it — when it is *simulating existence outside the layout* rather than
-participating in it. Three qualify today: `.ls-tooltip`, the four modal `.overlay-backdrop`/
-`.overlay-panel` dialogs, and `PriceSourcesAdmin`'s lifted drag card. An ordinary hover or emphasis
+participating in it. Three qualify today: `.ls-tooltip`, the `DialogShell` `.overlay-backdrop`/
+`.overlay-panel` dialogs, and `PriceSourcesAdmin`'s lifted drag card. Nine components wrap their body
+in `DialogShell`: `SettingsModal`, `ProviderEditDialog`, `RemoveProviderDialog`,
+`UnlockSecretFieldDialog`, `UnlockContentDialog`, `ExportDialog`, `AddPasskeyDialog`,
+`ApprovalRequestsDialog`, and `RegenerateManagementTokenDialog`. `DialogShell` carries `.z-50`. An ordinary hover or emphasis
 state does **not** qualify; it is still part of the layout and §5.4 applies to it in full.
 
 **To qualify, a detached element must:**
@@ -669,7 +672,7 @@ state does **not** qualify; it is still part of the layout and §5.4 applies to 
   | z-index | What | Note |
   |---|---|---|
   | `10` | `.card-lifted` | Was a local claim inside the stack; once pinned it is **app-wide**. Must stay under 50. |
-  | `50` | `.z-50` — all four modals | A drag can't start while a modal is open, but a modal opened another way must cover the card. |
+  | `50` | `.z-50` — every `DialogShell` dialog (the nine components named above) | A drag can't start while a modal is open, but a modal opened another way must cover the card. |
   | `100` | `.ls-tooltip`, `#blazor-error-ui` | Floating UI anchored to a trigger. |
   | `500` | `.ls-toast-host` (`ToastHost.razor`, §4.4) | The top layer. A toast reports a failure the operator must see even while a modal is open, so it deliberately clears the `50` tier. Nothing sits above it. |
 
@@ -822,10 +825,16 @@ Earlier round of classes:
 - `.btn-state-active`, `.btn-state-inactive`, `.btn-metric-active`, `.btn-metric-inactive` — conditional button states
 
 Every remaining `style=` attribute in `TotallyHotArcRouter.Gui.Components/Components` is one of the sanctioned
-exceptions: a per-agent/per-model color computed from backend data (`ColorUtils`, `m.Color`,
-`share.Color`, `AgentColor`), a log-level color (`LogLevelColorMapper`), a `--i` stagger-index custom
-property feeding the `.row-enter` animation delay (§6/MOTION.md), or `Icon.razor`'s
-`Style` passthrough parameter (a generic per-instance API, unused by any current caller).
+exceptions: a per-agent/per-model color computed from backend data (`CostAnalytics.razor`
+`background:@m.Color`, `ModelDistribution.razor` `background:@share.Color`, `LearningReportCard.razor`
+`background:@slice.Color`, `SessionOverviewTab.razor` `--agent-color:@m.Color`, `SessionMessageRow.razor`
+`--agent-color:@AgentColor`), a log-level color (`ConsoleTab.razor` `LogLevelColorMapper`), a `--i`
+stagger-index custom property (`SessionRailItem.razor` `--i:@StaggerIndex`) feeding the `.row-enter`
+animation delay (§6/MOTION.md), `Icon.razor`'s `Style` passthrough parameter (a generic per-instance
+API, unused by any current caller), `BenchmarkData.razor`'s four progress-bar widths
+(`style="width:@(PercentCss(...))%"`), or `SettingsModal.razor`'s
+`style="overflow-wrap:anywhere"` on the passkey-revoke hint. Phase A of #315 records these; it does
+not delete them.
 
 ## 8. Do's and Don'ts
 

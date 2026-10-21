@@ -97,9 +97,10 @@ flowchart LR
 ```
 
 The projection in `ManagementFacade.BuildProvidersResponse` is the **single place** a stored literal
-header value can leave the application. Every read surface — the REST `/admin/providers` API and the MCP
-`list_providers` tool — goes through it, so "a locked value is never sent to the GUI" is enforced once
-rather than per caller.
+header value can leave the application. Provider reads go through gRPC `ListProviders`. The MCP
+`list_providers` tool still goes through `ManagementFacade` (`ProviderMcpTools.ListProviders` calls
+`ManagementFacade.ListProviders`, which uses the same projection), so "a locked value is never sent
+to the GUI" is enforced once rather than per caller.
 
 On the write side, `HeaderWriteRequest.Locked` is a `bool?` and qualifies the blank rule:
 

@@ -2,7 +2,7 @@
 
 > **Status: Implemented.** This records a completed change and the reasoning behind it. The forward-looking
 > half — the 24h routing gate and the zero-fresh-prices error log — is **specified, not built**: it lands
-> with [`model-price-catalog.md`](model-price-catalog.md), which remains proposed. Where this document
+> with [`model-price-catalog.md`](model-price-catalog.md). Where this document
 > and that one disagree about price data, that one wins.
 
 ## Why
@@ -18,12 +18,14 @@ GUI ever sees. So the seed is deleted and cost is `null` until TotallyHotArcRout
 with one exception: a provider the operator marks **free** (a local Ollama runtime) has a *known* price
 of zero, which is a verifiable fact about the machine rather than a guess.
 
-**The constraint that shaped this:** the price-fetching subsystem does not exist. The recent price
-commits (`e06de96`…`a4c1586`) touched `docs/` only — no SQLite dependency, no `IModelPriceCatalog`, no
-ingestion worker. Removing the seed and enforcing a "must have a fresh price to be routable" rule at the
-same time would have made zero models routable and stopped the proxy serving anything. Hence the split:
-the seed removal and the free-provider flag are code today; the gate and the error log are documented
-design.
+**The constraint that shaped this (historical, amended 2026-10-21, #315):** when the seed was
+removed, the price-fetching subsystem did not exist. The price commits of that period touched `docs/`
+only. Removing the seed and enforcing a "must have a fresh price to be routable" rule at the same time
+would have made zero models routable and stopped the proxy serving anything. Hence the split: the seed
+removal and the free-provider flag landed first. The catalog has since landed. `IModelPriceCatalog`,
+`PriceRepository.GetFreshPrice`, `UsageLedger`, and `CostReconciliationService` exist under
+`src/TotallyHotArcRouter/PriceCatalog/` and `src/TotallyHotArcRouter/Telemetry/`. `appsettings.json`
+has no `Pricing` seed section. The banner above is the current rule.
 
 ## Decisions
 
@@ -46,8 +48,9 @@ Dropping it deleted that mechanism too.
 **Seed removal.** The `Pricing` block left [`appsettings.json`](../../src/TotallyHotArcRouter/appsettings.json);
 `PricingOptions` and its DI registration are gone; `ProxyMiddleware` lost its pricing field and ctor
 param. `ModelPrice` + `EstimateCost` survive in
-[`Telemetry/ModelPrice.cs`](../../src/TotallyHotArcRouter/Telemetry/ModelPrice.cs) — the catalog will supply
-their values later.
+[`Telemetry/ModelPrice.cs`](../../src/TotallyHotArcRouter/Telemetry/ModelPrice.cs). The catalog
+(`PriceRepository.GetFreshPrice`, reached from `PriceCatalogModelPriceLookup`) supplies fresh rates; this paragraph records the seed removal,
+not a catalog that was still missing.
 
 **The `IsFree` flag, end to end.** `ProviderOptions.IsFree` → `ResolvedModelRoute.IsFree` →
 `ProxyMiddleware`, which reports `ModelPrice.Free.EstimateCost(...)` for a free route. It runs through
@@ -94,7 +97,7 @@ pinned it. Side effect worth knowing: `llama3` now reports token counts for the 
 | Route | `EstimatedCostUsd` |
 |---|---|
 | Provider flagged `IsFree`, usage extracted | `0` — a known price |
-| Any other model | `null` — no price data source exists yet |
+| Any other model, no fresh catalog price | `null` — unknown, not a fabricated seed. A fresh catalog price produces an estimate; see [`telemetry.md`](telemetry.md) |
 | Usage not extractable (unsupported provider, malformed body) | `null` |
 
 ## Hazards
@@ -106,7 +109,7 @@ pinned it. Side effect worth knowing: `llama3` now reports token counts for the 
    is correct-by-design (no migration, no on-disk schema version), and it is why the `Free` badge sits
    on the provider card rather than only inside the edit dialog: the flag's state has to be visible
    without opening anything.
-2. **`ModelPrice.Free` is not a catalog row.** When the catalog lands it must not overwrite a free
+2. **`ModelPrice.Free` is not a catalog row.** The catalog must not overwrite a free
    provider's zero — an `IsFree` provider costs nothing regardless of what any aggregator publishes
    about the model it serves.
 3. **The freshness gate has an inverse-polarity trap.** `utility-model-routing.md`'s quality gate does

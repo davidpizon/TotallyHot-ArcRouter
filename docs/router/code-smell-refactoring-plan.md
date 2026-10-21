@@ -904,14 +904,31 @@ thresholds), and `ModelDistribution.razor:182-183`. `Models/DashboardData.cs:226
 **Fix:** `ChartPalette.Series[n]` for the arrays, and named `ChartPalette.Danger`/`Warning`/`Ok` for the
 budget thresholds.
 
-**D3 · Hardcoded default endpoints. Minor, borderline.** Three literal defaults —
-`ProviderAdminStore.cs:21` (`http://localhost:5001`), `TelemetryChannelFactory.cs:30`
-(`https://localhost:5002`), `ProviderTemplates.cs:151` (`http://localhost:11434/v1`). All three are
-`const` and named, which is already most of the way correct. The residual smell is that the router's
-own port defaults live separately in `ProxyServer`'s signature (`port = 5001`,
-`grpcPort = DefaultGrpcPort`), so the two sides of the contract can drift without a compile error.
-**Fix:** a shared `DefaultEndpoints` constant class — or consciously accept and document the
-duplication, since the GUI assemblies deliberately do not reference the router.
+**D3 · Hardcoded default endpoints. Minor, borderline. Retargeted 2026-10-21 (#315).** The 5000-series
+evidence is gone: no `http://localhost:5001` under `src/**/*.cs`, `TelemetryChannelFactory.DefaultServerAddress`
+is not `https://localhost:5002`, `ProxyServer` does not take `port = 5001` / `grpcPort = DefaultGrpcPort`,
+`ProviderAdminStore` has no endpoint constant, and `ProviderTemplates` does not hardcode the router port.
+The split that remains is the 47100-series literals. GUI projects do not reference the router
+(`Gui.Telemetry.csproj` says that omission is deliberate):
+
+- `TotallyHot.ArcRouter.Gui.Services.OpenAiCompatibleDropIn` (`src/TotallyHotArcRouter.Gui.Components/Services/OpenAiCompatibleDropIn.cs`) `BaseUrl` is the literal
+  `https://localhost:47101/v1` and `DashboardUrl` is `https://localhost:47104`. The router's
+  `OpenAiCompatibleDropIn` builds the same strings from `ProxyListenerOptions.Port` (47101) and
+  `WebInterfaceOptions.Port` (47104). `OpenAiCompatibleDropInTests.Gui_drop_in_constants_stay_in_lockstep_with_the_router`
+  greps the GUI source for the router's formatted strings. That test covers this pair.
+- `TelemetryChannelFactory.DefaultServerAddress` is the literal `https://localhost:47104`, against
+  `WebInterfaceOptions.Port`. `Gui.Telemetry.Tests` pins the literal string and does not read
+  `WebInterfaceOptions`. No lockstep test.
+- `McpServer`'s constructor default `port = 47103`, `McpOptions.Port` (47103), and `appsettings.json`
+  `Mcp:Port` (47103). Three literals, one value. `McpServiceRegistrationTests` asserts `McpOptions.Port`
+  only.
+
+`PlainHttpListenerOptions.Port` (47105) is a different opt-in listener and is not part of this split.
+**Fix:** a shared constant, or a written decision to keep the split because the GUI must not reference
+the router. Where a lockstep test already exists, that test is the guard. A new lockstep test for
+`TelemetryChannelFactory.DefaultServerAddress` and the `McpServer` constructor default is a follow-up
+on this item, not a docs change. Phase A does not add the constant or the test. D3 stays on the
+Phase 5C list.
 
 **D4 · Vestigial interception hooks. Minor — not dead code.**
 `RequestInterceptor.InterceptRequestAsync` logs and increments a counter; `InterceptResponseAsync` logs

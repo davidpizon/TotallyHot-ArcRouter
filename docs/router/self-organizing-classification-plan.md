@@ -678,7 +678,7 @@ flow, and the in-progress "Training…" state with a live bootstrap-progress cou
 ## Phase T6 — System Settings: Adaptive Routing toggle + Sample Size
 
 > **Status: shipped.** Router side: `router_settings` key/value table on `RouterMemoryDatabase`,
-> `RouterSettingsStore` (`AdaptiveRoutingEnabledKey`/`EmbeddingMemoryCapacityKey`, stored-override >
+> `RouterSettingsStore` (the SQLite key `AdaptiveRoutingEnabledKey` for `RoutingOptions.EnableAdaptiveRouting`, plus `EmbeddingMemoryCapacityKey`, stored-override >
 > appsettings.json > coded-default precedence via `RouterSettingsConfigureOptions`), and
 > `RouterSettingsAdminGrpcService` (`GetRouterSettings`/`UpdateRouterSettings`, `[500, 50000]` capacity
 > clamp, synchronous `EmbeddingMemory.TrimToCurrentCapacityAsync` on a lowered capacity) all landed ahead
@@ -706,7 +706,8 @@ scoped to exactly the two settings this phase needs.
 
 - A new `router_settings` key/value table, added via the same additive-migration convention
   `PriceCatalogDatabase.MigrateEnabledColumn` established, living in `RouterMemoryDatabase`. Two keys
-  to start: `AdaptiveRoutingEnabled` (bool, default `false`) and `EmbeddingMemoryCapacity` (int,
+  to start: the SQLite key `RouterSettingsStore.AdaptiveRoutingEnabledKey` (the property is
+  `RoutingOptions.EnableAdaptiveRouting`, default `true`) and `EmbeddingMemoryCapacity` (int,
   default `20000`, matching `RoutingOptions`'s existing shipped default).
 - **Precedence:** a stored override beats `appsettings.json`, which beats the coded default. Applied
   both at startup and at runtime — a small mutable options wrapper (e.g. an
@@ -715,11 +716,12 @@ scoped to exactly the two settings this phase needs.
   `EmbeddingMemoryCapacity` to `[500, 50000]` and rejects out-of-range values with a structured error
   rather than silently clamping — the GUI enforces the same bounds client-side so this path is rarely
   exercised, but the server is the actual authority.
-- **`RoutingOptions.EnableAdaptiveRouting`** (new, default `false`) is the single master gate for this
-  plan's own features: transcript capture (T1), the cluster-retrain hosted service (T2), and
-  `ClusterBestVoter` (T3) all check it in addition to their individual per-feature flags. It does
-  **not** gate anything already shipped — the Orchestrator itself, `dim_best`, `memory_kNN`, `logreg`,
-  `llm_router`, and exploration are unaffected by this toggle and keep their existing defaults.
+- **`RoutingOptions.EnableAdaptiveRouting`** (default `true`) is the master gate for this plan's own
+  features: transcript capture (T1, checked at the insert site), the cluster-retrain hosted service
+  (T2), and `ClusterBestVoter` (T3) all check it in addition to their individual per-feature flags. A
+  fresh install captures transcripts and can score `cluster_best` without an extra opt-in. The System
+  Settings toggle defaults to On. It does **not** gate the Orchestrator itself, `dim_best`,
+  `memory_kNN`, `logreg`, `llm_router`, or exploration; those keep their existing defaults.
 - **Capacity-change semantics.** Lowering `EmbeddingMemoryCapacity` at runtime triggers the same
   oldest-first trim `EmbeddingMemory.InitializeAsync` already performs on load, deleting evicted rows
   from `memory_entries`. This is documented both in this doc and in the GUI's own warning copy, since

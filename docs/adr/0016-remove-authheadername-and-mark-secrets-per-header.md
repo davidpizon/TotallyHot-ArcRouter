@@ -1,6 +1,8 @@
 # 0016. Remove `AuthHeaderName`; mark secret headers per header and strip every configured header name
 
-**Status:** proposed
+**Status:** accepted
+
+> **Accepted 2026-10-21 ([#315](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/315)).** There is no `AuthHeaderName` symbol under `src/`. Credentials are header rows (`appsettings.json` `Headers`).
 **Date:** 2026-09-24
 **Deciders:** David Pizon
 

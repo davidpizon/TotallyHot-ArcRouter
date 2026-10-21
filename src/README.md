@@ -56,8 +56,13 @@ shape, including how to compose a scheme prefix (e.g. `Bearer`).
 
 - **`Routing`** — router policy defaults (`DefaultModel`, `MaxCandidates`,
   `MaxNeighborCount`, `EnableExploration`, `ExplorationRate`).
-- **`ModelRouting`** — the proxy's allowlist. Only models listed in
-  `ModelList` are routable; anything else gets a `400` response.
+- **`ModelRouting`** — the proxy's allowlist. Outside forced single-model mode
+  (`--model`), an unresolved or administratively disabled name is a routing
+  decision (`RequestInterceptor.ResolveAgenticRouteAsync`, reasons
+  `UnresolvedName` or `ModelStopped`) and is served when a candidate exists.
+  The proxy returns 400 `invalid_request_error` only when `model` is missing,
+  or when that fallback also finds nothing
+  (`ProxyMiddleware.WriteModelNotFoundResponseAsync`).
 
 To add a model, add an entry under `ModelList` that points at an existing
 provider key:
@@ -228,8 +233,11 @@ curl -k https://localhost:47101/v1/chat/completions \
   -d '{"model":"auto","messages":[{"role":"user","content":"hello"}]}'
 ```
 
-An unconfigured model name returns a `400` with an `invalid_request_error`
-body instead of being forwarded.
+Outside forced single-model mode, an unconfigured or administratively disabled
+name is a routing decision (`RequestInterceptor.ResolveAgenticRouteAsync`) and
+is forwarded when a candidate exists. The proxy returns 400
+`invalid_request_error` only when `model` is missing, or when that fallback
+also finds nothing (`ProxyMiddleware.WriteModelNotFoundResponseAsync`).
 
 ### Model discovery (`GET /v1/models`)
 

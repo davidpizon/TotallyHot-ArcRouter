@@ -16,7 +16,7 @@
 
 ## Why this exists
 
-The per-request cost path is wired (`ProxyMiddleware` → `IModelPriceLookup` → `PriceCatalogRepository.GetFreshPrice`),
+The per-request cost path is wired (`ProxyMiddleware` → `IModelPriceLookup` → `PriceRepository.GetFreshPrice`),
 but it resolves a price only when the lookup key happens to equal a source's own raw model key. In
 practice that is rare, so most paid models report `EstimatedCostUsd = null`. Closing D3 is what turns that
 `null` into a real number for every model the operator has configured **and** an aggregator prices.

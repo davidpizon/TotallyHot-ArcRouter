@@ -116,9 +116,13 @@ newer archive. Updates are never applied without an explicit action. See
 The drop-in above is the whole client setup: one base URL, `"model": "auto"`
 (any casing). A request naming a real, servable model (e.g. `"model": "gpt-5.4"`)
 is always served exactly that model; the router never substitutes a model the
-client explicitly named. An unrecognized name, an administratively stopped
-model, or a circuit-open/unhealthy provider fall back to the same routing
-decision as `auto`.
+client explicitly named. An unrecognized name or an administratively stopped
+model falls back to the same routing decision as `auto`. An explicit model whose
+circuit is already open does not: `RoutingCandidateBuilder` sets
+`ExplicitCircuitTripBlockMessage` and does not swap in another model, and
+`ProxyMiddleware` returns 503 with substitution reason `CircuitOpen`
+(`WriteCircuitTripBlockedResponseAsync`) before the candidate loop. A circuit
+that opens during the request can still fail over.
 
 How that decision is scored against the policy that never learned — estimated
 regret, score-delta, and the Cost Analytics report card — is documented in
@@ -320,11 +324,19 @@ against are the work of Zhou et al. If you use them, cite their paper:
 ```
 
 **The quality-scoring judge** is an implementation of G-Eval, by Liu et al. Arc
-Router grades every response with two independent graders, and one of them
-(`GEvalJudgeClient`) follows this recipe directly: a per-dimension criteria
-prompt, a 1–5 form-filling score, and — the part that matters most — a
-**probability-weighted** score taken over the output-token logprobs rather than
-the single digit the model happened to sample. If you use that grader, cite:
+Router grades fenced code blocks. `QualityIngress` does not enqueue a turn that
+sampling drops, whose `ISignalExtractor.Extract` returns null, or while quality
+scoring is disabled. `CodeBlockSignalExtractor` returns null when the response
+has no fenced code block. The G-Eval judge (`GEvalJudgeClient`) joins only when
+the result has a correlation id, the judge is enabled, and a free backbone
+resolves (`JudgeAvailability`). Static syntax and analysis can score a block
+with no judge. Grading every response, including prose, is open issue
+[#304](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/304), not
+current behavior. When the judge does run, it follows this recipe directly: a
+per-dimension criteria prompt, a 1–5 form-filling score, and — the part that
+matters most — a **probability-weighted** score taken over the output-token
+logprobs rather than the single digit the model happened to sample. If you use
+that grader, cite:
 
 ```bibtex
 @inproceedings{geval2023liu,

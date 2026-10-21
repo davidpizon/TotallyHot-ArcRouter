@@ -17,8 +17,8 @@
 
 Under ADR-0012, `POST /auth/session` gives a management session to any process that can make a loopback HTTP call. That session can today:
 
-- read stored previews through `ListPersistedSessions` (`prompt_text` / `response_text`);
-- read live text through `StreamEvents` (`request_summary` / `response_summary`);
+- **Amendment (2026-10-21, [#315](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/315)).** `ListPersistedSessions` does not return `prompt_text` / `response_text`. The list is lengths and metadata. A content grant does not put preview text back on it. Previews are `GetTurnTexts`.
+- read live text through `StreamEvents` (`request_summary` / `response_summary`), filtered by `ApplyContentGate` rather than forwarded unchanged;
 - fetch the management token through `GetManagementToken` and `RegenerateManagementToken`.
 
 David's requirement (2026-09-30): conversation content must not be open to any application that can make an HTTP call. ADR-0020 chooses WebAuthn passkeys with user verification required. This plan implements that gate.
@@ -47,8 +47,8 @@ flowchart TB
 | # | Finding | Evidence |
 |---|---|---|
 | F1 | `ManagementTokenAdminGrpcService` returns `_tokenProvider.CurrentToken` / `Regenerate()` with no credential beyond the ADR-0012 session. | `ManagementTokenAdminGrpcService.cs:26-39` |
-| F2 | `ListPersistedSessions` maps full stored text into wire previews via `TextTruncator` with no grant check. | `TelemetryGrpcService.ToContract` (`:186-224`) |
-| F3 | `StreamEvents` forwards every `TelemetryEvent` unchanged; no per-event redaction. | `TelemetryGrpcService.StreamEvents` (`:97-117`) |
+| F2 | **Pre-fix finding.** `ListPersistedSessions` mapped stored text into wire previews via `TextTruncator` with no grant check. **Current rule (2026-10-21, [#315](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/315)):** the list does not map stored text. `ToContract` sets lengths and metadata and does not set `PromptText`, `ResponseText`, or the truncation flags. A content grant does not restore preview text on `ListPersistedSessions`. Previews are `GetTurnTexts`. | `TelemetryGrpcService.ToContract` |
+| F3 | **Pre-fix finding.** `StreamEvents` forwarded every `TelemetryEvent` unchanged. **Current rule (2026-10-21, #315):** `StreamEvents` is not "every event unchanged." `ApplyContentGate` filters it. | `TelemetryGrpcService.ApplyContentGate` |
 | F4 | `ManagementAuthEndpoints` issues a session cookie to any loopback caller with no credential. | `ManagementAuthEndpoints.HandleSessionAsync` |
 | F5 | Session tickets carry only token generation; every ticket in a generation is identical. | `ManagementSessionTicketService.IssueTicket` |
 | F6 | `#184` phase 1 landed: `SecureFile.WriteMachineShared` grants only `LocalSystem` and `Administrators`, with `Administrators` as owner — no writing-account ACE. | `SecureFile.RestrictToMachineAccountsWindows` (`:133-166`); test `WriteMachineShared_GrantsOnlyLocalSystemAndAdministrators_NotTheWriter` |
@@ -113,7 +113,7 @@ Additive proto changes in `telemetry.proto` (or a sibling `passkey.proto` mapped
   - `ListRecentApprovals` — audit list for the GUI.
 - **Header** `x-content-grant` on content-bearing RPCs (gRPC metadata). One-operation RPCs take the authorization token in the request message (or a dedicated header `x-content-authorization`) so binding can be checked against the request body.
 - **`LogLineEvent`**: add optional `bool content_bearing = N`. `TelemetryLogEventSink` stops dropping `ConversationBody` events; instead it publishes them with `content_bearing=true`. `StreamEvents` omits those events (and clears `request_summary` / `response_summary`) when the stream's call lacks a valid grant. Check **per event**, so expiry mid-stream stops text from then on.
-- **`ListPersistedSessions`**: without a grant, omit `prompt_text` / `response_text` (and truncation flags that imply text was sent); keep metadata, lengths, ids. With a grant, today's preview behavior.
+- **`ListPersistedSessions`**: **Amendment (2026-10-21, [#315](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/315)).** The list does not map stored text. A content grant does not restore preview text on `ListPersistedSessions`. It returns lengths and metadata and does not set `PromptText`, `ResponseText`, or the truncation flags. Previews are `GetTurnTexts`. The 2026-10 sentence that a grant restores "today's preview behavior" is not the contract. `StreamEvents` is filtered by `ApplyContentGate` (see F3), not forwarded unchanged.
 
 Do not change ADR-0012 session issuance.
 

@@ -100,8 +100,8 @@ they read as breathing rather than blinking.
 | `--dur-instant` | `100ms` | Shipping | Tooltip fade (`.ls-tooltip`) |
 | `--dur-fast` | `150ms` | Shipping | Hover, focus, color/border change (`.card-hover`, `.transition-colors`, input focus, `.ls-divider`) |
 | `--dur-default` | `200ms` | Shipping | Tab indicator, row enter, dropdowns, value tick |
-| `--dur-slow` | `300ms` | Proposed | Overlay enter (modals), largest surfaces only |
-| `--dur-exit` | `120ms` | Proposed | Exits — see rule below |
+| `--dur-slow` | `300ms` | Shipping | Overlay enter (`.overlay-panel`), largest surfaces only |
+| `--dur-exit` | `120ms` | Shipping | Exits (`.ls-disclosure`) — see rule below |
 | `--dur-entrance` | `420ms` | Shipping (token only, unused) | Reserved for a full-screen/theater-style entrance (`aspirational-design.md` §5) — e.g. a first-load empty state or a whole-tab reveal. **Not** used for list rows or dense stat strips; at 420ms those would read as sluggish in a telemetry app the operator scans continuously. `--dur-default`/`--dur-slow` remain correct for everything currently shipping. |
 | `--dur-pulse` | `2s` | Shipping | `.pulse-dot` liveness loop |
 | `--dur-flash` | `1.2s` | Shipping | `.flash-amber` / `.flash-red`, 3 iterations |

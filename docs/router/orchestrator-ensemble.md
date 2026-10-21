@@ -70,9 +70,9 @@ registered in `AddTotallyHotArcRouter`. Phase M later made it the default genera
   observed score in that (cluster, model) ledger cell. Abstains when no cluster artifact has been trained,
   when the embedding's dimension or embedding model disagrees with the artifact's, when the nearest
   centroid is below `ClusterAssignmentThreshold` (0.5), or when the winning cell holds fewer than
-  `ClusterBestMinObservations` (3) observations. Gated twice: by `EnableClusterBestVoter` (default `true`)
-  **and** by the `AdaptiveRoutingEnabled` master switch (default **off**), so a fresh install never scores
-  it until an operator opts in. Default weight `ClusterBestVoterWeight` = 0.5 — no published reference
+  `ClusterBestMinObservations` (3) observations. Gated by `EnableClusterBestVoter` (default `true`)
+  and by `RoutingOptions.EnableAdaptiveRouting` (default **true**), so a fresh install can score
+  `cluster_best` without an extra opt-in. The System Settings toggle defaults to On. Default weight `ClusterBestVoterWeight` = 0.5 — no published reference
   value exists, so it is set to the same order of magnitude as `logreg`'s until an operator tunes it.
 
 ## Weights, logging, and the worked-example exit test
@@ -114,9 +114,10 @@ four for a while — `GetRoutingMode` appended four hardcoded string literals an
 Phase T3 added the fifth — so the Governance → Routing Mode pane could not display `cluster_best` at all.
 Fixed per [`doc-code-reconciliation-plan.md`](doc-code-reconciliation-plan.md) §1.1: every name now comes
 from `VoterNames`, which exists precisely to stop this class of drift, so a future voter is a visible
-omission there rather than a silent one. `cluster_best` is reported un-gated on `AdaptiveRoutingEnabled`,
-because the pane reports *configuration* — what would apply if the Orchestrator were live — not current
-activity.
+omission there rather than a silent one. `cluster_best` is reported from `EnableClusterBestVoter`.
+The pane does not gate that row on `RoutingOptions.EnableAdaptiveRouting` (the service comment still
+names the retired property; the property is `EnableAdaptiveRouting`). The pane reports
+*configuration* — what would apply if the Orchestrator were live — not current activity.
 
 ## Settled deferral
 
