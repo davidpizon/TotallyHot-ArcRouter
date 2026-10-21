@@ -53,7 +53,7 @@ show truncated or load-on-demand text, which he prefers for performance.
 
 ### What this ADR chose on 2026-10-03 (interim, replaced by ADR-0019)
 
-Chosen option at that date: "A. Server-side previews plus a response byte budget, reusing fields 6 and 7", because it was the only option available then that satisfied **Bounded message** for any input. The 2,000-character preview (`TextTruncator.DefaultMaxLength`, the same cap live telemetry uses) was meant to keep the typical list small. The 3 MiB budget (`3 * 1024 * 1024`, counted with `CodedOutputStream.ComputeMessageSize` per row) was the hard guarantee. That contract is not what the router serves now.
+Chosen option at that date: "A. Server-side previews plus a response byte budget, reusing fields 6 and 7", because it was the only option available then that satisfied **Bounded message** for any input. The 2,000-character preview (`TextTruncator.DefaultMaxLength`, the same cap live telemetry uses) was meant to keep the typical list small. The 3 MiB budget (`TelemetryGrpcService.MaxListResponseBytes`, `3 * 1024 * 1024`, counted with `CodedOutputStream.ComputeMessageSize` per row) was the hard guarantee for message size. The preview half of that contract is not what the router serves now. The byte budget and `has_more` still apply to the metadata-only list.
 
 The additive fields that landed with option A, and that option E still uses for metadata, are:
 

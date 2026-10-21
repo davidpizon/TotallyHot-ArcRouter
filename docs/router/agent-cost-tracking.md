@@ -7,7 +7,7 @@
 > `src/TotallyHotArcRouter/Telemetry/`: the SQLite database (`agent_telemetry.db`,
 > `Microsoft.Data.Sqlite`), the multi-source price catalog of
 > [`model-price-catalog.md`](model-price-catalog.md) with live LiteLLM/OpenRouter feeds, the per-request
-> cost path (`ProxyMiddleware` → `IModelPriceLookup` → `PriceCatalogRepository.GetFreshPrice`, resolved
+> cost path (`ProxyMiddleware` → `IModelPriceLookup` → `PriceRepository.GetFreshPrice`, resolved
 > via [`d3-alias-resolution.md`](d3-alias-resolution.md)), per-provider monthly spend rows
 > (`provider_spend`) with budget enforcement (`ProviderBudgetStore`), rate-limit header
 > snapshots/history ([`anthropic-reported-usage-plan.md`](anthropic-reported-usage-plan.md)), the
@@ -29,7 +29,7 @@
 Asked when this document was written, the honest answer was that the project did not pull cost from
 providers and had no price data and no ledger. That is history. The banner above is the current rule
 (amended 2026-10-21, #315): the price catalog, `IModelPriceCatalog` /
-`PriceCatalogRepository.GetFreshPrice`, `UsageLedger`, and `CostReconciliationService` exist.
+`PriceRepository.GetFreshPrice`, `UsageLedger`, and `CostReconciliationService` exist.
 `appsettings.json` has no `Pricing` seed. `model-price-catalog.md` is the catalog spec, and it is not
 proposed. `EstimatedCostUsd` is still a local estimate (token counts × a catalog price, or zero for an
 `IsFree` provider, or null when no fresh price resolves). Provider-reported spend is the reconciliation
@@ -441,8 +441,8 @@ daily token usage via `GET /v1/organizations/usage_report/messages` (`bucket_wid
 `AnthropicUsageReportService` upserts the raw counts into `provider_reported_usage_snapshot`
 (`provider_key`, `usage_day`, `model` primary key) on the same hourly cycle as reconciliation -
 `CostReconciliationHostedService` runs both in turn, each independently swallowing its own failures so
-one never blocks the other. `ManagementFacade.ProviderView.ReportedUsage` exposes it on the existing
-`GET /admin/providers` payload; an account with no Admin API key configured simply never populates the
+one never blocks the other. `ProviderView.ReportedUsage` is on the gRPC `ListProviders` response
+(`ProviderAdminGrpcService`); an account with no Admin API key configured simply never populates the
 table, and the Governance UI's Anthropic Usage card shows "No reported usage fetched yet" instead of
 failing. See [`secrets-at-rest-plan.md`](secrets-at-rest-plan.md) §8 for the full design.
 

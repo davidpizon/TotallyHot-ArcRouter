@@ -15,7 +15,7 @@
 > currently "a source wrote something," not "a source wrote something *different*," which is coarser than
 > the designed eviction signal but never serves a stale value.
 >
-> `IModelPriceLookup` → `PriceCatalogModelPriceLookup` → `PriceCatalogRepository.GetFreshPrice` remains
+> `IModelPriceLookup` → `PriceCatalogModelPriceLookup` → `PriceRepository.GetFreshPrice` remains
 > the narrow per-request seam `ProxyMiddleware` uses for telemetry costing (a direct SQLite read, with the
 > D1 24-hour floor). It is deliberately kept rather than folded into the catalog: that caller wants
 > standard rates for one key and has no `PriceContext` opinion to express. Sections still describing

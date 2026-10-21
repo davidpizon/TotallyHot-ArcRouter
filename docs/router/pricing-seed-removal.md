@@ -23,7 +23,7 @@ removed, the price-fetching subsystem did not exist. The price commits of that p
 only. Removing the seed and enforcing a "must have a fresh price to be routable" rule at the same time
 would have made zero models routable and stopped the proxy serving anything. Hence the split: the seed
 removal and the free-provider flag landed first. The catalog has since landed. `IModelPriceCatalog`,
-`PriceCatalogRepository.GetFreshPrice`, `UsageLedger`, and `CostReconciliationService` exist under
+`PriceRepository.GetFreshPrice`, `UsageLedger`, and `CostReconciliationService` exist under
 `src/TotallyHotArcRouter/PriceCatalog/` and `src/TotallyHotArcRouter/Telemetry/`. `appsettings.json`
 has no `Pricing` seed section. The banner above is the current rule.
 
@@ -49,7 +49,7 @@ Dropping it deleted that mechanism too.
 `PricingOptions` and its DI registration are gone; `ProxyMiddleware` lost its pricing field and ctor
 param. `ModelPrice` + `EstimateCost` survive in
 [`Telemetry/ModelPrice.cs`](../../src/TotallyHotArcRouter/Telemetry/ModelPrice.cs). The catalog
-(`PriceCatalogRepository.GetFreshPrice`) supplies fresh rates; this paragraph records the seed removal,
+(`PriceRepository.GetFreshPrice`, reached from `PriceCatalogModelPriceLookup`) supplies fresh rates; this paragraph records the seed removal,
 not a catalog that was still missing.
 
 **The `IsFree` flag, end to end.** `ProviderOptions.IsFree` → `ResolvedModelRoute.IsFree` →

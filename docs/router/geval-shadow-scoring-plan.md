@@ -37,7 +37,7 @@ two deliberately separated stages:
 > **Status note.** Step 1 shipped. Step 2 was **superseded** — code execution was removed from the
 > project entirely, which made *every* dimension non-executable and turned the judge into a permanent
 > co-grader rather than a fallback. See [`quality-verifier-architecture.md`](quality-verifier-architecture.md),
-> and Phase G3 below for what shipped instead and what is still outstanding.
+> and Phase G3 below. The blend shipped. The embedding-memory `is_judge_scored` flag did not; the header says how.
 
 Two cross-cutting requirements apply from the first phase:
 
@@ -413,8 +413,8 @@ measurable against `static_score` and are still worth running as a standing regr
 > both grades are now blended into one via `QualityScoreAggregator`, and the judge defaults to **on**
 > whenever a free backbone resolves.
 >
-> The design below is retained because its learning-layer requirements were the right ones and are still
-> outstanding — see the note at the end of this section.
+> The design below is retained because its learning-layer requirements were the right ones. That policy
+> shipped; the embedding-memory provenance flag did not. See the note at the end of this section.
 
 The original scope: **only dimensions/results where the sandbox produced no execution signal**
 (`result.Executed == false` and the dimension is configured judge-eligible). Executable dimensions keep

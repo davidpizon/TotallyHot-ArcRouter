@@ -390,12 +390,11 @@ per card.
   must not be read as loosening it — it only means the price/spend split is no longer being held in
   place by licensing, and whoever revisits it must supply the design argument themselves rather than
   inheriting a constraint that no longer applies.
-- **This is the first client-initiated, on-demand query in the GUI.** Every other GUI data source
-  today is push-only over the telemetry gRPC stream (`Changed`, `LogLinesChanged`, and now
-  `ModelListChanged`). `TelemetryService` also has `ListPersistedSessions` and `GetTurnTexts`. The
-  spend query's request/response-on-user-interaction shape is a genuinely different integration pattern
-  from the push stream. `GetModelSpend` is still only a proposal; it is not a fourth `TelemetryService`
-  RPC.
+- **`GetModelSpend` would be another unary query.** The GUI already calls unary RPCs (`ListProviders`,
+  `GetUsageRollup`, `GetRoutingRoi`, `GetTurnTexts`, and others). `LiveDataStore` still pushes
+  `Changed` and `LogLinesChanged`. There is no `ModelListChanged` symbol. `GetModelSpend` is still only
+  a proposal; it is not a `TelemetryService` RPC. `TelemetryService` is `StreamEvents`,
+  `ListPersistedSessions`, and `GetTurnTexts`.
 - **No budget cap at the model level.** Explicitly out of scope per section 1 - if wanted later, it's
   a distinct follow-on design, not an extension bolted onto this doc.
 

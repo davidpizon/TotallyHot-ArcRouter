@@ -911,7 +911,7 @@ is not `https://localhost:5002`, `ProxyServer` does not take `port = 5001` / `gr
 The split that remains is the 47100-series literals. GUI projects do not reference the router
 (`Gui.Telemetry.csproj` says that omission is deliberate):
 
-- `TotallyHot.ArcRouter.Gui.Components.Services.OpenAiCompatibleDropIn.BaseUrl` is the literal
+- `TotallyHot.ArcRouter.Gui.Services.OpenAiCompatibleDropIn` (`src/TotallyHotArcRouter.Gui.Components/Services/OpenAiCompatibleDropIn.cs`) `BaseUrl` is the literal
   `https://localhost:47101/v1` and `DashboardUrl` is `https://localhost:47104`. The router's
   `OpenAiCompatibleDropIn` builds the same strings from `ProxyListenerOptions.Port` (47101) and
   `WebInterfaceOptions.Port` (47104). `OpenAiCompatibleDropInTests.Gui_drop_in_constants_stay_in_lockstep_with_the_router`

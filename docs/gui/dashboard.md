@@ -120,12 +120,11 @@ flowchart TD
      turn number), so a GUI restart that then sees one new live turn still shows earlier persisted turns
      of that session. Persisted history requires transcript capture to be on
      (`TranscriptOptions.Enabled`); with it off, the Sessions tab shows only the live stream.
-     - **Persisted history is previews under a byte budget** ([#179](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/179),
-       [ADR-0023](../adr/0023-send-display-previews-under-a-byte-budget-on-the-persisted-session-list.md)).
-       Each persisted turn's prompt and response arrive as the same 2,000-character previews live turns
-       carry, with truncation flags, stored lengths, and the row id. The router stops adding rows before the
-       response would pass 3 MiB, under the GUI gRPC client's default 4 MiB receive cap, and sets `has_more`.
-       Storage keeps the full text; only this display read is shortened.
+     - **Persisted history on the list is metadata** ([#179](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/179),
+       [ADR-0023](../adr/0023-send-display-previews-under-a-byte-budget-on-the-persisted-session-list.md), amended 2026-10-21, [#315](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/315)).
+       `ListPersistedSessions` returns lengths and metadata. `TelemetryGrpcService.ToContract` does not set prompt or response text. Previews are `GetTurnTexts`. The router still stops adding rows before the
+       response would pass 3 MiB (`TelemetryGrpcService.MaxListResponseBytes`) and sets `has_more`.
+       Storage keeps the full text in the encrypted per-session files.
      - **Notice line** (`PersistedSessionStore.HistoryNotice`, rendered by `LiveStream.razor` as
        `.ls-history-notice`): a failed load, whether the router is unreachable or the read was rejected,
        shows "Persisted history couldn't be loaded: …" instead of silently showing live sessions only. A load

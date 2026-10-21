@@ -8,7 +8,7 @@
 > the file's ACL; fix verified end to end — the MSI that previously aborted now installs cleanly, and the
 > `LocalSystem` service reads the machine-scoped store. See [Verification](#verification).
 
-> **Superseded by [ADR-0024](0024-protect-the-machine-shared-data-directory-and-make-deletion-final.md)** (accepted, 2026-10-21, [#315](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/315)). Machine-wide writes grant `LocalSystem` and `BuiltinAdministrators` only. `SecureFile.WriteMachineShared` no longer grants the writing-account ACE this ADR chose. The decision text below is the history of that choice; it is not the current ACL.
+> **Superseded by [ADR-0024](0024-protect-the-machine-shared-data-directory-and-make-deletion-final.md)** (accepted, 2026-10-21, [#315](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/315)). Machine-wide writes grant `WellKnownSidType.LocalSystemSid` and `WellKnownSidType.BuiltinAdministratorsSid` only (`SecureFile.RestrictToMachineAccountsWindows`). `WindowsDataDirectorySecurity.Machine` is `SYSTEM` and `Administrators` only. `SecureFile.WriteMachineShared` no longer grants the writing-account ACE this ADR chose. The decision text below is the history of that choice; it is not the current ACL.
 
 ## Context and Problem Statement
 

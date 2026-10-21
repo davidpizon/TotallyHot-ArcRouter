@@ -397,7 +397,7 @@ A new, **always-mapped, read-only** `RoutingModeAdminService` gRPC service
 ([`RoutingModeAdminGrpcService.cs`](../../src/TotallyHotArcRouter/Router/RoutingModeAdminGrpcService.cs))
 reports `RoutingOptions.EnableOrchestratorPolicy`, the exploration enablement/rate, and the four PLAN.md
 Phase L voters' enablement/weight (`dim_best`/`memory_kNN`/`logreg`/`llm_router`, in that fixed order).
-Unlike the other admin services sharing the :5002 TLS endpoint, it needed no optional-store gating in
+Unlike the other admin services sharing the web listener (HTTPS, `WebInterfaceOptions.Port`, default 47104), it needed no optional-store gating in
 `ProxyServer`/`ProxyHostedService`/`ServiceCollectionExtensions` — `RoutingOptions` is core, always-bound
 configuration, not an add-on feature. A new Governance sub-tab, `RoutingModeAdmin.razor`, renders the
 report via `RoutingModeStore` (the client-side singleton, mirroring `PriceSourceStore`'s
