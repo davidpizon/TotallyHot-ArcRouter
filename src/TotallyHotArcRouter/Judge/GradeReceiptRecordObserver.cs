@@ -2,7 +2,6 @@ using System.Text;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Quality.Grading;
-using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Judge;
 
@@ -69,8 +68,7 @@ public sealed class GradeReceiptRecordObserver : IQualityScoreObserver
             return;
         }
 
-        ConversationWindowResult? window = null;
-        _pendingWindowCache.TryTake(correlationId: result.RequestCorrelationId, out window);
+        _pendingWindowCache.TryTake(correlationId: result.RequestCorrelationId, out var window);
 
         var newestForHmac = window?.NewestUserMessage;
         var questionHmac = _questionHmacHasher.TryCompute(newestForHmac);

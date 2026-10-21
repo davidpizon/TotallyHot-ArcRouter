@@ -3,7 +3,6 @@ using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Quality;
-using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Tests.Judge;
 

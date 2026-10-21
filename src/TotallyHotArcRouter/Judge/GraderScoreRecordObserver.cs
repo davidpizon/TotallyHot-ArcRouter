@@ -92,8 +92,7 @@ public sealed class GraderScoreRecordObserver : IQualityScoreObserver
 
         string? questionHmac = null;
         if (hasCorrelationId &&
-            _pendingWindowCache.TryPeek(correlationId: result.RequestCorrelationId, out var window) &&
-            window is not null)
+            _pendingWindowCache.TryPeek(correlationId: result.RequestCorrelationId, out var window))
             questionHmac = _questionHmacHasher.TryCompute(window.NewestUserMessage);
 
         var createdAtUtc = _timeProvider.GetUtcNow();

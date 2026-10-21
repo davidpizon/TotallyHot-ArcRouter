@@ -222,4 +222,67 @@ public sealed class LiveDataStoreTests
         await cleared.Task.WaitAsync(TimeSpan.FromSeconds(4), TestContext.Current.CancellationToken);
         grant.IsActive.Should().BeFalse();
     }
+
+    /// <summary>
+    /// Issue #293: a StructureOnly or Incomplete grade is stored on the turn the Sessions pane renders,
+    /// with the exact label the dashboard shows while learning is paused.
+    /// </summary>
+    [Theory]
+    [InlineData("StructureOnly")]
+    [InlineData("Incomplete")]
+    public void Non_complete_grade_labels_the_turn_structure_only_learning_paused(string gradeStatus)
+    {
+        LiveDataStore.StructureOnlyLearningPausedLabel.Should().Be("structure only / learning paused");
+        var store = new LiveDataStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress));
+        var now = DateTimeOffset.UtcNow;
+        store.OnRoutingTelemetryReceived(EventWithText("s1", 1, now));
+
+        store.OnQualitySignalReceived(QualitySignal(correlationId: "s1:1", gradeStatus: gradeStatus, now: now));
+
+        store.Conversations.Single().Turns.Single().QualityGradeLabel
+            .Should().Be("structure only / learning paused");
+    }
+
+    [Fact]
+    public void Complete_grade_does_not_label_the_turn_and_clears_an_earlier_paused_label()
+    {
+        var store = new LiveDataStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress));
+        var now = DateTimeOffset.UtcNow;
+        store.OnRoutingTelemetryReceived(EventWithText("s1", 1, now));
+        store.OnQualitySignalReceived(QualitySignal(correlationId: "s1:1", gradeStatus: "StructureOnly", now: now));
+
+        store.OnQualitySignalReceived(QualitySignal(correlationId: "s1:1", gradeStatus: "Complete", now: now));
+
+        store.Conversations.Single().Turns.Single().QualityGradeLabel.Should().BeNull();
+    }
+
+    [Fact]
+    public void Quality_signal_without_a_grade_status_does_not_label_the_turn()
+    {
+        var store = new LiveDataStore(channelProvider: new StubRouterChannelProvider(UnreachableAddress));
+        var now = DateTimeOffset.UtcNow;
+        store.OnRoutingTelemetryReceived(EventWithText("s1", 1, now));
+
+        store.OnQualitySignalReceived(QualitySignal(correlationId: "s1:1", gradeStatus: null, now: now));
+
+        store.Conversations.Single().Turns.Single().QualityGradeLabel.Should().BeNull();
+    }
+
+    private static Contract.QualitySignalEvent QualitySignal(string correlationId, string? gradeStatus, DateTimeOffset now)
+    {
+        var signal = new Contract.QualitySignalEvent
+        {
+            CorrelationId = correlationId,
+            SessionId = "s1",
+            Dimension = "live:code_generation",
+            Model = "m",
+            Language = "csharp",
+            SyntaxValid = true,
+            SyntaxAuthoritative = true,
+            UnifiedScore = 0.4,
+            TimestampUtc = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTimeOffset(now)
+        };
+        if (gradeStatus is not null) signal.GradeStatus = gradeStatus;
+        return signal;
+    }
 }

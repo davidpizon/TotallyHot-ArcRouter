@@ -34,7 +34,7 @@ public sealed partial class QuestionHmacHasher
     {
         if (!GraderQuestionText.IsPresent(newestUserMessage)) return null;
 
-        var normalized = NormalizeWhitespace(newestUserMessage!.Trim());
+        var normalized = NormalizeWhitespace(newestUserMessage.Trim());
         var key = GetOrCreateKey();
         var payload = Encoding.UTF8.GetBytes(normalized);
         var digest = HMACSHA256.HashData(key: key, source: payload);

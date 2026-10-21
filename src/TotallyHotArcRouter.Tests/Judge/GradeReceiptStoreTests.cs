@@ -5,7 +5,6 @@ using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Quality;
-using TotallyHot.ArcRouter.Quality.Grading;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Tests.TestSupport;
@@ -70,7 +69,7 @@ public class GradeReceiptStoreTests
         var roundTrip = await store.TryGetAsync(correlationId: "sess-1:1",
             cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(roundTrip);
-        Assert.Equal(expected: GradeStatus.Complete, actual: roundTrip!.GradeStatus);
+        Assert.Equal(expected: GradeStatus.Complete, actual: roundTrip.GradeStatus);
         Assert.NotNull(roundTrip.QuestionHmac);
         Assert.DoesNotContain(question, roundTrip.QuestionHmac, StringComparison.Ordinal);
         Assert.DoesNotContain(question, roundTrip.AbstainedGraders, StringComparison.Ordinal);
@@ -134,6 +133,83 @@ public class GradeReceiptStoreTests
         Assert.Equal(expected: 1L, actual: Scalar(connection, "SELECT COUNT(*) FROM dimension_scores WHERE dimension = 'code_generation';"));
         Assert.Equal(expected: 0L, actual: Scalar(connection, "SELECT COUNT(*) FROM dimension_scores WHERE dimension LIKE 'live:%';"));
         Assert.True(SchemaMetaExists(connection: connection, key: RouterMemoryDatabase.Issue293LiveLearningPurgeKey));
+    }
+
+    /// <summary>
+    /// Upgrades a file copy of a pre-#293 database. The first open deletes live learning and stamps
+    /// <c>schema_meta</c>; a second open leaves rows written after that stamp in place.
+    /// </summary>
+    [Fact]
+    public void EnsureCreated_OnCopiedLegacyDatabase_PurgesLiveLearningOnce()
+    {
+        var source = CreateLegacyDatabaseWithoutIssue293Tables();
+        SeedLiveAndBenchmarkRows(source);
+        SeedShadowScore(source);
+
+        var copy = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "router_embedding_memory.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
+        File.Copy(sourceFileName: source, destFileName: copy);
+
+        var database = new RouterMemoryDatabase(Options.Create(new RoutingOptions
+        {
+            EmbeddingMemoryDatabasePath = copy
+        }));
+        database.EnsureCreated();
+
+        using (var upgraded = database.OpenConnection())
+        {
+            Assert.Equal(expected: 0L, actual: Scalar(upgraded, "SELECT COUNT(*) FROM memory_entries;"));
+            Assert.Equal(expected: 0L, actual: Scalar(upgraded, "SELECT COUNT(*) FROM grader_scores;"));
+            Assert.Equal(expected: 0L, actual: Scalar(upgraded, "SELECT COUNT(*) FROM judge_shadow_scores;"));
+            Assert.Equal(expected: 0L, actual: Scalar(upgraded, "SELECT COUNT(*) FROM dimension_scores WHERE dimension LIKE 'live:%';"));
+            Assert.Equal(expected: 1L, actual: Scalar(upgraded, "SELECT COUNT(*) FROM dimension_scores WHERE dimension = 'code_generation';"));
+            Assert.Equal(expected: 1L, actual: Scalar(upgraded,
+                "SELECT COUNT(*) FROM schema_meta WHERE key = 'issue-293-live-learning-purge';"));
+        }
+
+        using (var untouched = new SqliteConnection($"Data Source={source}"))
+        {
+            untouched.Open();
+            Assert.Equal(expected: 1L, actual: Scalar(untouched, "SELECT COUNT(*) FROM memory_entries;"));
+            Assert.Equal(expected: 1L, actual: Scalar(untouched, "SELECT COUNT(*) FROM grader_scores;"));
+            Assert.Equal(expected: 1L, actual: Scalar(untouched, "SELECT COUNT(*) FROM judge_shadow_scores;"));
+            Assert.Equal(expected: 1L, actual: Scalar(untouched, "SELECT COUNT(*) FROM dimension_scores WHERE dimension LIKE 'live:%';"));
+        }
+
+        using (var upgraded = database.OpenConnection())
+        {
+            using var insert = upgraded.CreateCommand();
+            insert.CommandText = """
+                                 INSERT INTO memory_entries (embedding, chosen_model, score, cost, created_at_utc)
+                                 VALUES (X'01', 'after', 0.9, 0, '2026-10-21T00:00:00Z');
+                                 INSERT INTO dimension_scores (dimension, model, sum, count)
+                                 VALUES ('live:code_generation', 'after', 0.9, 1);
+                                 INSERT INTO grader_scores (correlation_id, created_at_utc, dimension, model, grader_key, score)
+                                 VALUES ('after', '2026-10-21T00:00:00Z', 'd', 'after', 'judge', 0.9);
+                                 INSERT INTO judge_shadow_scores (
+                                     correlation_id, created_at_utc, dimension, model, static_score, judge_score,
+                                     judge_model, judge_prompt_version, judge_latency_ms, used_logprobs)
+                                 VALUES ('after', '2026-10-21T00:00:00Z', 'd', 'after', 0.4, 0.9, 'judge', 'v', 1, 0);
+                                 """;
+            insert.ExecuteNonQuery();
+        }
+
+        string marker;
+        using (var upgraded = database.OpenConnection())
+            marker = Text(upgraded, "SELECT value FROM schema_meta WHERE key = 'issue-293-live-learning-purge';");
+
+        database.EnsureCreated();
+
+        using (var upgraded = database.OpenConnection())
+        {
+            Assert.Equal(expected: 1L, actual: Scalar(upgraded, "SELECT COUNT(*) FROM memory_entries WHERE chosen_model = 'after';"));
+            Assert.Equal(expected: 1L, actual: Scalar(upgraded, "SELECT COUNT(*) FROM grader_scores;"));
+            Assert.Equal(expected: 1L, actual: Scalar(upgraded, "SELECT COUNT(*) FROM judge_shadow_scores;"));
+            Assert.Equal(expected: 1L, actual: Scalar(upgraded, "SELECT COUNT(*) FROM dimension_scores WHERE dimension LIKE 'live:%';"));
+            Assert.Equal(expected: 1L, actual: Scalar(upgraded, "SELECT COUNT(*) FROM dimension_scores WHERE dimension = 'code_generation';"));
+            Assert.Equal(expected: marker, actual: Text(upgraded,
+                "SELECT value FROM schema_meta WHERE key = 'issue-293-live-learning-purge';"));
+        }
     }
 
     private static GradeReceiptRecord SampleReceipt(string correlationId) =>
@@ -213,6 +289,20 @@ public class GradeReceiptStoreTests
         command.ExecuteNonQuery();
     }
 
+    private static void SeedShadowScore(string path)
+    {
+        using var connection = new SqliteConnection($"Data Source={path}");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+                              INSERT INTO judge_shadow_scores (
+                                  correlation_id, created_at_utc, dimension, model, static_score, judge_score,
+                                  judge_model, judge_prompt_version, judge_latency_ms, used_logprobs)
+                              VALUES ('c-1', '2020-01-01T00:00:00Z', 'd', 'm', 0.2, 0.4, 'judge', 'v1', 3, 0);
+                              """;
+        command.ExecuteNonQuery();
+    }
+
     private static bool ColumnExists(SqliteConnection connection, string table, string column)
     {
         using var command = connection.CreateCommand();
@@ -226,6 +316,13 @@ public class GradeReceiptStoreTests
         using var command = connection.CreateCommand();
         command.CommandText = sql;
         return Convert.ToInt64(command.ExecuteScalar());
+    }
+
+    private static string Text(SqliteConnection connection, string sql)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return Convert.ToString(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
     }
 
     private static bool SchemaMetaExists(SqliteConnection connection, string key)

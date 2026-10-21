@@ -81,7 +81,7 @@ public class DeferredTelemetryPublisherTests
         var signal = new QualitySignalEvent(
             CorrelationId: "corr-1", SessionId: "sess-1", Dimension: "live:code_generation", Model: "gpt-5.4",
             Language: "CSharp",
-            true, true, 0.9, 0.8, 0.87, null, GradeStatus: TotallyHot.ArcRouter.Quality.GradeStatus.Complete,
+            true, true, 0.9, 0.8, 0.87, null, GradeStatus: Quality.GradeStatus.Complete,
             TimestampUtc: DateTimeOffset.UtcNow);
         await deferred.PublishQualitySignalAsync(signal: signal,
             cancellationToken: TestContext.Current.CancellationToken);
