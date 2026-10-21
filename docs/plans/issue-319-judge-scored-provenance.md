@@ -1,6 +1,6 @@
 # Plan: Stamp embedding-memory rows from the judge score (#319)
 
-**Status:** Decisions recorded 2026-10-21. David answered the four questions in §7. This pull request is still the plan only. The implementation is a later pull request that links this file. It does not start in this pull request.
+**Status:** Decisions recorded 2026-10-21. David answered the four questions in §7. [#320](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/320) merged the previous text of this file, which still listed those questions as open. This revision records the answers. It is still the plan only. The implementation is a later pull request that links this file. It does not start here.
 **Issue:** [#319](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/319) — `EmbeddingMemoryScoreObserver` stamps every `Complete` grade as judge-scored.
 **Standing rule:** [Approved plan before coding](../router/standing-rules.md#approved-plan-before-coding). The implementation pull request links this file.
 **Precedes:** [#304](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/304). #304 planning may proceed now. #304's learning writes wait until this fix is in the tree. #304's plan is not edited here.
