@@ -146,11 +146,14 @@ public sealed class EmbeddingMemory : IDisposable
     /// compiling unchanged.
     /// </param>
     /// <param name="isJudgeScored">
-    /// Whether the G-Eval judge contributed to <paramref name="score"/> - <see cref="Router.EmbeddingMemoryScoreObserver"/>
-    /// passes <c>result.JudgeScore.HasValue</c> (docs/router/geval-shadow-scoring-plan.md §Provenance;
-    /// the G3 "still owed" item this closes). Defaults to <see langword="false"/> so every other caller
-    /// (bootstrap import, tests) keeps recording rows as execution/heuristic-grounded without change.
-    /// Placed last so every existing positional call site keeps compiling unchanged.
+    /// Whether the row is recorded as judge-grounded. <see cref="EmbeddingMemoryScoreObserver"/> passes
+    /// <see langword="true"/> for every <see cref="TotallyHot.ArcRouter.Quality.GradeStatus.Complete"/> grade it
+    /// writes and does not consult <c>result.JudgeScore.HasValue</c>
+    /// (docs/router/geval-shadow-scoring-plan.md §Provenance; G3 is not closed by that stamp).
+    /// <c>TranscriptScoreObserver</c> still passes <c>JudgeScore.HasValue</c>. Defaults to
+    /// <see langword="false"/> so every other caller (bootstrap import, tests) keeps recording rows
+    /// as execution/heuristic-grounded without change. Placed last so every existing positional call
+    /// site keeps compiling unchanged.
     /// </param>
     public async Task<MemoryEntry> AddEntryAsync(
         float[] taskEmbedding,

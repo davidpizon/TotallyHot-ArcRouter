@@ -32,10 +32,11 @@ namespace TotallyHot.ArcRouter.Router;
 /// capture is enabled.
 /// </param>
 /// <param name="IsJudgeScored">
-/// Whether the judge actually contributed a grade that influenced <paramref name="Score"/>, as opposed to
-/// a judge grade being requested but timing out or abstaining (docs/router/geval-shadow-scoring-plan.md's
-/// G3 provenance definition). <see cref="EmbeddingMemoryScoreObserver"/> stamps this as
-/// <see cref="Quality.QualityResult.JudgeScore"/>.HasValue. Used by learning consumers
+/// Whether learning consumers should treat the row as judge-grounded
+/// (docs/router/geval-shadow-scoring-plan.md's G3 provenance definition).
+/// <see cref="EmbeddingMemoryScoreObserver"/> stamps this <see langword="true"/> for every
+/// <see cref="TotallyHot.ArcRouter.Quality.GradeStatus.Complete"/> grade it writes, and does not consult
+/// <see cref="Quality.QualityResult.JudgeScore"/>'s <c>HasValue</c>. Used by learning consumers
 /// (<see cref="Orchestrator.MemoryKnnVoter"/>, the logreg/clustering trainers, <see cref="Orchestrator.ClusterLedger"/>)
 /// to weight, exclude, or discount judge-influenced rows per the operator's configured
 /// <see cref="Models.JudgeRowPolicy"/>.
