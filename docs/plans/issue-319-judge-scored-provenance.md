@@ -1,6 +1,6 @@
 # Plan: Stamp embedding-memory rows from the judge score (#319)
 
-**Status:** Decisions recorded 2026-10-21. David answered the four questions in §7. [#320](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/320) merged the previous text of this file, which still listed those questions as open. This revision records the answers. It is still the plan only. The implementation is a later pull request that links this file. It does not start here. Amended 2026-10-22: §6 names the `RoutingOptions.JudgeScoredRowPolicy` and `JudgeRowPolicy.DownWeight` comments and gives the replacement wording for each. This amendment still closes nothing.
+**Status:** Decisions recorded 2026-10-21. David answered the four questions in §7. [#320](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/320) merged the previous text of this file, which still listed those questions as open. This revision records the answers. It is still the plan only. The implementation is a later pull request that links this file. It does not start here. Amended 2026-10-22: §6 names the `RoutingOptions.JudgeScoredRowPolicy`, `JudgeRowPolicy.DownWeight`, and `JudgeRowPolicy.Include` comments and gives the replacement wording for each. This amendment still closes nothing.
 **Issue:** [#319](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/319) — `EmbeddingMemoryScoreObserver` stamps every `Complete` grade as judge-scored.
 **Standing rule:** [Approved plan before coding](../router/standing-rules.md#approved-plan-before-coding). The implementation pull request links this file.
 **Precedes:** [#304](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/304). #304 planning may proceed now. #304's learning writes wait until this fix is in the tree. #304's plan is not edited here.
@@ -61,7 +61,7 @@ Comments that describe the old stamp, updated in the same change so they match t
 
 - The class summary and the inline comment on `EmbeddingMemoryScoreObserver`.
 - `MemoryEntry.IsJudgeScored` and `EmbeddingMemory.AddEntryAsync`'s `isJudgeScored` parameter, which currently say the observer does not consult `HasValue`.
-- `JudgeRowPolicy`'s summary, which says every `Complete` live row is judge-scored by construction. After this change that is no longer true. The default stays `Include`. The 2026-10-22 note in §6 names two further comments with that claim, `RoutingOptions.JudgeScoredRowPolicy` and `JudgeRowPolicy.DownWeight`, and gives the replacement wording. Rewrite those two to that wording in the same change.
+- `JudgeRowPolicy`'s summary, which says every `Complete` live row is judge-scored by construction. After this change that is no longer true. The default stays `Include`. The 2026-10-22 note in §6 names `RoutingOptions.JudgeScoredRowPolicy`, `JudgeRowPolicy.DownWeight`, and `JudgeRowPolicy.Include`, which repeat that claim, and gives the replacement wording. Rewrite those three to that wording in the same change.
 
 C# / .NET only. No Python. No new service. No change to `ManagementFacade`. Serilog templates stay static string literals. The hot path is one boolean read on a grade that is already off the request thread. No new allocation. The purge is startup migration, not the request path.
 
@@ -178,15 +178,15 @@ After the assignment and the purge are true, these sentences are updated so they
 - [ADR-0026](../adr/0026-grade-a-response-only-against-its-question-and-learn-only-from-complete-grades.md) and `docs/plans/issue-293-graders-judge-against-the-question.md` §2.5. **Decided 2026-10-21:** add a dated correction note in the implementation. Do not delete the old text. Do not change the `Complete`-only learning gate, the #293 purge, or `grade_receipts`.
   - The sentence "every new live row is judge-scored by construction" is §2.5 of the #293 plan (`MemoryEntry.IsJudgeScored` is true for every new live row). The note says that sentence described the stamp this plan removes, and that the flag is now `JudgeScore.HasValue`.
   - ADR-0026 does not contain that sentence. Its decision is the `Complete`-only gate, `JudgeRowPolicy` default `Include`, and the one-time #293 purge (decision point 6). The note, dated 2026-10-21, says a `Complete` grade no longer means the embedding-memory row is judge-scored, names #319, and records the second purge in §4. It does not reopen decision point 6.
-- **2026-10-22.** `RoutingOptions.JudgeScoredRowPolicy` and `JudgeRowPolicy.DownWeight` still say every `Complete` live row is judge-scored. After the assignment in §3 (`isJudgeScored: result.JudgeScore.HasValue`), a `Complete` grade with no `JudgeScore` is still written, and the row is stored with `is_judge_scored = 0`. `AGENTS.md` treats a stale XML doc as a missing doc, so both comments are rewritten in the implementation to the wording below. This plan pull request leaves the C# files unchanged. The default stays `Include`.
+- **2026-10-22.** `RoutingOptions.JudgeScoredRowPolicy` and `JudgeRowPolicy.DownWeight` still say every `Complete` live row is judge-scored. `JudgeRowPolicy.Include` says the same thing in other words ("only question-aware complete grades survive the learning gate"). After the assignment in §3 (`isJudgeScored: result.JudgeScore.HasValue`), a `Complete` grade with no `JudgeScore` is still written, and the row is stored with `is_judge_scored = 0`. `AGENTS.md` treats a stale XML doc as a missing doc, so the implementation rewrites all three to the wording below. This plan pull request leaves the C# files unchanged. The default stays `Include`.
 
   `JudgeRowWeighting.ResolveWeight` (`src/TotallyHotArcRouter/Models/JudgeRowWeighting.cs` line 28) returns `1.0` when `isJudgeScored` is false. The policy switch on lines 30-35 does not run for that row. That return is how every value of `RoutingOptions.JudgeScoredRowPolicy` treats an `is_judge_scored = 0` row, and how `JudgeRowPolicy.DownWeight` treats one: the row stays, at multiplier `1.0`. Consumers apply the return as-is:
 
   - `MemoryKnnVoter.VoteAsync` (`src/TotallyHotArcRouter/Router/Orchestrator/MemoryKnnVoter.cs` lines 59-63) takes that weight and multiplies neighbor similarity by it. The row stays in the average at its full similarity.
-  - `EmbeddingMemory.FindNearest` (`src/TotallyHotArcRouter/Router/EmbeddingMemory.cs` lines 292-294) drops a neighbor only when `ResolveWeight` returns null. This row is retrieved.
-  - `ClusterLedger.Build` (`src/TotallyHotArcRouter/Router/Orchestrator/ClusterLedger.cs` lines 74-81) skips only a null weight, then adds `score * weight` and increments `ObservationCount`. This row contributes its score at `1.0` and counts as an observation.
-  - `EmbeddingLogRegTrainingService` (`src/TotallyHotArcRouter/Router/Orchestrator/EmbeddingLogRegTrainingService.cs` lines 150-161) skips only a null weight and stores `LogRegLiveSampleWeight * 1.0`. `ClusterTrainingService` (`src/TotallyHotArcRouter/Router/Orchestrator/ClusterTrainingService.cs` lines 156-164) does the same with `ClusterLiveSampleWeight * 1.0`.
-  - `MemoryKnnVoterTests.VoteAsync_DownWeightPolicy_PullsTheWeightedAverageTowardTheNonJudgeScoredNeighbor` (`src/TotallyHotArcRouter.Tests/Router/Orchestrator/MemoryKnnVoterTests.cs` lines 150-173) stores a non-judge `0.9` beside a judge-scored `0.3`. `Include` averages them to `0.6` (the `0` row at weight 1). `DownWeight` at `0.5` yields `(0.9 * 1 + 0.3 * 0.5) / 1.5 = 0.7`. `Exclude` drops the judge-scored neighbor and leaves `0.9`. `ClusterLedgerTests.Build_DownWeightPolicy_WeightsTheMeanButNotTheObservationCount` (`src/TotallyHotArcRouter.Tests/Router/Orchestrator/ClusterLedgerTests.cs` lines 123-126) records the same split on the ledger: the non-judge entry is the `* 1` term, and `ObservationCount` stays 2.
+  - `EmbeddingMemory.FindNearest` (`src/TotallyHotArcRouter/Router/EmbeddingMemory.cs` lines 292-294) applies the judge policy by dropping a neighbor only when `ResolveWeight` returns null. Length, embedding-model, and similarity checks still apply (lines 286-290 and 298). This row passes the judge-policy check.
+  - `ClusterLedger.Build` (`src/TotallyHotArcRouter/Router/Orchestrator/ClusterLedger.cs` lines 74-81) skips a row on the judge policy only when the weight is null, then adds `score * weight` and increments `ObservationCount`. Dimension and assignment-threshold checks still apply (lines 69 and 72). This row contributes its score at `1.0` and counts as an observation. Any non-null weight is counted, including a judge-scored row that `DownWeight` scaled (line 81).
+  - `EmbeddingLogRegTrainingService` (`src/TotallyHotArcRouter/Router/Orchestrator/EmbeddingLogRegTrainingService.cs` lines 150-161) skips a row on the judge policy only when the weight is null, and otherwise stores `LogRegLiveSampleWeight * 1.0`. Dimension and embedding-model skips still apply (lines 125-136 and 138-148). `ClusterTrainingService` (`src/TotallyHotArcRouter/Router/Orchestrator/ClusterTrainingService.cs` lines 156-164) does the same with `ClusterLiveSampleWeight * 1.0`. Its dimension and embedding-model skips are lines 133-144 and 146-154.
+  - `MemoryKnnVoterTests.VoteAsync_DownWeightPolicy_PullsTheWeightedAverageTowardTheNonJudgeScoredNeighbor` (`src/TotallyHotArcRouter.Tests/Router/Orchestrator/MemoryKnnVoterTests.cs` lines 150-174) stores a non-judge `0.9` beside a judge-scored `0.3`. `Include` averages them to `0.6` (the `0` row at weight 1). `DownWeight` at `0.5` yields `(0.9 * 1 + 0.3 * 0.5) / 1.5 = 0.7`. `Exclude` drops the judge-scored neighbor and leaves `0.9` (the assertion is line 174). `ClusterLedgerTests.Build_DownWeightPolicy_WeightsTheMeanButNotTheObservationCount` (`src/TotallyHotArcRouter.Tests/Router/Orchestrator/ClusterLedgerTests.cs` lines 123-126) records the same split on the ledger: the non-judge entry is the `* 1` term, and `ObservationCount` stays 2.
 
   `JudgeRowPolicy.DownWeight`'s own arm is `JudgeRowWeighting.cs` line 34 (`judgeRowWeight <= 0 ? null : judgeRowWeight`). Line 34 runs only when `isJudgeScored` is true. An `is_judge_scored = 0` row has already returned `1.0` at line 28.
 
@@ -203,21 +203,36 @@ After the assignment and the purge are true, these sentences are updated so they
       /// value. A row with <c>is_judge_scored = 0</c> keeps multiplier <c>1.0</c> under every value of this
       /// property. <see cref="Models.JudgeRowWeighting.ResolveWeight"/> returns <c>1.0</c> for that row before
       /// <see cref="Models.JudgeRowPolicy.Include"/>, <see cref="Models.JudgeRowPolicy.Exclude"/>, or
-      /// <see cref="Models.JudgeRowPolicy.DownWeight"/> is applied, so the row stays in retrieval, in the
-      /// weighted mean, and in training at full strength.
+      /// <see cref="Models.JudgeRowPolicy.DownWeight"/> is applied, so none of those values removes it from
+      /// retrieval, from the weighted mean, or from training.
       /// </summary>
   ```
 
-  Replace the summary on `JudgeRowPolicy.DownWeight` (`src/TotallyHotArcRouter/Models/JudgeRowPolicy.cs` lines 22-26). The current text says the knob is no longer the default "once live memory admits only complete judge-grounded grades." A `Complete` grade with no `JudgeScore` is admitted, and it is not judge-grounded. `DownWeight` leaves that row at multiplier `1.0` (line 28) and scales only a judge-scored row (line 34). On the ledger the `0` row stays in the weighted mean at full strength and still counts as an observation (`ClusterLedger.Build` lines 74-81). The replacement, at the member's existing four-space indent:
+  Replace the summary on `JudgeRowPolicy.DownWeight` (`src/TotallyHotArcRouter/Models/JudgeRowPolicy.cs` lines 22-26). The current text says the knob is no longer the default "once live memory admits only complete judge-grounded grades." A `Complete` grade with no `JudgeScore` is admitted, and it is not judge-grounded. `DownWeight` leaves that row at multiplier `1.0` (line 28). Line 34 scales a judge-scored row when `judgeRowWeight` is positive and drops it when `judgeRowWeight` is 0 or less (`judgeRowWeight <= 0 ? null : judgeRowWeight`). On the ledger the `0` row stays in the weighted mean at full strength. `ClusterLedger.Build` line 81 counts every row the policy keeps, scaled or not, as one observation, so this row is counted too. The replacement, at the member's existing four-space indent:
 
   ```csharp
       /// <summary>
       /// A judge-scored row's contribution is scaled by <see cref="RoutingOptions.JudgeScoredRowWeight"/>
-      /// rather than dropped or trusted at full strength. Kept as an operator knob, and no longer the default
-      /// after issue #293. A row with <c>is_judge_scored = 0</c> keeps multiplier <c>1.0</c>.
-      /// <see cref="JudgeRowWeighting.ResolveWeight"/> returns that weight before this policy is consulted, so
-      /// a <see cref="TotallyHot.ArcRouter.Quality.GradeStatus.Complete"/> grade with no <c>JudgeScore</c>
-      /// (issue #319) stays at full strength in the weighted mean and still counts as an observation.
+      /// when that weight is positive, and dropped when it is 0 or less. Kept as an operator knob, and no
+      /// longer the default after issue #293. A row with <c>is_judge_scored = 0</c> keeps multiplier
+      /// <c>1.0</c>. <see cref="JudgeRowWeighting.ResolveWeight"/> returns that weight before this policy is
+      /// consulted. A <see cref="TotallyHot.ArcRouter.Quality.GradeStatus.Complete"/> grade with no
+      /// <c>JudgeScore</c> (issue #319) stays at full strength in the weighted mean.
+      /// <see cref="Router.Orchestrator.ClusterLedger"/> counts every row this policy keeps, scaled or not,
+      /// as one observation.
+      /// </summary>
+  ```
+
+  Replace the summary on `JudgeRowPolicy.Include` (`src/TotallyHotArcRouter/Models/JudgeRowPolicy.cs` lines 13-16). The current text says it is the default "because only question-aware complete grades survive the learning gate." The learning gate stays `Complete`. A `Complete` grade with no `JudgeScore` also survives, and it is not question-aware. Under `Include`, line 28 returns `1.0` for that row and line 32 returns `1.0` for a judge-scored row, so the two contribute at the same strength. The replacement, at the member's existing four-space indent:
+
+  ```csharp
+      /// <summary>
+      /// A judge-scored row is treated exactly like any other row. The default after issue #293 (ADR-0026).
+      /// A row with <c>is_judge_scored = 0</c> keeps multiplier <c>1.0</c>.
+      /// <see cref="JudgeRowWeighting.ResolveWeight"/> returns that weight before this policy is consulted,
+      /// and this value also returns <c>1.0</c> for a judge-scored row, so a
+      /// <see cref="TotallyHot.ArcRouter.Quality.GradeStatus.Complete"/> grade with no <c>JudgeScore</c>
+      /// (issue #319) contributes at the same full strength.
       /// </summary>
   ```
 
