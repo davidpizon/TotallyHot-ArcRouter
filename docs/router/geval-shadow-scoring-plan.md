@@ -12,11 +12,11 @@
 Status: **G1 shipped** (shadow judge observer, ephemeral response-text cache, `judge_shadow_scores` side
 table, `is_judge_scored` provenance columns). **G2 shipped** (`QualityScorer` folds `result.JudgeScore`
 into the weighted total; judge calibration is the Governance surface `JudgeCalibrationAdmin` plus the
-CLI/report path). **G3 is not in the tree.** `EmbeddingMemoryScoreObserver` stamps `is_judge_scored`
-true for every `GradeStatus.Complete` row and does not use `JudgeScore.HasValue`.
-`TranscriptScoreObserver` still passes `JudgeScore.HasValue`. The blend, the row-weight policy, and
-the superseded non-executable-only scope are in the Phase G3 section; the provenance flag on the
-embedding-memory path is the missing piece (checked 2026-10-21, #315).
+CLI/report path). **G3 is not in the tree.** The provenance flag on the embedding-memory path now
+matches `TranscriptScoreObserver`: `EmbeddingMemoryScoreObserver` stamps `is_judge_scored` from
+`JudgeScore.HasValue` (issue #319). The blend, the row-weight policy, and the superseded
+non-executable-only scope are in the Phase G3 section; that flag does not complete them
+(checked 2026-10-22, #319).
 **Ordering** (per `src/PLAN.md`'s "Remaining work, in order"): G1 lands after the
 `self-organizing-classification-plan.md` T phases and *before* PLAN.md Phase N — the shadow table costs
 nothing on the hot path and G2's gate needs volume, so agreement data accumulates passively while the
@@ -37,7 +37,8 @@ two deliberately separated stages:
 > **Status note.** Step 1 shipped. Step 2 was **superseded** — code execution was removed from the
 > project entirely, which made *every* dimension non-executable and turned the judge into a permanent
 > co-grader rather than a fallback. See [`quality-verifier-architecture.md`](quality-verifier-architecture.md),
-> and Phase G3 below. The blend shipped. The embedding-memory `is_judge_scored` flag did not; the header says how.
+> and Phase G3 below. The blend shipped. The embedding-memory `is_judge_scored` flag now matches
+> `TranscriptScoreObserver` (`JudgeScore.HasValue`, issue #319). That flag does not complete the rest of G3.
 
 Two cross-cutting requirements apply from the first phase:
 
@@ -186,7 +187,7 @@ late that they can't.
 |---|---|---|---|
 | G1 | Shadow judge observer, `PendingResponseTextCache`, `judge_shadow_scores` side table, `is_judge_scored` columns (always 0) | none (T1 optional) | **Shipped** |
 | G2 | Agreement/calibration analysis surface over the shadow table; go/no-go criteria for G3 | G1 + accumulated shadow data | **Shipped** (as a standing check, not a gate) |
-| G3 | Judge as scorer of record for non-executable dimensions; first `is_judge_scored = 1` rows | G2 gate passed | **Not in the tree.** `EmbeddingMemoryScoreObserver` stamps `is_judge_scored` true for every `GradeStatus.Complete` row and does not use `JudgeScore.HasValue` |
+| G3 | Judge as scorer of record for non-executable dimensions; first `is_judge_scored = 1` rows | G2 gate passed | **Not in the tree.** The embedding-memory provenance flag now matches `TranscriptScoreObserver` (`JudgeScore.HasValue`, issue #319). The non-executable-only scope and the old blend story are still owed. |
 
 ---
 
@@ -440,16 +441,16 @@ the judge cleanly reverts non-executable dimensions to today's Tier-0 behavior.
 Shipped: the judge contributes to `u_i` on every graded request, blended with the static score rather than
 replacing it, with exactly-once write semantics and graceful static-only degradation.
 
-The learning-layer policy below shipped. The provenance bullet did not survive issue #293 on the
-embedding-memory path (amended 2026-10-21, #315). G3 is not in the tree for that reason. The header
-and the phase table say the same thing.
+The learning-layer policy below shipped. The provenance flag on the embedding-memory path now matches
+`TranscriptScoreObserver` (`JudgeScore.HasValue`, issue #319). G3 is still not in the tree: the
+non-executable-only scope and the old blend story are unchanged. The header and the phase table say
+the same thing.
 
-- **`is_judge_scored` on blended rows.** `TranscriptScoreObserver` still passes
-  `QualityResult.JudgeScore.HasValue`. `EmbeddingMemoryScoreObserver.ObserveAsync` does not. After
-  issue #293 it writes `isJudgeScored: true` for every row that reaches memory, which is only a
-  `GradeStatus.Complete` grade (see the paragraph below). A Complete grade with no `JudgeScore` is
-  still stamped true on that path. The class comment still describes the `HasValue` rule; the call
-  does not. The narrower of the two definitions this section originally posed ("contributed at all"
+- **`is_judge_scored` on blended rows.** `TranscriptScoreObserver` passes
+  `QualityResult.JudgeScore.HasValue`. After issue #319, `EmbeddingMemoryScoreObserver.ObserveAsync`
+  passes the same boolean. A `GradeStatus.Complete` grade is still the only grade that reaches
+  embedding memory (see the paragraph below). A Complete grade with no `JudgeScore` is written with
+  the flag false. The narrower of the two definitions this section originally posed ("contributed at all"
   vs. "contributed more than X of the weight") was the `HasValue` rule, because the blend weight
   itself is a `QualityOptions`/`DimensionWeightOptions` configuration detail that changes
   independently of provenance.

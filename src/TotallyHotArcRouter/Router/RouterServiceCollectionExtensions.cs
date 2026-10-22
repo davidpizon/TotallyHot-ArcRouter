@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.CodeRouterBench;
 using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Router.Embeddings;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Router.TextGeneration;
@@ -65,7 +66,8 @@ internal static class RouterServiceCollectionExtensions
         // RouterSettingsStore is deliberately built from a private RouterMemoryDatabase resolved
         // straight from configuration rather than the DI singleton below (which itself needs
         // IOptions<RoutingOptions>) - see RouterSettingsStore's remarks for why the DI singleton would
-        // be circular here.
+        // be circular here. The factory also passes StorageOptions so the issue #319 purge can clear
+        // transcript links. StorageOptions binds from IConfiguration only, so that read is not a cycle.
         services.AddSingleton(sp =>
         {
             var configuration = sp.GetRequiredService<IConfiguration>();
@@ -76,7 +78,8 @@ internal static class RouterServiceCollectionExtensions
             {
                 EmbeddingMemoryDatabasePath = configuredPath ?? new RoutingOptions().EmbeddingMemoryDatabasePath
             });
-            return new RouterSettingsStore(database: new RouterMemoryDatabase(databaseOptions),
+            var storageOptions = sp.GetRequiredService<IOptions<StorageOptions>>();
+            return new RouterSettingsStore(database: new RouterMemoryDatabase(databaseOptions, storageOptions),
                 logger: sp.GetRequiredService<ILogger<RouterSettingsStore>>());
         });
         services.AddSingleton<RouterSettingsReloadToken>();

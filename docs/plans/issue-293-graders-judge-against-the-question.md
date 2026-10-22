@@ -129,6 +129,10 @@ Learning consumers accept a live grade only when `GradeStatus == Complete`:
 
 - `RouterMemoryScoreObserver` and `EmbeddingMemoryScoreObserver` skip `AddScoreAsync` / the embedding insert for any other status. They still publish the `QualitySignalEvent`, now with `GradeStatus` added so the dashboard can label "structure only".
 - `MemoryEntry.IsJudgeScored` is true for every new live row. `JudgeRowPolicy` default moves from `DownWeight` (0.5) to `Include`. The enum and `JudgeScoredRowWeight` stay, because they remain a valid knob, but the default no longer penalizes the only rows that carry question-aware evidence. This reverses the G3 rationale in `JudgeRowPolicy`'s docs, so those docs are rewritten.
+
+  > **Correction, 2026-10-21 (issue #319).** The sentence above described the stamp issue #319 removes.
+  > `MemoryEntry.IsJudgeScored` is now `JudgeScore.HasValue`, the same boolean `TranscriptScoreObserver`
+  > already passed. The `Complete`-only learning gate in this section is unchanged.
 - Benchmark rows (CodeRouterBench, RouterBench) are labels attached to a task, are not live grades, and are unaffected ([parent plan](router-evaluator-and-live-pricing.md) §14).
 
 ### 2.6 Interaction with the other issues

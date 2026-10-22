@@ -11,11 +11,11 @@ namespace TotallyHot.ArcRouter.Router;
 /// correlation id has no pending embedding (never computed, already claimed, or expired) is a lost
 /// learning opportunity, not an error - logged and dropped, exactly like every other best-effort
 /// observation path in this codebase. After issue #293 only <see cref="GradeStatus.Complete"/> grades
-/// reach the memory write, and every such row is stamped <see cref="MemoryEntry.IsJudgeScored"/>
-/// <see langword="true"/>. This observer does not consult <see cref="QualityResult.JudgeScore"/>'s
-/// <c>HasValue</c>. <see cref="TotallyHot.ArcRouter.Transcripts.TranscriptScoreObserver"/> still passes
-/// <c>result.JudgeScore.HasValue</c>. That is why docs/router/geval-shadow-scoring-plan.md's G3 is
-/// not in the tree.
+/// reach the memory write. After issue #319 the row is stamped <see cref="MemoryEntry.IsJudgeScored"/>
+/// from <see cref="QualityResult.JudgeScore"/>'s <c>HasValue</c>, the same boolean
+/// <see cref="TotallyHot.ArcRouter.Transcripts.TranscriptScoreObserver"/> passes. A
+/// <see cref="GradeStatus.Complete"/> grade with no judge score is still written, with the flag false.
+/// That flag does not by itself complete docs/router/geval-shadow-scoring-plan.md's G3.
 /// </summary>
 public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
 {
@@ -132,9 +132,9 @@ public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
             isExploratory: recoveredIsExploratory,
             propensity: recoveredPropensity,
             dimension: recoveredDimension,
-            // After issue #293 only Complete grades reach this write, and every surviving row is stamped
-            // IsJudgeScored true. This call does not read JudgeScore.HasValue. TranscriptScoreObserver does.
-            isJudgeScored: true).ConfigureAwait(false);
+            // Issue #319: judge-scored means JudgeScore.HasValue, the same boolean TranscriptScoreObserver
+            // passes. A Complete grade with no judge score is still written; the flag is false.
+            isJudgeScored: result.JudgeScore.HasValue).ConfigureAwait(false);
 
         if (_logger.IsEnabled(LogLevel.Information))
             _logger.LogInformation(

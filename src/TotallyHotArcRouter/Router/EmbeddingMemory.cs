@@ -145,16 +145,15 @@ public sealed class EmbeddingMemory : IDisposable
     /// <paramref name="propensity"/>, not before it, so every existing positional call site keeps
     /// compiling unchanged.
     /// </param>
-    /// <param name="isJudgeScored">
-    /// Whether the row is recorded as judge-grounded. <see cref="EmbeddingMemoryScoreObserver"/> passes
-    /// <see langword="true"/> for every <see cref="TotallyHot.ArcRouter.Quality.GradeStatus.Complete"/> grade it
-    /// writes and does not consult <c>result.JudgeScore.HasValue</c>
-    /// (docs/router/geval-shadow-scoring-plan.md §Provenance; G3 is not closed by that stamp).
-    /// <c>TranscriptScoreObserver</c> still passes <c>JudgeScore.HasValue</c>. Defaults to
-    /// <see langword="false"/> so every other caller (bootstrap import, tests) keeps recording rows
-    /// as execution/heuristic-grounded without change. Placed last so every existing positional call
-    /// site keeps compiling unchanged.
-    /// </param>
+/// <param name="isJudgeScored">
+/// Whether the row is recorded as judge-grounded. <see cref="EmbeddingMemoryScoreObserver"/> passes
+/// <c>result.JudgeScore.HasValue</c> (issue #319), the same boolean <c>TranscriptScoreObserver</c> passes.
+/// A <see cref="TotallyHot.ArcRouter.Quality.GradeStatus.Complete"/> grade with no judge score is stored
+/// with this flag <see langword="false"/>. That stamp does not by itself close
+/// docs/router/geval-shadow-scoring-plan.md's G3. Defaults to <see langword="false"/> so every other
+/// caller (bootstrap import, tests) keeps recording rows as execution/heuristic-grounded without change.
+/// Placed last so every existing positional call site keeps compiling unchanged.
+/// </param>
     public async Task<MemoryEntry> AddEntryAsync(
         float[] taskEmbedding,
         string chosenModel,
