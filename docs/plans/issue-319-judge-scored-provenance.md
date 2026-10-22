@@ -69,9 +69,9 @@ C# / .NET only. No Python. No new service. No change to `ManagementFacade`. Seri
 
 **Decided 2026-10-21:** do not leave the rows, and do not re-derive them. Purge the live learning rows whose `isJudgeScored` provenance cannot be trusted, and start fresh. A fuzzy match on model, score, and time would invent a provenance. `grade_receipts` stays the audit record it already is. It is not a repair source.
 
-The #293 purge is a different migration. Do not clear `issue-293-live-learning-purge`, do not change `MigrateIssue293LiveLearningPurge`, and do not delete the tables that purge deleted. This purge has its own marker, `issue-319-untrusted-judge-provenance-purge`, in the same `schema_meta` table. If the key is present, the method returns without deleting. The value is the UTC timestamp of the run, the same shape as the #293 marker (`DateTimeOffset.UtcNow` formatted with `"O"`). The router logs one static Serilog line with the deleted count. If the write-ahead log is busy, log the same kind of static warning `MigrateIssue293LiveLearningPurge` already logs, and do not fail startup.
+The #293 purge is a different migration. Do not clear `issue-293-live-learning-purge`, do not change `MigrateIssue293LiveLearningPurge`, and do not delete the tables that purge deleted. This purge has its own marker, `issue-319-untrusted-judge-provenance-purge`, in `schema_meta` inside `router_embedding_memory.db`. If the key is present, the method returns without deleting and without opening `transcripts.db`. The value is the UTC timestamp of the run, the same shape as the #293 marker (`DateTimeOffset.UtcNow` formatted with `"O"`). The marker is written only after the memory delete and the transcript-link clear in §4.3 have both succeeded. The router logs one static Serilog line with the deleted-row count and the cleared-link count. If a write-ahead log is busy, log the same kind of static warning `MigrateIssue293LiveLearningPurge` already logs, and do not fail startup.
 
-Finality matches the #293 purge and [ADR-0024](../adr/0024-protect-the-machine-shared-data-directory-and-make-deletion-final.md): after the delete, truncate the write-ahead log the way `MigrateIssue293LiveLearningPurge` does, then `VACUUM`. The migration is not reversible. Take a copy of `router_embedding_memory.db` first if you want one.
+Finality matches the #293 purge and [ADR-0024](../adr/0024-protect-the-machine-shared-data-directory-and-make-deletion-final.md): after the delete, truncate the write-ahead log the way `MigrateIssue293LiveLearningPurge` does, then `VACUUM`. The migration is not reversible. Take a copy of `router_embedding_memory.db` and of `transcripts.db` first if you want one.
 
 ### 4.1 What is deleted
 
@@ -81,7 +81,7 @@ In `router_embedding_memory.db` only:
 |---|---|
 | Every `memory_entries` row with `is_judge_scored = 1` | This is the only value the live observer writes, and this database cannot show whether that `1` was `JudgeScore.HasValue` or the hardcoded true. Under shipped weights (`Judge` 0.60) a calculator `Complete` always has a `JudgeScore`, so those live rows matched `HasValue`. A `1` may also be a backfill of a transcript the judge really did score, which copies the trusted flag. `memory_entries` has no `correlation_id`, and the transcript link lives in the other database, so the two cannot be separated. Both are deleted. That is the cost of starting fresh instead of re-deriving. |
 
-No other table is deleted from.
+No other table is deleted from. The one column update, on the other file, is §4.3.
 
 ### 4.2 What is kept
 
@@ -93,10 +93,38 @@ No other table is deleted from.
 | `grade_receipts`, including `prompt_version` | Unchanged, per decision 2. `prompt_version` is null when no judge score existed. Retention is unchanged. |
 | `schema_meta` key `issue-293-live-learning-purge` | Left as stored. The new key is separate. |
 | `router_settings` and any other table in this file | Not the flag. |
-| `request_transcripts`, including `is_judge_scored` and `memory_entry_id` | The transcript flag is the trusted `HasValue` stamp. It is a different database. Do not null `memory_entry_id`. Nulling a link that is already set would make `EmbeddingBackfillService` recreate that row, which is a re-derive this migration does not do. A `memory_entry_id` that pointed at a deleted `1` is left dangling. Readers that load `memory_entries` never see that id. The next backfill pass skips a transcript whose link is still set. Checks that only test `memory_entry_id IS NOT NULL` (`SqliteTaxonomyComparisonStore.LoadPendingComparisonsAsync`, and `PersistedSessionAggregator`, which sets `IsUsedForTraining` when any turn's `MemoryEntryId` is not null) still see the transcript. They do not join `memory_entries`, so a missing row does not throw. The dashboard can keep saying a turn was used for training after its memory row is gone. The #293 purge left the same kind of dangling link. Do not null the column to clear that label. The live observer never set `memory_entry_id`, so the transcripts behind the deleted live rows stay eligible for `LoadUnembeddedScoredAsync` (`memory_entry_id IS NULL AND score IS NOT NULL`, plus an archive turn and a non-empty prompt). Embedding backfill defaults off (`TranscriptOptions.EnableEmbeddingBackfill` is false, and `appsettings.json` does not set it). If it is on, `EmbeddingBackfillService` will insert a new memory row for those transcripts after this purge, with `IsJudgeScored` copied from the transcript. That is the service's existing job, not this migration rebuilding rows. This plan does not enable backfill and does not scan transcripts. `TranscriptScoreObserver` writes `score` for every grade status, and the backfill does not filter on `GradeStatus`, so a non-`Complete` transcript can become a memory row the same way it can today. Do not change that here. |
+| `request_transcripts`, except the `memory_entry_id` values §4.3 clears | The transcript flag is the trusted `HasValue` stamp. `is_judge_scored`, `score`, prompt text, response text, and every column other than the cleared links stay. A link to a kept `is_judge_scored = 0` row stays. The live observer never set `memory_entry_id`, so transcripts it never linked stay eligible for `LoadUnembeddedScoredAsync`. Embedding backfill defaults off. This plan does not change `EmbeddingBackfillService`. |
 | Trained cluster and logreg artifacts | Not the rows. The next training pass reads whatever `memory_entries` remains. This purge does not delete model files. |
 
 Do not add `correlation_id` to `memory_entries` in this change.
+
+### 4.3 Links in the transcript file
+
+**Decided 2026-10-21.** The purge also clears `request_transcripts.memory_entry_id` values that point at `memory_entries` rows this purge deletes. Set those values to NULL. Every other column on `request_transcripts` stays, including `is_judge_scored`, `score`, and the prompt and response text.
+
+The two tables are not in the same file.
+
+| Table | File | How the path is resolved |
+|---|---|---|
+| `memory_entries`, and the marker in `schema_meta` | `router_embedding_memory.db` | `RoutingOptions.EmbeddingMemoryDatabasePath`. A relative path is combined with `AppDataPaths.ResolveMachineSharedDirectory()`. |
+| `request_transcripts` | `transcripts.db` | `StorageOptions.TranscriptDatabasePath`, default `%PROGRAMDATA%\transcripts.db`, resolved by `StorageOptions.ResolveTranscriptDatabasePath()`. |
+
+There is no shared transaction. Do not `ATTACH` one file to the other. Use the one marker already named in §4, `issue-319-untrusted-judge-provenance-purge`, stored in `router_embedding_memory.db`. Do not add a companion marker on `transcripts.db`. That file has no copy of the deleted ids, so a second marker there could not tell which links this purge owned.
+
+Write the marker only after both steps have succeeded. If the key is already present, return without opening `transcripts.db` and without deleting. Order:
+
+1. Read the `id` values of `memory_entries` where `is_judge_scored = 1`. Keep that list. Do not delete yet. If the list is empty, skip the transcript update. An empty `IN` list is not valid SQL. Still write the marker after the delete of zero rows, so the next startup returns at the marker. Bind a non-empty list in chunks that fit SQLite's variable limit. A chunk that commits is safe to run again.
+2. On `transcripts.db`: if the file does not exist, skip this step and do not create the file. If it exists, run `UPDATE request_transcripts SET memory_entry_id = NULL WHERE memory_entry_id IN (those ids)`. That statement is the step that must succeed. Then truncate that file's write-ahead log the way `TranscriptDatabase.RunStartupMaintenance` does. A busy log logs one static warning. The update is already committed, so a busy log does not fail the purge and does not block the delete.
+3. If the update in step 2 throws, stop. Do not delete the memory rows and do not write the marker. Log one static warning. The next startup still has the ids and retries both steps. A missing file is not a failure.
+4. Delete the `is_judge_scored = 1` rows, write the marker, then truncate and `VACUUM` `router_embedding_memory.db` as §4 already says.
+
+A link is cleared only when its `memory_entry_id` is in the id list from step 1. These stay: a link to a kept `is_judge_scored = 0` row, a `memory_entry_id` that is already NULL, and an id that was already dangling before this purge. The #293 purge removed rows whose ids are no longer in `memory_entries`, so those ids are not in the list. Doing the update before the delete is what makes a crash safe. After the rows are gone, the transcript file cannot tell a link this purge removed from a link that was already dangling. A retry that still sees the rows runs the same update, which sets NULL again and changes nothing else, then deletes and writes the marker.
+
+`PersistedSessionAggregator` sets `IsUsedForTraining` when any turn's `MemoryEntryId` is not null. Clearing these links is what keeps that label from saying a deleted row was used for training. A session that still links a kept `0` stays labeled.
+
+`LoadUnembeddedScoredAsync` selects `memory_entry_id IS NULL`, so a cleared link is eligible for embedding backfill again. Backfill defaults off (`TranscriptOptions.EnableEmbeddingBackfill` is false, and `appsettings.json` does not set it). If it is on, `EmbeddingBackfillService` may later insert a new memory row and copy `transcript.IsJudgeScored`. That insert is the existing service. This migration does not rebuild the deleted row, and it does not change backfill.
+
+Every production construction passes the transcript path from `StorageOptions.ResolveTranscriptDatabasePath()`. There are two. The DI singleton is `services.AddSingleton<RouterMemoryDatabase>()`. The private instance is the one the `RouterSettingsStore` factory in `RouterServiceCollectionExtensions` builds with `RoutingOptions` only today. That private instance runs `EnsureCreated` first, from `RouterSettingsStore`'s constructor, so it is the one that writes the marker. In that factory, read the path from `sp.GetRequiredService<IOptions<StorageOptions>>()`. `StorageOptions` binds from `IConfiguration` only (`PriceCatalogServiceCollectionExtensions`), so this does not create a cycle with `RoutingOptions`. The new test passes the path of the transcript copy and does not open the machine-default transcript file. A missing transcript path is allowed only for the `RoutingOptions`-only constructor the existing #293 tests use. In that case, skip the update, do not throw, and still delete and write the marker. Do not use that missing-path branch in production. A production run that deleted the rows and wrote the marker without the path could never clear the links, because the ids would already be gone.
 
 ## 5. Tests
 
@@ -119,12 +147,23 @@ Do not create the seed by calling `EnsureCreated` after this migration exists. T
 
 Do not edit the existing #293 tests. `EnsureCreated_OnCopiedLegacyDatabase_PurgesLiveLearningOnce` inserts its post-marker row after the first `EnsureCreated`, which will already have written the #319 marker, so that row survives because of the marker, not because of this predicate. Do not cite that test as proof the predicate keeps `0`s.
 
-- The copy loses every `memory_entries` row with `is_judge_scored = 1`.
-- The copy keeps a `memory_entries` row with `is_judge_scored = 0`.
-- The copy keeps a `grade_receipts` row, a `grader_scores` row, a `judge_shadow_scores` row, a `live:` `dimension_scores` row, and a benchmark `dimension_scores` row.
-- The copy keeps the existing `issue-293-live-learning-purge` value and gains `issue-319-untrusted-judge-provenance-purge`.
-- The source file is unchanged.
-- A row inserted into the copy after the marker, with `is_judge_scored = 1`, is still there after a second `EnsureCreated`. The marker value does not change.
+- The memory copy loses every `memory_entries` row with `is_judge_scored = 1`.
+- The memory copy keeps a `memory_entries` row with `is_judge_scored = 0`.
+- The memory copy keeps a `grade_receipts` row, a `grader_scores` row, a `judge_shadow_scores` row, a `live:` `dimension_scores` row, and a benchmark `dimension_scores` row.
+- The memory copy keeps the existing `issue-293-live-learning-purge` value and gains `issue-319-untrusted-judge-provenance-purge`.
+- The memory source file is unchanged.
+- A row inserted into the memory copy after the marker, with `is_judge_scored = 1`, is still there after a second `EnsureCreated`. The marker value does not change.
+
+The same test uses a copied `transcripts.db`. Point the purge's transcript path at that copy. Build it with raw SQL. Seed four `request_transcripts` rows:
+
+- `memory_entry_id` equal to the id of an `is_judge_scored = 1` memory row. After `EnsureCreated` that column is NULL. `is_judge_scored`, `score`, and every other column on that row are unchanged.
+- `memory_entry_id` equal to the id of an `is_judge_scored = 0` memory row. After `EnsureCreated` that value is unchanged.
+- `memory_entry_id` already NULL. It stays NULL.
+- `memory_entry_id` set to an id that matches no row in the memory copy (already dangling, and not an id this purge deletes). It stays unchanged.
+
+The transcript source file is unchanged. After the marker, insert a new `is_judge_scored = 1` memory row and a transcript row whose `memory_entry_id` is that new id. A second `EnsureCreated` leaves that new link set.
+
+In a separate test, copy the same memory seed again: the #293 key present, no #319 key, one `is_judge_scored = 1` row, and one `is_judge_scored = 0` row. Point the transcript path at a file that does not exist. After `EnsureCreated`, the `1` row is gone, the `0` row stays, the #319 key is present, and the transcript path still does not exist.
 
 Run `TotallyHotArcRouter.Tests`. The build stays warning-free (`TreatWarningsAsErrors`, XML docs on the touched members). The purge test stays under the 5-second cap.
 
@@ -146,8 +185,9 @@ These were the open questions. They are decided. The recommendations are kept so
 
 1. **Judge-scored means `JudgeScore.HasValue`.** Decided: yes. Same boolean `TranscriptScoreObserver` already uses. A later local grader that writes `JudgeScore` counts as judge-scored. Telling that grader apart from G-Eval is #304's storage choice, not a second rule in this observer.
 2. **Amend ADR-0026 and the #293 plan §2.5 sentence.** Decided: yes, a dated note in the implementation, as §6 specifies. The learning gate, the #293 purge, and `grade_receipts` stay as they are. The §2.5 sentence stays in place with the note beside it. ADR-0026's note sits on the decision; it does not rewrite decision point 6.
-3. **Rows already stored.** The recommendation was to leave them. Decided: do not leave them. Purge the live learning rows whose `isJudgeScored` provenance cannot be trusted, and start fresh, as §4 specifies. The migration does not rebuild rows and does not re-run the #293 purge. An install that already has embedding backfill on can later insert new rows for transcripts the live observer never linked. Those inserts copy the trusted transcript flag. They are the existing backfill service, described in §4.2, not this migration repairing the deleted rows.
+3. **Rows already stored.** The recommendation was to leave them. Decided: do not leave them. Purge the live learning rows whose `isJudgeScored` provenance cannot be trusted, and start fresh, as §4 specifies. The migration does not rebuild rows and does not re-run the #293 purge. An install that already has embedding backfill on can later insert new rows for transcripts the live observer never linked, and for transcripts whose link §4.3 cleared. Those inserts copy the trusted transcript flag. They are the existing backfill service, not this migration repairing the deleted rows.
 4. **#304.** Decided: #304's learning writes wait for this fix. #304 planning may proceed now.
+5. **Dangling transcript links.** Added the same day. Decided: the purge sets `request_transcripts.memory_entry_id` to NULL where it points at a `memory_entries` row this purge deletes, as §4.3 specifies. Every other column on `request_transcripts` stays. The label `PersistedSessionAggregator` derives from that column then stays honest.
 
 ## 8. Out of scope
 
