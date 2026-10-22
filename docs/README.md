@@ -77,7 +77,7 @@ paths so existing links resolve.
 |---|---|---|
 | [`router/coderouterbench-sqlite-migration-plan.md`](router/coderouterbench-sqlite-migration-plan.md) | Benchmark corpus sync into SQLite, checksums, row counts | Shipped (all six phases) |
 | [`router/regret-evaluation-harness-plan.md`](router/regret-evaluation-harness-plan.md) | PLAN.md Phase N: `CumReg`/`AvgPerf`/`TotTok`/`$Total`/`Perf/$`, replay engine, comparison baselines, Orchestrator arm | N1–N6 shipped (N5 exit criterion measured, not met); Q5 evidence-blocked |
-| [`router/geval-shadow-scoring-plan.md`](router/geval-shadow-scoring-plan.md) | G-Eval shadow judge, then judge-as-verifier for non-executable dimensions | G1–G2 shipped. G3 is not in the tree: `EmbeddingMemoryScoreObserver` stamps `is_judge_scored` true for every `GradeStatus.Complete` row and does not use `JudgeScore.HasValue` |
+| [`router/geval-shadow-scoring-plan.md`](router/geval-shadow-scoring-plan.md) | G-Eval shadow judge, then judge-as-verifier for non-executable dimensions | G1–G2 shipped. G3 is not in the tree: the embedding-memory flag now matches `TranscriptScoreObserver` (`JudgeScore.HasValue`, issue #319). That flag does not complete the rest of G3 |
 | [`router/grader-reliability-plan.md`](router/grader-reliability-plan.md) | Q4 inter-grader agreement CLI (`--run-grader-reliability-report`) | Shipped, CLI only; gRPC/GUI deferred |
 | [`router/quality-verifier-architecture.md`](router/quality-verifier-architecture.md) | The Verifier: static analysis + G-Eval judge scoring (no code execution) | Implemented |
 

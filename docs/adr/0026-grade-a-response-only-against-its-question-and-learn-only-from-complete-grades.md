@@ -81,6 +81,14 @@ The rules, in short (full design in the plan):
    upgrade, finally, per ADR-0024. Benchmark data is kept. David chose this on 2026-10-14 over quarantining the
    rows.
 
+   > **Correction, 2026-10-21 (issue #319).** A `Complete` grade no longer means the embedding-memory row is
+   > judge-scored. `EmbeddingMemoryScoreObserver` stamps `IsJudgeScored` from `JudgeScore.HasValue`. Rows
+   > already stored with `is_judge_scored = 1` whose provenance could not be trusted were deleted once, by
+   > the marker `issue-319-untrusted-judge-provenance-purge` in `router_embedding_memory.db`, and
+   > `request_transcripts.memory_entry_id` values that pointed at those rows were set to NULL. This note
+   > does not reopen decision point 6: the `Complete`-only gate, the `Include` default, and the #293 purge
+   > stay as decided.
+
 ### Consequences
 
 - Good, because the router can no longer reward a tidy answer to the wrong question through a missing or failed

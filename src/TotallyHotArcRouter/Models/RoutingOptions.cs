@@ -395,8 +395,13 @@ public sealed class RoutingOptions
     /// <see cref="Router.Orchestrator.ClusterLedger"/> treat a <see cref="Router.MemoryEntry"/> whose score
     /// came from the G-Eval judge (<see cref="Router.MemoryEntry.IsJudgeScored"/>) rather than from
     /// execution or heuristic signals alone. Defaults to <see cref="Models.JudgeRowPolicy.Include"/> after
-    /// issue #293: only <see cref="TotallyHot.ArcRouter.Quality.GradeStatus.Complete"/> grades enter live memory, and every
-    /// surviving row is judge-scored question-aware evidence (ADR-0026).
+    /// issue #293: only <see cref="TotallyHot.ArcRouter.Quality.GradeStatus.Complete"/> grades enter live
+    /// memory (ADR-0026). After issue #319 a surviving row is judge-scored only when <c>JudgeScore</c> has a
+    /// value. A row with <c>is_judge_scored = 0</c> keeps multiplier <c>1.0</c> under every value of this
+    /// property. <see cref="Models.JudgeRowWeighting.ResolveWeight"/> returns <c>1.0</c> for that row before
+    /// <see cref="Models.JudgeRowPolicy.Include"/>, <see cref="Models.JudgeRowPolicy.Exclude"/>, or
+    /// <see cref="Models.JudgeRowPolicy.DownWeight"/> is applied, so none of those values removes it from
+    /// retrieval, from the weighted mean, or from training.
     /// </summary>
     public JudgeRowPolicy JudgeScoredRowPolicy { get; init; } = JudgeRowPolicy.Include;
 

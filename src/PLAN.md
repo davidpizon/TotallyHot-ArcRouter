@@ -22,7 +22,7 @@ measured by cumulative regret against a per-task oracle.
 | T1–T6 — transcripts, clustering, `cluster_best`, adaptive-routing toggle | [`self-organizing-classification-plan.md`](../docs/router/self-organizing-classification-plan.md) |
 | N1–N6 — regret harness (measured; **exit criterion not met**) | [`regret-evaluation-harness-plan.md`](../docs/router/regret-evaluation-harness-plan.md) |
 | Q0–Q4 — quality rescan, keyed graders, portfolio, CLI reliability report | [`quality-verifier-architecture.md`](../docs/router/quality-verifier-architecture.md), [`grader-reliability-plan.md`](../docs/router/grader-reliability-plan.md) |
-| G1–G2 — shadow judge and the calibration check. G3 is not in the tree: `EmbeddingMemoryScoreObserver` stamps `is_judge_scored` true for every `GradeStatus.Complete` row and does not use `JudgeScore.HasValue` | [`geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md) |
+| G1–G2 — shadow judge and the calibration check. G3 is not in the tree: the embedding-memory flag now matches `TranscriptScoreObserver` (`JudgeScore.HasValue`, issue #319). That flag does not complete the rest of G3 | [`geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md) |
 | Sessions tab persisted transcripts | [`../docs/gui/dashboard.md`](../docs/gui/dashboard.md) |
 | Auto-update detect (apply is manual: the dashboard links to the release) | [`packaging-and-distribution.md`](../docs/router/packaging-and-distribution.md), [`version-compatibility.md`](../docs/router/version-compatibility.md) |
 

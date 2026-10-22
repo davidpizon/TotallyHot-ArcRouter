@@ -135,7 +135,15 @@ public sealed class RouterMemoryDatabase
     private readonly string _databasePath;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="RouterMemoryDatabase"/> class.
+    /// Absolute path of <c>transcripts.db</c> for the issue #319 link clear, or <see langword="null"/> when
+    /// this instance was built from routing options alone. A null path skips that update.
+    /// </summary>
+    private readonly string? _transcriptDatabasePath;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="RouterMemoryDatabase"/> class from routing options alone.
+    /// The issue #319 purge then skips the transcript-link update, still deletes untrusted memory rows, and
+    /// still writes its marker. Production uses <see cref="RouterMemoryDatabase(IOptions{RoutingOptions}, IOptions{StorageOptions})"/>.
     /// </summary>
     /// <remarks>
     /// A relative <see cref="RoutingOptions.EmbeddingMemoryDatabasePath"/> resolves against the
@@ -169,6 +177,25 @@ public sealed class RouterMemoryDatabase
     /// </remarks>
     /// <param name="routingOptions">The routing options containing the database path.</param>
     public RouterMemoryDatabase(IOptions<RoutingOptions> routingOptions)
+        : this(routingOptions, transcriptDatabasePath: null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance that can clear transcript links during the issue #319 purge.
+    /// </summary>
+    /// <param name="routingOptions">The routing options containing the embedding-memory database path.</param>
+    /// <param name="storageOptions">
+    /// Supplies <see cref="StorageOptions.ResolveTranscriptDatabasePath"/>. Production passes this from DI.
+    /// The new purge test passes options whose path is a copy, so the machine-default transcript file is
+    /// never opened.
+    /// </param>
+    public RouterMemoryDatabase(IOptions<RoutingOptions> routingOptions, IOptions<StorageOptions> storageOptions)
+        : this(routingOptions, RequireTranscriptPath(storageOptions))
+    {
+    }
+
+    private RouterMemoryDatabase(IOptions<RoutingOptions> routingOptions, string? transcriptDatabasePath)
     {
         ArgumentNullException.ThrowIfNull(routingOptions);
 
@@ -176,6 +203,14 @@ public sealed class RouterMemoryDatabase
         _databasePath = Path.IsPathRooted(configuredPath)
             ? configuredPath
             : Path.Combine(path1: AppDataPaths.ResolveMachineSharedDirectory(), path2: configuredPath);
+        _transcriptDatabasePath = transcriptDatabasePath;
+    }
+
+    private static string RequireTranscriptPath(IOptions<StorageOptions> storageOptions)
+    {
+        ArgumentNullException.ThrowIfNull(storageOptions);
+        ArgumentNullException.ThrowIfNull(storageOptions.Value);
+        return storageOptions.Value.ResolveTranscriptDatabasePath();
     }
 
     /// <summary>Gets the resolved absolute path of the database file.</summary>
@@ -333,12 +368,25 @@ public sealed class RouterMemoryDatabase
         MigrateJudgeShadowScoreColumns(connection);
         MigrateGraderScoreQuestionColumns(connection);
         MigrateIssue293LiveLearningPurge(connection);
+        MigrateIssue319UntrustedJudgeProvenancePurge(connection);
     }
 
     /// <summary>
     /// Marker in <c>schema_meta</c> recording that pre-#293 live learning was purged (plan §6).
     /// </summary>
     internal const string Issue293LiveLearningPurgeKey = "issue-293-live-learning-purge";
+
+    /// <summary>
+    /// Marker in <c>schema_meta</c> recording that memory rows whose judge-score provenance could not be
+    /// trusted were purged (issue #319).
+    /// </summary>
+    internal const string Issue319UntrustedJudgeProvenancePurgeKey = "issue-319-untrusted-judge-provenance-purge";
+
+    /// <summary>
+    /// How many bound parameters one transcript <c>UPDATE</c> uses. Kept under SQLite's historical
+    /// variable limit so a chunk commits on its own and a later retry can run the same statement again.
+    /// </summary>
+    private const int TranscriptLinkParameterChunkSize = 500;
 
     /// <summary>
     /// Default live-memory prefix used when purging <c>dimension_scores</c> rows; matches
@@ -542,6 +590,114 @@ public sealed class RouterMemoryDatabase
             "Issue-293 live-learning purge complete: {GraderScoresDeleted} grader_scores and {ShadowScoresDeleted} judge_shadow_scores deleted.",
             propertyValue0: graderScoresDeleted,
             propertyValue1: shadowScoresDeleted);
+    }
+
+    /// <summary>
+    /// One-time purge of <c>memory_entries</c> whose <c>is_judge_scored = 1</c> cannot be trusted (issue #319),
+    /// then clears <c>request_transcripts.memory_entry_id</c> values that pointed at those rows. Runs after
+    /// <see cref="MigrateIssue293LiveLearningPurge"/> and does not edit that purge. The marker is written only
+    /// after both steps succeed. A missing transcript path or a missing transcript file skips the link clear
+    /// and still deletes and writes the marker. A thrown transcript update leaves the rows and the marker
+    /// absent so the next startup retries. A busy write-ahead log is logged and does not fail startup.
+    /// </summary>
+    /// <param name="connection">An open connection to <c>router_embedding_memory.db</c>.</param>
+    private void MigrateIssue319UntrustedJudgeProvenancePurge(SqliteConnection connection)
+    {
+        if (SchemaMetaExists(connection: connection, key: Issue319UntrustedJudgeProvenancePurgeKey)) return;
+
+        var ids = ReadJudgeScoredEntryIds(connection);
+        var linksCleared = 0;
+        if (ids.Count > 0 && !string.IsNullOrWhiteSpace(_transcriptDatabasePath))
+        {
+            if (File.Exists(_transcriptDatabasePath))
+            {
+                try
+                {
+                    linksCleared = ClearTranscriptLinks(transcriptPath: _transcriptDatabasePath, ids: ids);
+                }
+                catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException)
+                {
+                    Log.Warning(
+                        exception: ex,
+                        messageTemplate:
+                        "Issue-319 untrusted judge-provenance purge left memory rows in place because the transcript link update failed; it will retry on the next startup.");
+                    return;
+                }
+
+                if (!SqliteHardening.TruncateWal($"Data Source={_transcriptDatabasePath}"))
+                    Log.Warning(
+                        "The transcript database write-ahead log was busy after the issue-319 transcript-link clear; cleared links will be finalized on the next restart.");
+            }
+        }
+
+        var memoryDeleted = ExecuteCountDelete(
+            connection: connection,
+            sql: "DELETE FROM memory_entries WHERE is_judge_scored = 1;");
+        WriteSchemaMeta(
+            connection: connection,
+            key: Issue319UntrustedJudgeProvenancePurgeKey,
+            value: DateTimeOffset.UtcNow.ToString("O"));
+
+        if (!SqliteHardening.TruncateWal(connection))
+            Log.Warning(
+                "The router memory database write-ahead log was busy after the issue-319 untrusted judge-provenance purge; deleted content will be finalized on the next restart or eviction.");
+
+        using (var vacuum = connection.CreateCommand())
+        {
+            vacuum.CommandText = "VACUUM;";
+            vacuum.ExecuteNonQuery();
+        }
+
+        Log.Information(
+            messageTemplate:
+            "Issue-319 untrusted judge-provenance purge complete: {MemoryEntriesDeleted} memory_entries deleted and {TranscriptLinksCleared} transcript links cleared.",
+            propertyValue0: memoryDeleted,
+            propertyValue1: linksCleared);
+    }
+
+    /// <summary>Reads the ids of <c>memory_entries</c> rows stamped <c>is_judge_scored = 1</c>.</summary>
+    /// <param name="connection">An open connection to <c>router_embedding_memory.db</c>.</param>
+    /// <returns>The ids. Empty when none match.</returns>
+    private static List<long> ReadJudgeScoredEntryIds(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id FROM memory_entries WHERE is_judge_scored = 1;";
+        using var reader = command.ExecuteReader();
+        var ids = new List<long>();
+        while (reader.Read())
+            ids.Add(reader.GetInt64(0));
+        return ids;
+    }
+
+    /// <summary>
+    /// Sets <c>request_transcripts.memory_entry_id</c> to NULL for each id in <paramref name="ids"/>, in
+    /// chunks that each commit on their own.
+    /// </summary>
+    /// <param name="transcriptPath">Absolute path of an existing <c>transcripts.db</c>.</param>
+    /// <param name="ids">The memory-entry ids this purge is about to delete. Must be non-empty.</param>
+    /// <returns>The number of transcript rows updated.</returns>
+    private static int ClearTranscriptLinks(string transcriptPath, IReadOnlyList<long> ids)
+    {
+        var cleared = 0;
+        using var connection = SqliteHardening.Open($"Data Source={transcriptPath}");
+        for (var offset = 0; offset < ids.Count; offset += TranscriptLinkParameterChunkSize)
+        {
+            var count = Math.Min(val1: TranscriptLinkParameterChunkSize, val2: ids.Count - offset);
+            using var command = connection.CreateCommand();
+            var names = new string[count];
+            for (var i = 0; i < count; i++)
+            {
+                names[i] = "$id" + i.ToString(CultureInfo.InvariantCulture);
+                command.Parameters.AddWithValue(parameterName: names[i], value: ids[offset + i]);
+            }
+
+            command.CommandText =
+                "UPDATE request_transcripts SET memory_entry_id = NULL WHERE memory_entry_id IN (" +
+                string.Join(separator: ", ", values: names) + ");";
+            cleared += command.ExecuteNonQuery();
+        }
+
+        return cleared;
     }
 
     private static bool SchemaMetaExists(SqliteConnection connection, string key)

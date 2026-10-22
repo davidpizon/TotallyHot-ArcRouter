@@ -225,6 +225,42 @@ public class EmbeddingMemoryScoreObserverTests
     }
 
     [Fact]
+    public async Task ObserveAsync_CompleteGradeWithoutJudgeScore_WritesRowWithIsJudgeScoredFalse()
+    {
+        var store = new FakeMemoryEntryStore();
+        var memory = CreateMemory(store);
+        await memory.InitializeAsync(TestContext.Current.CancellationToken);
+
+        var pendingCache = CreatePendingCache();
+        pendingCache.Set(correlationId: "corr-1", value: [1f, 0f, 0f]);
+        var pendingCostCache = CreatePendingCostCache();
+        pendingCostCache.Set(correlationId: "corr-1", 0.0042m);
+        var pendingProvenanceCache = CreatePendingProvenanceCache();
+        pendingProvenanceCache.Set(correlationId: "corr-1",
+            value: new PendingRequestProvenance(true, 0.02, null));
+        var observer = new EmbeddingMemoryScoreObserver(memory: memory, pendingCache: pendingCache,
+            pendingCostCache: pendingCostCache, pendingProvenanceCache: pendingProvenanceCache,
+            logger: NullLogger<EmbeddingMemoryScoreObserver>.Instance);
+
+        var result = new QualityResult
+        {
+            RequestCorrelationId = "corr-1",
+            Model = "claude-opus-4-6",
+            UnifiedScore = 0.75,
+            GradeStatus = GradeStatus.Complete
+        };
+
+        await observer.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
+
+        var entry = Assert.Single(store.Entries);
+        Assert.False(entry.IsJudgeScored);
+        Assert.Equal(0.75, actual: entry.Score);
+        Assert.Equal(0.0042, actual: entry.Cost);
+        Assert.True(entry.IsExploratory);
+        Assert.Equal(0.02, actual: entry.Propensity);
+    }
+
+    [Fact]
     public async Task ObserveAsync_IncompleteGrade_WritesNoEntry()
     {
         var store = new FakeMemoryEntryStore();
