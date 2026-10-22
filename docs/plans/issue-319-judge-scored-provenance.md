@@ -1,13 +1,13 @@
 # Plan: Stamp embedding-memory rows from the judge score (#319)
 
-**Status:** Decisions recorded 2026-10-21. David answered the four questions in §7. [#320](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/320) merged the previous text of this file, which still listed those questions as open. This revision records the answers. It is still the plan only. The implementation is a later pull request that links this file. It does not start here. Amended 2026-10-22: §6 names the `RoutingOptions.JudgeScoredRowPolicy`, `JudgeRowPolicy.DownWeight`, and `JudgeRowPolicy.Include` comments and gives the replacement wording for each. This amendment still closes nothing.
+**Status:** Implemented. [#327](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/327) merged the stamp (`isJudgeScored: result.JudgeScore.HasValue`), the one-time purge (`issue-319-untrusted-judge-provenance-purge`), the comment rewrites in §6, and the dated notes on ADR-0026 and the #293 plan §2.5. Decisions recorded 2026-10-21 (§7). Plan text landed via [#320](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/320), [#321](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/321), and [#325](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/325). CodeGraph + Serena (2026-10-22) re-checked `EmbeddingMemoryScoreObserver.ObserveAsync` and `MigrateIssue319UntrustedJudgeProvenancePurge` on `main` at `547439de`; both match this plan. No further code change is owed here.
 **Issue:** [#319](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/319) — `EmbeddingMemoryScoreObserver` stamps every `Complete` grade as judge-scored.
-**Standing rule:** [Approved plan before coding](../router/standing-rules.md#approved-plan-before-coding). The implementation pull request links this file.
-**Precedes:** [#304](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/304). #304 planning may proceed now. #304's learning writes wait until this fix is in the tree. #304's plan is not edited here.
+**Standing rule:** [Approved plan before coding](../router/standing-rules.md#approved-plan-before-coding). The implementation pull request linked this file (#327).
+**Precedes:** [#304](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/304). #304's learning writes may proceed; this fix is in the tree. #304's plan is not edited here.
 **Found in:** [#315](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/315) item #20 (G3). The docs correction is [#318](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/318), merged. That pull request did not change the stamp.
-**Audit base:** `main` at `770d02a1` (2026-10-21), which is the #318 merge. Re-read `EmbeddingMemoryScoreObserver.ObserveAsync` and `MigrateIssue293LiveLearningPurge` before editing. A shifted line is not a reason to change the decision.
+**Audit base:** Implementation landed on `main` at `547439de` (#327). The plan was written against `770d02a1` (#318).
 
-This plan pull request **closes nothing**.
+This closeout pull request closes [#319](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/319).
 
 ## 1. Observed cost
 
