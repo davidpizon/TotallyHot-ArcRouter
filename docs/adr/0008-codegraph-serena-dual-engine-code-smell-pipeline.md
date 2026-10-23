@@ -522,6 +522,7 @@ CI analyzers and line-count budgets only.
 
 ## More Information
 
+- Project MCP server definitions: [`.cursor/mcp.json`](../../.cursor/mcp.json) (`codegraph` + `serena`)
 - Mechanical work list: [`docs/router/code-smell-refactoring-plan.md`](../router/code-smell-refactoring-plan.md)
 - Agent instructions for this pipeline: [`AGENTS.md`](../../AGENTS.md) (Dual-engine code-smell analysis)
 - Related decisions: [ADR-0006](0006-split-managementfacade-along-crud-aggregate-boundaries.md),

@@ -271,8 +271,9 @@ Architecture decisions are recorded under [`docs/adr/`](docs/adr/README.md) (tem
 and the index of accepted vs proposed records).
 
 Code-quality work uses a **dual-engine pipeline**: CodeGraph MCP maps structure (call paths, type
-hierarchies, blast radius) and Serena MCP classifies smells and proposes phased refactors. The
-standing method, severity matrix, and a dated production-`src/` catalog are
+hierarchies, blast radius) and Serena MCP classifies smells and proposes phased refactors. Cursor
+loads both from [`.cursor/mcp.json`](.cursor/mcp.json) (`npx` + CodeGraph 1.6.0; `uvx` + Serena).
+The standing method, severity matrix, and a dated production-`src/` catalog are
 [ADR-0008](docs/adr/0008-codegraph-serena-dual-engine-code-smell-pipeline.md). Mechanical extracts
 and the validation gate (zero-warning build, tests, coverage floor, hot-path smoke) stay in
 [`docs/router/code-smell-refactoring-plan.md`](docs/router/code-smell-refactoring-plan.md) — ADR-0008

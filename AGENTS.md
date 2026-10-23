@@ -36,7 +36,10 @@ This repository contains the TotallyHot Arc Router project.
 ## Dual-engine code-smell analysis (CodeGraph + Serena)
 
 Architectural surveys, coupling questions, and refactor planning use two MCP engines as a pair.
-The method, severity matrix, live catalog, and safety protocol live in
+Project MCP definitions live in [`.cursor/mcp.json`](.cursor/mcp.json) (`codegraph` via
+`@colbymchenry/codegraph@1.6.0`, `serena` via `uvx` from the oraios/serena git source). Requires
+`npx` (Node) for CodeGraph and `uvx` (Astral uv) for Serena. The method, severity matrix, live
+catalog, and safety protocol live in
 [ADR-0008](docs/adr/0008-codegraph-serena-dual-engine-code-smell-pipeline.md). Mechanical work stays in
 [`docs/router/code-smell-refactoring-plan.md`](docs/router/code-smell-refactoring-plan.md) — do not
 start a parallel smell tracker. A CodeGraph + Serena survey is triggered by observed pain, not by
@@ -44,15 +47,17 @@ a schedule, and may correctly conclude that nothing needs filing — see step 3.
 only file issues are a separate allowance under
 [Amendment 2](docs/adr/0008-codegraph-serena-dual-engine-code-smell-pipeline.md#amendment-2-2026-10-07-scheduled-audits-that-do-not-churn).
 
-1. **CodeGraph MCP (structural engine)** — namespace `user-codegraph`, tool `codegraph_explore`.
-   Call it *first* for production `src/` symbols: call paths, type hierarchies, instantiations, and
-   blast radius. Treat returned source as already read. Score smells on production
-   `src/TotallyHotArcRouter*` only (router, Quality, GUI). Test projects are the regression net, not
-   the catalog. Do not re-grep indexed code to confirm the graph.
-2. **Serena MCP (cognitive engine)** — namespace `plugin-serena-serena`. Given CodeGraph evidence
-   (not a raw file dump), name anti-patterns (God Object, Shotgun Surgery, Feature Envy, callback
-   coupling), classify **Critical / Major / Minor** per ADR-0008's matrix, and propose a phased
-   refactor that respects existing ADRs. If Serena fails tool discovery or auth, proceed
+1. **CodeGraph MCP (structural engine)** — tool `codegraph_explore` (namespace often
+   `user-codegraph` or a project-prefixed `codegraph` variant; discover with a tool search for
+   `codegraph`). Call it *first* for production `src/` symbols: call paths, type hierarchies,
+   instantiations, and blast radius. Treat returned source as already read. Score smells on
+   production `src/TotallyHotArcRouter*` only (router, Quality, GUI). Test projects are the
+   regression net, not the catalog. Do not re-grep indexed code to confirm the graph.
+2. **Serena MCP (cognitive engine)** — namespace often `plugin-serena-serena` or a project-prefixed
+   `serena` variant; discover with a tool search for `serena` / `find_symbol`. Given CodeGraph
+   evidence (not a raw file dump), name anti-patterns (God Object, Shotgun Surgery, Feature Envy,
+   callback coupling), classify **Critical / Major / Minor** per ADR-0008's matrix, and propose a
+   phased refactor that respects existing ADRs. If Serena fails tool discovery or auth, proceed
    CodeGraph-only, classify explicitly as the agent, and record **Serena skipped** so the catalog is
    not mistaken for a dual-engine result.
 3. **Stop rules — a finding is not automatically work** ([ADR-0008 Amendment 1](docs/adr/0008-codegraph-serena-dual-engine-code-smell-pipeline.md#amendment-1-2026-09-02-stop-rules)
