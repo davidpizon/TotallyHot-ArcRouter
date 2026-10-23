@@ -46,7 +46,7 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// </param>
 /// <param name="MemoryEntryCount">
 /// The number of live <c>memory_entries</c> rows that contributed to this artifact, or 0 if
-/// none. Under a judge-row policy of <see cref="Models.JudgeRowPolicy.Exclude"/> this is smaller than the
+/// none. Under a judge-row policy of <see cref="Models.UnjudgedRowPolicy.Exclude"/> this is smaller than the
 /// store's raw row count at training time - see <see cref="TotalLiveMemoryEntryCount"/> for the count
 /// comparable to <c>IMemoryEntryStore.LoadAllAsync</c>'s raw total.
 /// </param>
@@ -64,7 +64,7 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// filtering - the watermark <see cref="Hosting.ClusterRetrainHostedService"/> compares against the
 /// store's current raw row count to decide whether enough new rows have accumulated to retrain.
 /// Comparing against <see cref="MemoryEntryCount"/> instead would be wrong under
-/// <see cref="Models.JudgeRowPolicy.Exclude"/>: that count omits policy-excluded rows, so it can never
+/// <see cref="Models.UnjudgedRowPolicy.Exclude"/>: that count omits policy-excluded rows, so it can never
 /// catch up to the raw store total once excluded rows accumulate, triggering a retrain on every poll.
 /// Defaults to 0 for an artifact trained before this field existed.
 /// </param>

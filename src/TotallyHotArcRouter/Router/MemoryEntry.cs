@@ -39,8 +39,8 @@ namespace TotallyHot.ArcRouter.Router;
 /// <c>TranscriptScoreObserver</c> passes. A <see cref="TotallyHot.ArcRouter.Quality.GradeStatus.Complete"/>
 /// grade with no judge score is stored with this flag <see langword="false"/>. Used by learning consumers
 /// (<see cref="Orchestrator.MemoryKnnVoter"/>, the logreg/clustering trainers, <see cref="Orchestrator.ClusterLedger"/>)
-/// to weight, exclude, or discount judge-influenced rows per the operator's configured
-/// <see cref="Models.JudgeRowPolicy"/>.
+/// to weight, exclude, or discount unjudged rows per the operator's configured
+/// <see cref="Models.UnjudgedRowPolicy"/>. A judge-scored row always contributes at weight <c>1.0</c>.
 /// </param>
 /// <param name="EmbeddingModel">
 /// The identity of the embedding model that produced <paramref name="TaskEmbedding"/>

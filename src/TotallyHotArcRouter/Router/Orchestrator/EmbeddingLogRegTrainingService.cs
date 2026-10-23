@@ -119,7 +119,7 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
         var liveEntries = await _memoryEntryStore.LoadAllAsync(cancellationToken).ConfigureAwait(false);
         var memoryEntryCount = 0;
         var skippedForModelMismatch = 0;
-        var skippedForJudgePolicy = 0;
+        var skippedForUnjudgedPolicy = 0;
         foreach (var entry in liveEntries)
         {
             if (entry.TaskEmbedding.Length != dimension)
@@ -147,10 +147,10 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
                 continue;
             }
 
-            var judgeWeight = _routingOptions.ResolveJudgeRowWeight(entry.IsJudgeScored);
+            var judgeWeight = _routingOptions.ResolveRowWeight(entry.IsJudgeScored);
             if (judgeWeight is null)
             {
-                skippedForJudgePolicy++;
+                skippedForUnjudgedPolicy++;
                 continue;
             }
 
@@ -169,11 +169,11 @@ public sealed class EmbeddingLogRegTrainingService : IEmbeddingLogRegTrainingSer
                 skippedForModelMismatch,
                 modelIdentity);
 
-        if (skippedForJudgePolicy > 0)
+        if (skippedForUnjudgedPolicy > 0)
             _logger.LogInformation(
                 message:
-                "Excluded {SkippedCount} judge-scored memory entry/entries from logreg training per the configured judge-row policy.",
-                skippedForJudgePolicy);
+                "Excluded {SkippedCount} unjudged memory entry/entries from logreg training per the configured unjudged-row policy.",
+                skippedForUnjudgedPolicy);
 
         var modelsRepresented = samples.Select(s => s.ModelKey).Distinct(StringComparer.Ordinal).Count();
 

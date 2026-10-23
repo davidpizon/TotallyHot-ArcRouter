@@ -134,15 +134,15 @@ public class ClusterTrainingServiceTests
     }
 
     [Fact]
-    public async Task RetrainAsync_ExcludePolicy_JudgeScoredEntriesAreNotCounted()
+    public async Task RetrainAsync_ExcludePolicy_UnjudgedEntriesAreNotCounted()
     {
         var memoryStore = new FakeMemoryEntryStore();
         for (var i = 0; i < 100; i++)
-            memoryStore.Add(embedding: UnitVector(1, 0), chosenModel: "model-a", 1.0, dimension: "bug_fixing");
-        // These would otherwise push MemoryEntryCount to 120 and still train - Exclude must drop them instead.
-        for (var i = 0; i < 20; i++)
             memoryStore.Add(embedding: UnitVector(1, 0), chosenModel: "model-a", 1.0, dimension: "bug_fixing",
                 isJudgeScored: true);
+        // These would otherwise push MemoryEntryCount to 120 and still train - Exclude must drop them instead.
+        for (var i = 0; i < 20; i++)
+            memoryStore.Add(embedding: UnitVector(1, 0), chosenModel: "model-a", 1.0, dimension: "bug_fixing");
 
         var modelPath = TempModelPath();
         using var temp = new TempBenchmarkDatabase();
@@ -150,7 +150,7 @@ public class ClusterTrainingServiceTests
             routingOptions: new RoutingOptions
             {
                 ClusterLiveSampleWeight = 1.0, ClusterMinTrainingRows = 100, ClusterCountMin = 2,
-                ClusterCountMax = 3, JudgeScoredRowPolicy = JudgeRowPolicy.Exclude
+                ClusterCountMax = 3, UnjudgedRowPolicy = UnjudgedRowPolicy.Exclude
             });
 
         try

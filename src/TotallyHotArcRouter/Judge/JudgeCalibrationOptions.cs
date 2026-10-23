@@ -10,7 +10,7 @@ namespace TotallyHot.ArcRouter.Judge;
 /// <remarks>
 /// <para>
 /// <b>Both defaults are documented guesses, not measured values</b> - the same honesty
-/// <c>RoutingOptions.JudgeScoredRowWeight</c>'s 0.5 shipped with. G-Eval
+/// <c>RoutingOptions.UnjudgedRowWeight</c>'s 0.5 shipped with. G-Eval
 /// (docs/research/2303.16634v3.md) documents score collapse as a real failure mode of exactly this
 /// technique but publishes no threshold for it, so these numbers exist to make the check <i>runnable</i>,
 /// and re-tuning them is a configuration edit rather than a code change.

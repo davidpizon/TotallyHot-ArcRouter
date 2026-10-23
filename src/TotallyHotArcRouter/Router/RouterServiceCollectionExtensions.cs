@@ -39,25 +39,7 @@ internal static class RouterServiceCollectionExtensions
         services.AddOptions<EmbeddingOptions>()
             .Configure<IConfiguration>((options, configuration) =>
                 configuration.GetSection(EmbeddingOptions.SectionName).Bind(options));
-        // EnsureValid() is enforced here (rather than by a consuming component's constructor, this
-        // options type's usual pattern - see e.g. CircuitBreaker's) because RoutingOptions is read
-        // piecemeal by several singletons (AgentAsARouter, RouterMemoryDatabase, RequestInterceptor),
-        // none of which is guaranteed to be constructed eagerly; ValidateOnStart guarantees the check
-        // runs during host startup regardless of which of those paths is actually exercised.
-        // ValidateDataAnnotations() enforces the [Range]/[Required] attributes on individual properties
-        // (e.g. EmbeddingBudgetMs) that EnsureValid's hand-written checks don't cover - the two are
-        // complementary, not redundant: EnsureValid checks cross-property invariants annotations can't
-        // express, ValidateDataAnnotations checks the per-property bounds EnsureValid doesn't repeat.
-        services.AddOptions<RoutingOptions>()
-            .Configure<IConfiguration>((options, configuration) =>
-                configuration.GetSection(RoutingOptions.SectionName).Bind(options))
-            .ValidateDataAnnotations()
-            .Validate(options =>
-            {
-                options.EnsureValid();
-                return true;
-            })
-            .ValidateOnStart();
+        services.AddRoutingOptions();
 
         // docs/router/self-organizing-classification-plan.md Phase T6: the SQLite-backed override
         // layer, registered as an IConfigureOptions<RoutingOptions> step *after* the appsettings.json
@@ -173,5 +155,83 @@ internal static class RouterServiceCollectionExtensions
         services.AddSingleton<IRegretHarnessRunner, RegretHarnessRunner>();
 
         return services;
+    }
+
+    /// <summary>
+    /// Binds and validates <see cref="RoutingOptions"/> from configuration. Rejects the pre-#326
+    /// <c>Routing:JudgeScoredRowPolicy</c> and <c>Routing:JudgeScoredRowWeight</c> keys before bind so an
+    /// operator who still has the old name fails startup instead of silently receiving
+    /// <see cref="UnjudgedRowPolicy.Include"/>. Extracted from <see cref="AddRouterCore"/> so tests can
+    /// exercise the chain without registering the database and voters.
+    /// </summary>
+    /// <param name="services">The service collection to add the options chain to.</param>
+    /// <returns>The same <paramref name="services"/> instance.</returns>
+    internal static IServiceCollection AddRoutingOptions(this IServiceCollection services)
+    {
+        // EnsureValid() is enforced here (rather than by a consuming component's constructor, this
+        // options type's usual pattern - see e.g. CircuitBreaker's) because RoutingOptions is read
+        // piecemeal by several singletons (AgentAsARouter, RouterMemoryDatabase, RequestInterceptor),
+        // none of which is guaranteed to be constructed eagerly; ValidateOnStart guarantees the check
+        // runs during host startup regardless of which of those paths is actually exercised.
+        // ValidateDataAnnotations() enforces the [Range]/[Required] attributes on individual properties
+        // (e.g. EmbeddingBudgetMs) that EnsureValid's hand-written checks don't cover - the two are
+        // complementary, not redundant: EnsureValid checks cross-property invariants annotations can't
+        // express, ValidateDataAnnotations checks the per-property bounds EnsureValid doesn't repeat.
+        services.AddOptions<RoutingOptions>()
+            .Configure<IConfiguration>((options, configuration) =>
+            {
+                var section = configuration.GetSection(RoutingOptions.SectionName);
+                RejectRetiredJudgeScoredRowKeys(section);
+                section.Bind(options);
+            })
+            .ValidateDataAnnotations()
+            .Validate(options =>
+            {
+                options.EnsureValid();
+                return true;
+            })
+            .ValidateOnStart();
+        return services;
+    }
+
+    /// <summary>
+    /// Throws when the configuration still names the pre-#326 keys, so bind cannot hide them behind the
+    /// coded <see cref="UnjudgedRowPolicy.Include"/> default.
+    /// </summary>
+    /// <param name="section">The <c>Routing</c> configuration section.</param>
+    private static void RejectRetiredJudgeScoredRowKeys(IConfiguration section)
+    {
+        var failures = new List<string>();
+        if (HasConfigurationChild(section, "JudgeScoredRowPolicy"))
+        {
+            failures.Add(
+                "Routing:JudgeScoredRowPolicy is not a setting. Set Routing:UnjudgedRowPolicy. The policy applies to rows that are not judge-scored. Judge-scored rows always have weight 1. Copying the old value onto the new key does not keep the old behavior.");
+        }
+
+        if (HasConfigurationChild(section, "JudgeScoredRowWeight"))
+        {
+            failures.Add("Routing:JudgeScoredRowWeight is not a setting. Set Routing:UnjudgedRowWeight.");
+        }
+
+        if (failures.Count > 0)
+        {
+            throw new OptionsValidationException(
+                optionsName: nameof(RoutingOptions),
+                optionsType: typeof(RoutingOptions),
+                failureMessages: failures);
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="section"/> has a child named <paramref name="key"/>, compared
+    /// case-insensitively. A key set to an empty string still counts as present.
+    /// </summary>
+    /// <param name="section">The configuration section to inspect.</param>
+    /// <param name="key">The child name to look for.</param>
+    /// <returns><see langword="true"/> when the child is present.</returns>
+    private static bool HasConfigurationChild(IConfiguration section, string key)
+    {
+        return section.GetChildren().Any(child =>
+            string.Equals(a: child.Key, b: key, comparisonType: StringComparison.OrdinalIgnoreCase));
     }
 }

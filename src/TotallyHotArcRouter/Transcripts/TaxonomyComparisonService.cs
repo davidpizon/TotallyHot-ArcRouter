@@ -413,8 +413,8 @@ public sealed class TaxonomyComparisonService : BackgroundService
                 ? null
                 : ClusterLedger.Build(artifact: _cachedArtifact, entries: entries,
                     assignmentThreshold: _routingOptions.ClusterAssignmentThreshold,
-                    judgeRowPolicy: _routingOptions.JudgeScoredRowPolicy,
-                    judgeRowWeight: _routingOptions.JudgeScoredRowWeight);
+                    unjudgedRowPolicy: _routingOptions.UnjudgedRowPolicy,
+                    unjudgedRowWeight: _routingOptions.UnjudgedRowWeight);
             _cachedMaxEntryId = maxEntryId;
             _cachedArtifactStamp = artifactStamp;
         }
@@ -470,9 +470,13 @@ public sealed class TaxonomyComparisonService : BackgroundService
                            scores.TryGetValue(key: key, value: out var found)
                     ? found
                     : null;
-                var observedWeight = _routingOptions.ResolveJudgeRowWeight(entry.IsJudgeScored) ?? 1.0;
-                clusterPredicted = ClusterLedger.PredictLeaveOneOut(cell: cell, observedScore: observedScore,
-                    observedScoreWeight: observedWeight);
+                var observedWeight = _routingOptions.ResolveRowWeight(entry.IsJudgeScored);
+                // A dropped row was never added to the cell. Subtracting a stand-in weight of 1.0 invents
+                // a held-out prediction; the cell mean is already the prediction with this row removed.
+                clusterPredicted = observedWeight is null
+                    ? cell?.MeanScore
+                    : ClusterLedger.PredictLeaveOneOut(cell: cell, observedScore: observedScore,
+                        observedScoreWeight: observedWeight.Value);
             }
         }
 

@@ -352,6 +352,10 @@ Replace with the current registration: `ProxyServiceCollectionExtensions` regist
 1. `QualityScorer` folds `result.JudgeScore` into the weighted total (the three-axis blend).
 2. `TranscriptScoreObserver` and `EmbeddingMemoryScoreObserver` set `is_judge_scored` from `JudgeScore.HasValue`.
 3. `RoutingOptions.JudgeScoredRowPolicy` / `JudgeScoredRowWeight` are applied through `RoutingOptions.ResolveJudgeRowWeight` by `MemoryKnnVoter`, `EmbeddingLogRegTrainingService`, and `ClusterTrainingService`. `ClusterLedger.Build` calls `JudgeRowWeighting.ResolveWeight`. Those are two methods. Both must be present.
+
+   > **Note, 2026-10-22 (issue #326).** #326 renamed those symbols to `UnjudgedRowPolicy`,
+   > `UnjudgedRowWeight`, `ResolveRowWeight`, and `UnjudgedRowWeighting.ResolveWeight`. This checklist
+   > item records what existed at `d3452c4a`; it is not an audit of the new names.
 4. The Phase G3 section of the same plan says the original "non-executable dimensions only" scope was superseded because execution was removed.
 
 At `d3452c4a` all four are present, and the Phase G3 body already says the blend, the provenance flag, and the learning policy shipped. Re-read them anyway. Then pick exactly one of these writings, and use it in the header, the G3 table row, and the `docs/README.md` row:

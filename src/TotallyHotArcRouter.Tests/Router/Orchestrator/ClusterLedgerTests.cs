@@ -93,7 +93,7 @@ public class ClusterLedgerTests
     }
 
     [Fact]
-    public void Build_ExcludePolicy_DropsJudgeScoredEntriesFromMeanAndObservationCount()
+    public void Build_ExcludePolicy_DropsUnjudgedEntriesFromMeanAndObservationCount()
     {
         MemoryEntry[] entries =
         [
@@ -102,9 +102,9 @@ public class ClusterLedgerTests
         ];
 
         var ledger = ClusterLedger.Build(artifact: TwoClusterArtifact, entries: entries, assignmentThreshold: 0.5,
-            judgeRowPolicy: JudgeRowPolicy.Exclude);
+            unjudgedRowPolicy: UnjudgedRowPolicy.Exclude);
 
-        Assert.Equal(0.9, actual: ledger[0]["model-a"].MeanScore, 6);
+        Assert.Equal(0.1, actual: ledger[0]["model-a"].MeanScore, 6);
         Assert.Equal(1, actual: ledger[0]["model-a"].ObservationCount);
     }
 
@@ -118,11 +118,11 @@ public class ClusterLedgerTests
         ];
 
         var ledger = ClusterLedger.Build(artifact: TwoClusterArtifact, entries: entries, assignmentThreshold: 0.5,
-            judgeRowPolicy: JudgeRowPolicy.DownWeight, judgeRowWeight: 0.5);
+            unjudgedRowPolicy: UnjudgedRowPolicy.DownWeight, unjudgedRowWeight: 0.5);
 
-        // (0.9*1 + 0.3*0.5) / (1 + 0.5) = 1.05 / 1.5 = 0.7 - the weighted mean shifts toward the
-        // non-judge-scored entry, but ObservationCount still counts both raw rows.
-        Assert.Equal(0.7, actual: ledger[0]["model-a"].MeanScore, 6);
+        // (0.9*0.5 + 0.3*1) / (0.5 + 1) = 0.75 / 1.5 = 0.5 - the weighted mean shifts toward the
+        // judge-scored entry, but ObservationCount still counts both kept rows.
+        Assert.Equal(0.5, actual: ledger[0]["model-a"].MeanScore, 6);
         Assert.Equal(2, actual: ledger[0]["model-a"].ObservationCount);
     }
 

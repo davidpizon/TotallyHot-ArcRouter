@@ -117,6 +117,79 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RunCycle_ExcludePolicy_DroppedUnjudgedRowUsesTheCellMeanAsIs()
+    {
+        var exclude = new RoutingOptions
+        {
+            ClusterAssignmentThreshold = 0.5, UnjudgedRowPolicy = UnjudgedRowPolicy.Exclude
+        };
+
+        var judgedPlusUnjudged = await BuildHarnessAsync(
+            samples:
+            [
+                new Sample(Embedding: [1f, 0f], Model: "model-a", 0.4, IsJudgeScored: true),
+                new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9)
+            ],
+            routingOptions: exclude,
+            storePrefix: "exclude-one-judged");
+        await judgedPlusUnjudged.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+        var oneJudgedRows = await judgedPlusUnjudged.ComparisonStore.LoadSinceAsync(
+            since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken);
+        var oneJudgedUnjudged = RowWithObservedScore(rows: oneJudgedRows, expected: 0.9);
+        Assert.Equal(0.4, actual: oneJudgedUnjudged.ClusterPredictedScore!.Value, 6);
+
+        var twoJudgedPlusUnjudged = await BuildHarnessAsync(
+            samples:
+            [
+                new Sample(Embedding: [1f, 0f], Model: "model-a", 0.4, IsJudgeScored: true),
+                new Sample(Embedding: [1f, 0f], Model: "model-a", 0.8, IsJudgeScored: true),
+                new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9)
+            ],
+            routingOptions: exclude,
+            storePrefix: "exclude-two-judged");
+        await twoJudgedPlusUnjudged.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+        var twoJudgedRows = await twoJudgedPlusUnjudged.ComparisonStore.LoadSinceAsync(
+            since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken);
+        var twoJudgedUnjudged = RowWithObservedScore(rows: twoJudgedRows, expected: 0.9);
+        Assert.Equal(0.6, actual: twoJudgedUnjudged.ClusterPredictedScore!.Value, 6);
+
+        var unjudgedOnly = await BuildHarnessAsync(
+            samples: [new Sample(Embedding: [1f, 0f], Model: "model-a", 0.9)],
+            routingOptions: exclude,
+            storePrefix: "exclude-unjudged-only");
+        await unjudgedOnly.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+        var loneUnjudged = Assert.Single(await unjudgedOnly.ComparisonStore.LoadSinceAsync(
+            since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Null(loneUnjudged.ClusterPredictedScore);
+
+        var twoJudged = await BuildHarnessAsync(
+            samples:
+            [
+                new Sample(Embedding: [1f, 0f], Model: "model-a", 0.4, IsJudgeScored: true),
+                new Sample(Embedding: [1f, 0f], Model: "model-a", 0.8, IsJudgeScored: true)
+            ],
+            routingOptions: exclude,
+            storePrefix: "exclude-judged-loo");
+        await twoJudged.Service.RunCycleAsync(TestContext.Current.CancellationToken);
+        var judgedRows = await twoJudged.ComparisonStore.LoadSinceAsync(
+            since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken);
+        var judgedAtFour = RowWithObservedScore(rows: judgedRows, expected: 0.4);
+        Assert.Equal(0.8, actual: judgedAtFour.ClusterPredictedScore!.Value, 6);
+        var judgedAtEight = RowWithObservedScore(rows: judgedRows, expected: 0.8);
+        Assert.Equal(0.4, actual: judgedAtEight.ClusterPredictedScore!.Value, 6);
+    }
+
+    /// <summary>
+    /// Picks the comparison row whose observed score matches <paramref name="expected"/> within 1e-9,
+    /// so the fixture can identify a row without an exact floating-point <c>==</c>.
+    /// </summary>
+    private static TaxonomyComparisonRecord RowWithObservedScore(
+        IReadOnlyList<TaxonomyComparisonRecord> rows, double expected)
+    {
+        return Assert.Single(collection: rows, predicate: r => Math.Abs(r.ObservedScore - expected) < 1e-9);
+    }
+
+    [Fact]
     public async Task RunCycle_NoClusterModelTrained_LeavesClusterErrorUnmeasuredRatherThanZero()
     {
         var harness = await BuildHarnessAsync(
@@ -550,12 +623,20 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
         int batchSize = 200,
         Func<InFlightRequestGauge, ITranscriptStore, ITranscriptStore>? wrapTranscriptStore = null,
         IReadOnlyList<PriorRow>? priorRows = null,
-        ITokenCounter? tokenCounter = null)
+        ITokenCounter? tokenCounter = null,
+        RoutingOptions? routingOptions = null,
+        string? storePrefix = null)
     {
+        var transcriptDatabasePath = storePrefix is null
+            ? _dbPath
+            : Path.Combine(path1: _tempDirectory, path2: $"{storePrefix}-transcripts.db");
+        var clusterModelPath = storePrefix is null
+            ? _clusterModelPath
+            : Path.Combine(path1: _tempDirectory, path2: $"{storePrefix}-cluster-model.json");
         var storageOptions = Options.Create(new StorageOptions
         {
-            TranscriptDatabasePath = _dbPath,
-            ClusterModelPath = _clusterModelPath
+            TranscriptDatabasePath = transcriptDatabasePath,
+            ClusterModelPath = clusterModelPath
         });
         var transcriptOptions = Options.Create(new TranscriptOptions { Enabled = transcriptsEnabled });
         var transcriptOptionsMonitor =
@@ -582,7 +663,8 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
                     0,
                     null,
                     CreatedAtUtc: DateTimeOffset.UtcNow,
-                    IsExploratory: sample.IsExploratory),
+                    IsExploratory: sample.IsExploratory,
+                    IsJudgeScored: sample.IsJudgeScored),
                 cancellationToken: token);
 
             var id = await transcriptStore.InsertAsync(
@@ -626,7 +708,7 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
             }
         }
 
-        if (trainClusterModel) WriteClusterModel();
+        if (trainClusterModel) WriteClusterModel(clusterModelPath);
 
         // No prior rows -> point at a corpus file that never gets created, matching a machine where the
         // benchmark has never been synced (DimensionModelScoreMatrix.SelectBest/AverageScore then always
@@ -671,7 +753,7 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
             benchmarkDatabase: benchmarkDatabase,
             routeResolver: new StubRouteResolver(),
             transcriptOptions: transcriptOptions,
-            routingOptions: Options.Create(new RoutingOptions { ClusterAssignmentThreshold = 0.5 }),
+            routingOptions: Options.Create(routingOptions ?? new RoutingOptions { ClusterAssignmentThreshold = 0.5 }),
             storageOptions: storageOptions,
             qualityOptions: Options.Create(new QualityOptions { LiveMemoryPrefix = Prefix }),
             priceLookup: new StubPriceLookup(),
@@ -683,7 +765,8 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
     }
 
     /// <summary>Writes a two-centroid artifact on the axes the fixture embeddings sit on.</summary>
-    private void WriteClusterModel()
+    /// <param name="clusterModelPath">The artifact path this harness's storage options already point at.</param>
+    private static void WriteClusterModel(string clusterModelPath)
     {
         var artifact = new ClusterModelArtifact(
             2,
@@ -697,7 +780,7 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
             0,
             4);
 
-        File.WriteAllText(path: _clusterModelPath, contents: ClusterModelArtifactSerializer.Serialize(artifact));
+        File.WriteAllText(path: clusterModelPath, contents: ClusterModelArtifactSerializer.Serialize(artifact));
     }
 
     /// <summary>One fixture request: its embedding, the model that served it, and what came back.</summary>
@@ -711,7 +794,8 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
         string? Dimension = "code_generation",
         double? UntrainedBaselinePredictedScore = null,
         string PromptText = "write a function",
-        int InputTokens = 100);
+        int InputTokens = 100,
+        bool IsJudgeScored = false);
 
     /// <summary>One row of a fixture's synced frozen probing-split prior.</summary>
     private sealed record PriorRow(string Dimension, string Model, double Score);

@@ -131,7 +131,7 @@ public sealed class ClusterRetrainHostedService : BackgroundService
     /// currently on disk, tolerating a missing or unreadable file by returning <c>0</c> - the honest
     /// baseline when no artifact has ever been trained. This is the raw, policy-unfiltered watermark
     /// comparable to <see cref="IMemoryEntryStore.LoadAllAsync"/>'s count - not
-    /// <see cref="ClusterModelArtifact.MemoryEntryCount"/>, which under <see cref="Models.JudgeRowPolicy.Exclude"/>
+    /// <see cref="ClusterModelArtifact.MemoryEntryCount"/>, which under <see cref="Models.UnjudgedRowPolicy.Exclude"/>
     /// omits policy-excluded rows and would never let this comparison converge.
     /// </summary>
     private int TryReadLastTrainedMemoryEntryCount()
