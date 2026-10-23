@@ -135,7 +135,7 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
         await judgedPlusUnjudged.Service.RunCycleAsync(TestContext.Current.CancellationToken);
         var oneJudgedRows = await judgedPlusUnjudged.ComparisonStore.LoadSinceAsync(
             since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken);
-        var oneJudgedUnjudged = Assert.Single(collection: oneJudgedRows, predicate: r => r.ObservedScore == 0.9);
+        var oneJudgedUnjudged = RowWithObservedScore(rows: oneJudgedRows, expected: 0.9);
         Assert.Equal(0.4, actual: oneJudgedUnjudged.ClusterPredictedScore!.Value, 6);
 
         var twoJudgedPlusUnjudged = await BuildHarnessAsync(
@@ -150,7 +150,7 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
         await twoJudgedPlusUnjudged.Service.RunCycleAsync(TestContext.Current.CancellationToken);
         var twoJudgedRows = await twoJudgedPlusUnjudged.ComparisonStore.LoadSinceAsync(
             since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken);
-        var twoJudgedUnjudged = Assert.Single(collection: twoJudgedRows, predicate: r => r.ObservedScore == 0.9);
+        var twoJudgedUnjudged = RowWithObservedScore(rows: twoJudgedRows, expected: 0.9);
         Assert.Equal(0.6, actual: twoJudgedUnjudged.ClusterPredictedScore!.Value, 6);
 
         var unjudgedOnly = await BuildHarnessAsync(
@@ -173,10 +173,20 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
         await twoJudged.Service.RunCycleAsync(TestContext.Current.CancellationToken);
         var judgedRows = await twoJudged.ComparisonStore.LoadSinceAsync(
             since: DateTimeOffset.MinValue, cancellationToken: TestContext.Current.CancellationToken);
-        var judgedAtFour = Assert.Single(collection: judgedRows, predicate: r => r.ObservedScore == 0.4);
+        var judgedAtFour = RowWithObservedScore(rows: judgedRows, expected: 0.4);
         Assert.Equal(0.8, actual: judgedAtFour.ClusterPredictedScore!.Value, 6);
-        var judgedAtEight = Assert.Single(collection: judgedRows, predicate: r => r.ObservedScore == 0.8);
+        var judgedAtEight = RowWithObservedScore(rows: judgedRows, expected: 0.8);
         Assert.Equal(0.4, actual: judgedAtEight.ClusterPredictedScore!.Value, 6);
+    }
+
+    /// <summary>
+    /// Picks the comparison row whose observed score matches <paramref name="expected"/> within 1e-9,
+    /// so the fixture can identify a row without an exact floating-point <c>==</c>.
+    /// </summary>
+    private static TaxonomyComparisonRecord RowWithObservedScore(
+        IReadOnlyList<TaxonomyComparisonRecord> rows, double expected)
+    {
+        return Assert.Single(collection: rows, predicate: r => Math.Abs(r.ObservedScore - expected) < 1e-9);
     }
 
     [Fact]
