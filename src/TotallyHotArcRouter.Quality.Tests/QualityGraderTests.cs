@@ -164,4 +164,32 @@ public class QualityGraderTests
             grader.GradeAsync(request: Request(code: "const x = 1;", language: CodeLanguage.JavaScript),
                 cancellationToken: cts.Token));
     }
+
+    [Fact]
+    public async Task GradeAsync_BootstrapRecipe_SkipsParserAndLeavesSyntaxConfidenceAtDefault()
+    {
+        var grader = CreateGrader();
+        var request = new QualityRequest(
+            Code: string.Empty,
+            Language: CodeLanguage.Unknown,
+            Prompt: "what is a mutex",
+            Dimension: string.Empty,
+            Model: "model-a",
+            CorrelationId: "sess-1:1",
+            SessionId: "sess-1",
+            ResponseText: "A mutex is a lock.",
+            RecipeId: GradingRecipes.Bootstrap);
+
+        var result = await grader.GradeAsync(request: request,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected: GradingRecipes.Bootstrap, actual: result.RecipeId);
+        Assert.False(result.ResponseHasCode);
+        Assert.False(result.SyntaxValid);
+        Assert.False(result.SyntaxAuthoritative);
+        Assert.Equal(1.0, actual: result.SyntaxConfidence);
+        Assert.Null(result.AnalysisScore);
+        Assert.True(result.QuestionPresent);
+        Assert.Equal(0.0, actual: result.UnifiedScore);
+    }
 }

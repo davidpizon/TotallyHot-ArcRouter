@@ -30,7 +30,7 @@ internal sealed class JudgeGraderClient : IPortfolioGraderClient
         var result = await _judgeClient
             .ScoreAsync(
                 request: new JudgeScoreRequest(Dimension: request.Dimension, ResponseText: request.ResponseText,
-                    Prompt: request.Prompt),
+                    Prompt: request.Prompt, RecipeId: request.RecipeId),
                 cancellationToken: cancellationToken).ConfigureAwait(false);
 
         return result is null

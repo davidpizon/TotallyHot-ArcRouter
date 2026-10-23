@@ -162,7 +162,7 @@ public sealed class GraderDrainService : BackgroundService
             var result = await client
                 .ScoreAsync(
                     request: new PortfolioGraderScoreRequest(Dimension: job.Dimension, ResponseText: responseText,
-                        Prompt: prompt),
+                        Prompt: prompt, RecipeId: job.RecipeId),
                     cancellationToken: stoppingToken).ConfigureAwait(false);
             stopwatch.Stop();
 

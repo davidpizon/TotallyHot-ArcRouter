@@ -35,7 +35,12 @@ public interface IPortfolioGraderClient
 /// the response in isolation when this is missing or whitespace-only
 /// (docs/research/code-quality-metrics-assessment.md §1; GitHub issue #114).
 /// </param>
-public sealed record PortfolioGraderScoreRequest(string Dimension, string ResponseText, string Prompt);
+/// <param name="RecipeId">The grading recipe, forwarded to the G-Eval judge for the non-code hint.</param>
+public sealed record PortfolioGraderScoreRequest(
+    string Dimension,
+    string ResponseText,
+    string Prompt,
+    string? RecipeId = null);
 
 /// <summary>The result of one <see cref="IPortfolioGraderClient.ScoreAsync"/> call.</summary>
 /// <param name="Score">The grader's score, normalized to <c>[0, 1]</c>.</param>

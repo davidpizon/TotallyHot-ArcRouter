@@ -66,6 +66,8 @@ public sealed class GEvalJudgeClient : IJudgeClient
         1. Relevance — Does the response address what was asked, rather than a different question?
         2. Correctness — Is what it says or writes right for what was asked?
         3. Completeness — Does it cover the whole request, without stubs, cut-off output, or skipped parts?
+
+        A longer answer is not a better one. Length is not a reason to raise the score.
         """;
 
     /// <summary>
@@ -143,7 +145,7 @@ public sealed class GEvalJudgeClient : IJudgeClient
         // (docs/research/code-quality-metrics-assessment.md §1; GitHub issue #114).
         var taskPrompt = GraderQuestionText.Require(request.Prompt);
         var prompt = BuildPrompt(dimension: request.Dimension, responseText: request.ResponseText,
-            taskPrompt: taskPrompt);
+            taskPrompt: taskPrompt, recipeId: request.RecipeId);
         var client = _httpClientFactory.CreateClient(HttpClientName);
         client.Timeout = TimeSpan.FromSeconds(_options.CurrentValue.RequestTimeoutSeconds);
 
@@ -221,9 +223,11 @@ public sealed class GEvalJudgeClient : IJudgeClient
     /// <param name="dimension">The task dimension whose hint should be applied.</param>
     /// <param name="responseText">The agent's response text to score.</param>
     /// <param name="taskPrompt">The user/task question the response was written to answer; never empty.</param>
-    internal static string BuildPrompt(string dimension, string responseText, string taskPrompt)
+    /// <param name="recipeId">The grading recipe; bootstrap uses a non-code hint instead of a dimension topic.</param>
+    internal static string BuildPrompt(string dimension, string responseText, string taskPrompt,
+        string? recipeId = null)
     {
-        var hint = ResolveDimensionHint(dimension);
+        var hint = ResolveDimensionHint(dimension: dimension, recipeId: recipeId);
 
         return $"""
                 You are an expert evaluator. Rate the AI assistant's response on a scale of 1 (worst) to 5
@@ -253,9 +257,14 @@ public sealed class GEvalJudgeClient : IJudgeClient
     /// generic coding-task emphasis (still never silent about the three criteria).
     /// </summary>
     /// <param name="dimension">The router dimension label.</param>
+    /// <param name="recipeId">The grading recipe; bootstrap ignores <paramref name="dimension"/>.</param>
     /// <returns>The hint sentence to weave into the prompt.</returns>
-    internal static string ResolveDimensionHint(string? dimension)
+    internal static string ResolveDimensionHint(string? dimension, string? recipeId = null)
     {
+        if (string.Equals(recipeId, GradingRecipes.Bootstrap, StringComparison.OrdinalIgnoreCase))
+            return
+                "Dimension emphasis: judge the response as an answer to the question, and do not reward code that the question did not ask for.";
+
         if (!string.IsNullOrEmpty(dimension) &&
             DimensionHints.TryGetValue(key: dimension, value: out var hint))
             return hint;

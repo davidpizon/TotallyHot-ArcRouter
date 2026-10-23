@@ -31,7 +31,14 @@ public interface IJudgeClient
 /// than grading the response in isolation when this is missing or whitespace-only
 /// (docs/research/code-quality-metrics-assessment.md §1; GitHub issue #114).
 /// </param>
-public sealed record JudgeScoreRequest(string Dimension, string ResponseText, string Prompt);
+/// <param name="RecipeId">
+/// The grading recipe, forwarded so the G-Eval prompt can use the non-code hint on bootstrap rows.
+/// </param>
+public sealed record JudgeScoreRequest(
+    string Dimension,
+    string ResponseText,
+    string Prompt,
+    string? RecipeId = null);
 
 /// <summary>The result of one <see cref="IJudgeClient.ScoreAsync"/> call.</summary>
 /// <param name="Score">The judge's score, normalized to <c>[0, 1]</c>.</param>

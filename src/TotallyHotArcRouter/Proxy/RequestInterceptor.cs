@@ -6,6 +6,7 @@ using TotallyHot.ArcRouter.Logging;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
+using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Quality.Extraction;
 using TotallyHot.ArcRouter.Router;
@@ -207,6 +208,10 @@ public class RequestInterceptor
     /// Optional live switch for the two conversation-bearing request excerpts (#184 phase 3).
     /// <see langword="null"/> (the default) leaves those templates silent.
     /// </param>
+    /// <param name="judgeOptions">
+    /// Optional live judge pin forwarded to <see cref="RoutingCandidateBuilder"/> so auto-route never
+    /// selects the teacher (ADR-0027). <see langword="null"/> excludes nothing extra.
+    /// </param>
     public RequestInterceptor(
         ILogger<RequestInterceptor> logger,
         IModelRouteResolver modelRouteResolver,
@@ -224,7 +229,8 @@ public class RequestInterceptor
         UntrainedBaselineSelector? untrainedBaselineSelector = null,
         IOptionsMonitor<RoutingOptions>? routingOptionsMonitor = null,
         IModelFeatureSupportStore? modelFeatureSupportStore = null,
-        IOptionsMonitor<BodyExcerptOptions>? bodyExcerptOptions = null)
+        IOptionsMonitor<BodyExcerptOptions>? bodyExcerptOptions = null,
+        IOptionsMonitor<JudgeOptions>? judgeOptions = null)
     {
         _routingOptionsMonitor = routingOptionsMonitor;
         _bodyExcerptOptions = bodyExcerptOptions;
@@ -245,7 +251,7 @@ public class RequestInterceptor
         _routingCandidateBuilder = new RoutingCandidateBuilder(
             circuitBreaker: _circuitBreaker, modelRouteResolver: _modelRouteResolver, routerMemory: _routerMemory,
             interactionStatusStore: _interactionStatusStore, logger: _logger,
-            featureSupportStore: modelFeatureSupportStore);
+            featureSupportStore: modelFeatureSupportStore, judgeOptions: judgeOptions);
 
         if (_forcedModelName is not null &&
             !modelRouteResolver.ListModels().Any(m => string.Equals(a: m.ModelName, b: _forcedModelName,

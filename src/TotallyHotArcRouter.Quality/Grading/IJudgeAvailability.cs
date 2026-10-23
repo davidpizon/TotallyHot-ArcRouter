@@ -28,6 +28,29 @@ public interface IJudgeAvailability
     /// </remarks>
     // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Global
     bool WillJudge(QualityResult result);
+
+    /// <summary>
+    /// Whether the operator has the judge switched on. Distinct from <see cref="WillJudge"/>: a missing
+    /// pin is still "enabled" and becomes <c>Incomplete</c> reason <c>no_judge</c>, whereas a disabled
+    /// judge is <see cref="GradeStatus.StructureOnly"/>.
+    /// </summary>
+    /// <returns><see langword="true"/> when the judge toggle is on.</returns>
+    bool IsJudgeEnabled() => false;
+
+    /// <summary>
+    /// Whether the judge is on but the pinned free model is missing, paid, or switched off. Default
+    /// <see langword="false"/> so tests that only stub <see cref="WillJudge"/> keep compiling.
+    /// </summary>
+    /// <returns><see langword="true"/> when a pin was required and none is eligible.</returns>
+    bool IsPinMissing() => false;
+
+    /// <summary>
+    /// Whether <paramref name="result"/>'s answering model is the pinned judge. That response is never
+    /// graded (<c>Incomplete</c> reason <c>judge_is_answerer</c>).
+    /// </summary>
+    /// <param name="result">The static result whose <see cref="QualityResult.Model"/> is the answerer.</param>
+    /// <returns><see langword="true"/> when the answerer is the pin.</returns>
+    bool IsAnswererTheJudge(QualityResult result) => false;
 }
 
 /// <summary>

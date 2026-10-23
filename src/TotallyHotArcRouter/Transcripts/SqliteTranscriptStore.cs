@@ -140,6 +140,22 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
     public Task UpdateOutcomeAsync(string correlationId, double? score, bool isJudgeScored = false,
         CancellationToken cancellationToken = default)
     {
+        return UpdateOutcomeAsync(
+            correlationId: correlationId,
+            score: score,
+            isJudgeScored: isJudgeScored,
+            scorerVersion: null,
+            cancellationToken: cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task UpdateOutcomeAsync(
+        string correlationId,
+        double? score,
+        bool isJudgeScored,
+        string? scorerVersion,
+        CancellationToken cancellationToken = default)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -150,12 +166,16 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         using var command = connection.CreateCommand();
         // Updates every matching row, not just the newest - in the ordinary case there is exactly one
         // (correlation ids are per-request), and this avoids a second query to find "the" row when more
-        // than one somehow shares an id.
-        command.CommandText =
-            "UPDATE request_transcripts SET score = $score, is_judge_scored = $isJudgeScored WHERE correlation_id = $correlationId;";
+        // than one somehow shares an id. Scorer version is stamped only when the caller supplies it so
+        // a code-recipe live update does not freeze the row against rescan.
+        command.CommandText = string.IsNullOrEmpty(scorerVersion)
+            ? "UPDATE request_transcripts SET score = $score, is_judge_scored = $isJudgeScored WHERE correlation_id = $correlationId;"
+            : "UPDATE request_transcripts SET score = $score, is_judge_scored = $isJudgeScored, scorer_version = $scorerVersion WHERE correlation_id = $correlationId;";
         command.Parameters.AddWithValue(parameterName: "$score", value: (object?)score ?? DBNull.Value);
         command.Parameters.AddWithValue(parameterName: "$isJudgeScored", value: isJudgeScored ? 1 : 0);
         command.Parameters.AddWithValue(parameterName: "$correlationId", value: correlationId);
+        if (!string.IsNullOrEmpty(scorerVersion))
+            command.Parameters.AddWithValue(parameterName: "$scorerVersion", value: scorerVersion);
         command.ExecuteNonQuery();
 
         return Task.CompletedTask;

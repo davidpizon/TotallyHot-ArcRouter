@@ -278,7 +278,7 @@ public class GEvalJudgeClientTests
     private static JudgeModelSelector CreateSelector(IModelRouteResolver resolver, JudgeOptions? options = null)
     {
         return new JudgeModelSelector(routeResolver: resolver,
-            options: new StaticOptionsMonitor<JudgeOptions>(options ?? new JudgeOptions()),
+            options: new StaticOptionsMonitor<JudgeOptions>(options ?? new JudgeOptions { ModelName = "local-judge" }),
             logger: NullLogger<JudgeModelSelector>.Instance);
     }
 

@@ -32,11 +32,13 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
                               INSERT INTO grade_receipts (
                                   correlation_id, created_at_utc, dimension, model, grade_status, unified_score,
                                   question_hmac, question_chars, context_messages, question_truncated,
-                                  fingerprint_ref, scorer_version, prompt_version, weights_version, abstained_graders)
+                                  fingerprint_ref, scorer_version, prompt_version, weights_version, abstained_graders,
+                                  incomplete_reason, grade_source, response_has_code, judge_model, answer_model)
                               VALUES (
                                   $correlationId, $createdAtUtc, $dimension, $model, $gradeStatus, $unifiedScore,
                                   $questionHmac, $questionChars, $contextMessages, $questionTruncated,
-                                  $fingerprintRef, $scorerVersion, $promptVersion, $weightsVersion, $abstainedGraders)
+                                  $fingerprintRef, $scorerVersion, $promptVersion, $weightsVersion, $abstainedGraders,
+                                  $incompleteReason, $gradeSource, $responseHasCode, $judgeModel, $answerModel)
                               ON CONFLICT(correlation_id) DO UPDATE SET
                                   created_at_utc = excluded.created_at_utc,
                                   dimension = excluded.dimension,
@@ -51,7 +53,12 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
                                   scorer_version = excluded.scorer_version,
                                   prompt_version = excluded.prompt_version,
                                   weights_version = excluded.weights_version,
-                                  abstained_graders = excluded.abstained_graders;
+                                  abstained_graders = excluded.abstained_graders,
+                                  incomplete_reason = excluded.incomplete_reason,
+                                  grade_source = excluded.grade_source,
+                                  response_has_code = excluded.response_has_code,
+                                  judge_model = excluded.judge_model,
+                                  answer_model = excluded.answer_model;
                               """;
         BindRecord(command, record);
         command.ExecuteNonQuery();
@@ -69,7 +76,8 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
         command.CommandText = """
                               SELECT correlation_id, created_at_utc, dimension, model, grade_status, unified_score,
                                      question_hmac, question_chars, context_messages, question_truncated,
-                                     fingerprint_ref, scorer_version, prompt_version, weights_version, abstained_graders
+                                     fingerprint_ref, scorer_version, prompt_version, weights_version, abstained_graders,
+                                     incomplete_reason, grade_source, response_has_code, judge_model, answer_model
                               FROM grade_receipts
                               WHERE correlation_id = $correlationId;
                               """;
@@ -144,6 +152,15 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
             value: (object?)record.PromptVersion ?? DBNull.Value);
         command.Parameters.AddWithValue(parameterName: "$weightsVersion", value: record.WeightsVersion);
         command.Parameters.AddWithValue(parameterName: "$abstainedGraders", value: record.AbstainedGraders);
+        command.Parameters.AddWithValue(parameterName: "$incompleteReason",
+            value: (object?)record.IncompleteReason ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$gradeSource",
+            value: (object?)record.GradeSource ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$responseHasCode", value: record.ResponseHasCode ? 1 : 0);
+        command.Parameters.AddWithValue(parameterName: "$judgeModel",
+            value: (object?)record.JudgeModel ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$answerModel",
+            value: (object?)record.AnswerModel ?? DBNull.Value);
     }
 
     private static GradeReceiptRecord ReadRecord(Microsoft.Data.Sqlite.SqliteDataReader reader)
@@ -163,6 +180,11 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
             ScorerVersion: reader.GetString(11),
             PromptVersion: reader.IsDBNull(12) ? null : reader.GetString(12),
             WeightsVersion: reader.GetString(13),
-            AbstainedGraders: reader.GetString(14));
+            AbstainedGraders: reader.GetString(14),
+            IncompleteReason: reader.FieldCount > 15 && !reader.IsDBNull(15) ? reader.GetString(15) : null,
+            GradeSource: reader.FieldCount > 16 && !reader.IsDBNull(16) ? reader.GetString(16) : null,
+            ResponseHasCode: reader.FieldCount > 17 && !reader.IsDBNull(17) && reader.GetInt64(17) != 0,
+            JudgeModel: reader.FieldCount > 18 && !reader.IsDBNull(18) ? reader.GetString(18) : null,
+            AnswerModel: reader.FieldCount > 19 && !reader.IsDBNull(19) ? reader.GetString(19) : null);
     }
 }

@@ -50,4 +50,27 @@ public sealed class JudgeAvailability : IJudgeAvailability
 
         return _modelSelector.Resolve() is not null;
     }
+
+    /// <inheritdoc/>
+    public bool IsJudgeEnabled()
+    {
+        return _options.CurrentValue.Enabled;
+    }
+
+    /// <inheritdoc/>
+    public bool IsPinMissing()
+    {
+        return _options.CurrentValue.Enabled && _modelSelector.Resolve() is null;
+    }
+
+    /// <inheritdoc/>
+    public bool IsAnswererTheJudge(QualityResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+
+        var pin = _options.CurrentValue.ModelName;
+        if (string.IsNullOrWhiteSpace(pin) || string.IsNullOrEmpty(result.Model)) return false;
+
+        return string.Equals(a: result.Model, b: pin, comparisonType: StringComparison.OrdinalIgnoreCase);
+    }
 }

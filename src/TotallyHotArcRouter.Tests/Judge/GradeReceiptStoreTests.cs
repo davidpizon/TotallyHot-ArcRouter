@@ -24,6 +24,11 @@ public class GradeReceiptStoreTests
 
         using var connection = database.OpenConnection();
         Assert.True(ColumnExists(connection: connection, table: "grade_receipts", column: "question_hmac"));
+        Assert.True(ColumnExists(connection: connection, table: "grade_receipts", column: "incomplete_reason"));
+        Assert.True(ColumnExists(connection: connection, table: "grade_receipts", column: "grade_source"));
+        Assert.True(ColumnExists(connection: connection, table: "grade_receipts", column: "response_has_code"));
+        Assert.True(ColumnExists(connection: connection, table: "grade_receipts", column: "judge_model"));
+        Assert.True(ColumnExists(connection: connection, table: "grade_receipts", column: "answer_model"));
         Assert.True(ColumnExists(connection: connection, table: "grader_scores", column: "question_hmac"));
         Assert.True(ColumnExists(connection: connection, table: "grader_scores", column: "prompt_version"));
     }
@@ -78,7 +83,8 @@ public class GradeReceiptStoreTests
         await using var scan = connection.CreateCommand();
         scan.CommandText = """
                            SELECT correlation_id, dimension, model, grade_status, question_hmac, scorer_version,
-                                  prompt_version, weights_version, abstained_graders
+                                  prompt_version, weights_version, abstained_graders, incomplete_reason, grade_source,
+                                  response_has_code, judge_model, answer_model
                            FROM grade_receipts;
                            """;
         await using var reader = scan.ExecuteReader();
@@ -89,6 +95,65 @@ public class GradeReceiptStoreTests
             var value = reader.GetValue(i).ToString() ?? string.Empty;
             Assert.DoesNotContain(question, value, StringComparison.Ordinal);
         }
+    }
+
+    [Fact]
+    public async Task GradeReceiptRecordObserver_BootstrapRow_StampsTeacherSourceAndNoQuestionText()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "router.db");
+        var database = new RouterMemoryDatabase(Options.Create(new RoutingOptions { EmbeddingMemoryDatabasePath = path }));
+        database.EnsureCreated();
+
+        IGradeReceiptStore store = new SqliteGradeReceiptStore(database);
+        var windowCache = new PendingConversationWindowCache(Options.Create(new JudgeOptions()));
+        var secretPath = Path.Combine(Path.GetDirectoryName(path)!, "secrets.dat");
+        var hasher = new QuestionHmacHasher(new ProtectedSecretStore(secretPath));
+        const string question = "Explain what a mutex is without writing code";
+        windowCache.Set(correlationId: "sess-1:2",
+            window: new ConversationWindowResult(
+                FormattedText: $"Task:\n{question}",
+                NewestUserMessage: question,
+                QuestionChars: question.Length,
+                ContextMessages: 0,
+                Truncated: false));
+
+        var observer = new GradeReceiptRecordObserver(
+            store: store,
+            pendingWindowCache: windowCache,
+            questionHmacHasher: hasher,
+            qualityOptions: Options.Create(new QualityOptions { ScorerVersion = "3.0", WeightsVersion = "3.0-judge-heavy" }),
+            judgeOptions: Options.Create(new JudgeOptions
+            {
+                PromptVersion = "g-eval-v3-question-rubric-noncode", ModelName = "local-judge"
+            }),
+            logger: NullLogger<GradeReceiptRecordObserver>.Instance);
+
+        await observer.ObserveAsync(result: new QualityResult
+        {
+            RequestCorrelationId = "sess-1:2",
+            Model = "gpt-5.4",
+            Dimension = string.Empty,
+            UnifiedScore = 0.8,
+            GradeStatus = GradeStatus.Complete,
+            JudgeScore = 0.8,
+            RecipeId = GradingRecipes.Bootstrap,
+            GradeSource = GradeSources.Teacher,
+            ResponseHasCode = false
+        }, cancellationToken: TestContext.Current.CancellationToken);
+
+        var roundTrip = await store.TryGetAsync(correlationId: "sess-1:2",
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(roundTrip);
+        Assert.Equal(GradeStatus.Complete, actual: roundTrip.GradeStatus);
+        Assert.Equal(expected: GradingRecipes.Bootstrap, actual: roundTrip.WeightsVersion);
+        Assert.Equal(expected: GradeSources.Teacher, actual: roundTrip.GradeSource);
+        Assert.False(roundTrip.ResponseHasCode);
+        Assert.Equal(expected: "local-judge", actual: roundTrip.JudgeModel);
+        Assert.Equal(expected: "gpt-5.4", actual: roundTrip.AnswerModel);
+        Assert.Null(roundTrip.IncompleteReason);
+        Assert.NotNull(roundTrip.QuestionHmac);
+        Assert.DoesNotContain(question, roundTrip.QuestionHmac, StringComparison.Ordinal);
+        Assert.Equal(0.8, actual: roundTrip.UnifiedScore);
     }
 
     [Fact]

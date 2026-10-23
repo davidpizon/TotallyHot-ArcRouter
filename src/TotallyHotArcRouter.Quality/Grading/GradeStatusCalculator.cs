@@ -13,7 +13,9 @@ public static class GradeStatusCalculator
     public const double MinimumSyntaxConfidenceForComplete = 0.70;
 
     /// <summary>
-    /// Computes the grade status for <paramref name="result"/> under <paramref name="weights"/>.
+    /// Computes the grade status for <paramref name="result"/> under <paramref name="weights"/>. A
+    /// pre-stamped <see cref="QualityResult.IncompleteReason"/> is always Incomplete. Syntax confidence
+    /// and missing analysis only withhold Complete when those axes have nonzero weight.
     /// </summary>
     /// <param name="result">The result whose axes and confidence are inspected.</param>
     /// <param name="weights">The fixed per-dimension weights (must already sum to 1 at startup).</param>
@@ -31,14 +33,12 @@ public static class GradeStatusCalculator
         ArgumentNullException.ThrowIfNull(result);
         ArgumentNullException.ThrowIfNull(weights);
 
+        if (!string.IsNullOrEmpty(result.IncompleteReason)) return GradeStatus.Incomplete;
+
         if (!result.QuestionPresent) return GradeStatus.Incomplete;
 
-        if (result.SyntaxConfidence < MinimumSyntaxConfidenceForComplete) return GradeStatus.Incomplete;
-
-        if (weights.Syntax > 0.0)
-        {
-            // Syntax always produces a verdict when grading runs; confidence gate above is the abstention.
-        }
+        if (weights.Syntax > 0.0 && result.SyntaxConfidence < MinimumSyntaxConfidenceForComplete)
+            return GradeStatus.Incomplete;
 
         if (weights.Analysis > 0.0 && result.AnalysisScore is null) return GradeStatus.Incomplete;
 

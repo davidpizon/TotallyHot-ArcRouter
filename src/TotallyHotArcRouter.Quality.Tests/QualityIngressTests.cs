@@ -26,10 +26,11 @@ public class QualityIngressTests
     private static QualityIngress CreateIngress(
         QualityOptions options,
         Mock<ISignalExtractor> extractor,
-        Mock<IQualityQueue> queue)
+        Mock<IQualityQueue> queue,
+        IQualityScoreAggregator? aggregator = null)
     {
         return new QualityIngress(extractor: extractor.Object, queue: queue.Object, options: Options.Create(options),
-            logger: NullLogger<QualityIngress>.Instance);
+            logger: NullLogger<QualityIngress>.Instance, aggregator: aggregator);
     }
 
     [Fact]
@@ -74,31 +75,126 @@ public class QualityIngressTests
     }
 
     [Fact]
-    public void TryIngest_NoRunnableBlock_DoesNotEnqueue()
+    public void TryIngest_NoRunnableBlock_EnqueuesBootstrapRecipe()
     {
         var extractor = new Mock<ISignalExtractor>();
         extractor.Setup(e => e.Extract(It.IsAny<SignalExtractionContext>())).Returns((QualityRequest?)null);
         var queue = new Mock<IQualityQueue>();
+        queue.Setup(q => q.TryEnqueue(It.IsAny<QualityRequest>())).Returns(true);
         var ingress = CreateIngress(options: new QualityOptions(), extractor: extractor, queue: queue);
 
-        ingress.TryIngest(Context());
+        ingress.TryIngest(new QualityIngestContext(
+            ResponseText: "here is a prose answer with no fence",
+            Prompt: "what is a mutex",
+            Model: "gpt-5.4",
+            CorrelationId: "corr",
+            SessionId: "sess"));
 
-        queue.Verify(expression: q => q.TryEnqueue(It.IsAny<QualityRequest>()), times: Times.Never);
+        queue.Verify(
+            expression: q => q.TryEnqueue(It.Is<QualityRequest>(r =>
+                r.RecipeId == GradingRecipes.Bootstrap &&
+                r.Code == string.Empty &&
+                r.ResponseText == "here is a prose answer with no fence")),
+            times: Times.Once);
     }
 
     [Fact]
-    public void TryIngest_QueueFull_LogsAndDoesNotThrow()
+    public async Task TryIngest_NoTextAndNoTools_SubmitsNoTextIncomplete()
+    {
+        var extractor = new Mock<ISignalExtractor>();
+        var queue = new Mock<IQualityQueue>();
+        var submitted = new TaskCompletionSource<QualityResult>();
+        var aggregator = new Mock<IQualityScoreAggregator>();
+        aggregator.Setup(a => a.SubmitAsync(It.IsAny<QualityResult>(), It.IsAny<CancellationToken>()))
+            .Callback<QualityResult, CancellationToken>((result, _) => submitted.TrySetResult(result))
+            .Returns(Task.CompletedTask);
+        var ingress = CreateIngress(options: new QualityOptions(), extractor: extractor, queue: queue,
+            aggregator: aggregator.Object);
+
+        ingress.TryIngest(new QualityIngestContext(
+            ResponseText: string.Empty,
+            Prompt: "what is a mutex",
+            Model: "gpt-5.4",
+            CorrelationId: "corr",
+            SessionId: "sess"));
+
+        queue.Verify(expression: q => q.TryEnqueue(It.IsAny<QualityRequest>()), times: Times.Never);
+        extractor.Verify(expression: e => e.Extract(It.IsAny<SignalExtractionContext>()), times: Times.Never);
+        var observed = await submitted.Task.WaitAsync(TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(expected: IncompleteReasons.NoText, actual: observed.IncompleteReason);
+    }
+
+    [Fact]
+    public async Task TryIngest_WhitespaceOnly_SubmitsEmptyIncomplete()
+    {
+        var extractor = new Mock<ISignalExtractor>();
+        var queue = new Mock<IQualityQueue>();
+        var submitted = new TaskCompletionSource<QualityResult>();
+        var aggregator = new Mock<IQualityScoreAggregator>();
+        aggregator.Setup(a => a.SubmitAsync(It.IsAny<QualityResult>(), It.IsAny<CancellationToken>()))
+            .Callback<QualityResult, CancellationToken>((result, _) => submitted.TrySetResult(result))
+            .Returns(Task.CompletedTask);
+        var ingress = CreateIngress(options: new QualityOptions(), extractor: extractor, queue: queue,
+            aggregator: aggregator.Object);
+
+        ingress.TryIngest(new QualityIngestContext(
+            ResponseText: "   \n",
+            Prompt: "what is a mutex",
+            Model: "gpt-5.4",
+            CorrelationId: "corr",
+            SessionId: "sess"));
+
+        var observed = await submitted.Task.WaitAsync(TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(expected: IncompleteReasons.Empty, actual: observed.IncompleteReason);
+    }
+
+    [Fact]
+    public void TryIngest_ToolOnlyBody_DoesNotIngest()
+    {
+        var extractor = new Mock<ISignalExtractor>();
+        var queue = new Mock<IQualityQueue>();
+        var aggregator = new Mock<IQualityScoreAggregator>();
+        var ingress = CreateIngress(options: new QualityOptions(), extractor: extractor, queue: queue,
+            aggregator: aggregator.Object);
+
+        ingress.TryIngest(new QualityIngestContext(
+            ResponseText: string.Empty,
+            Prompt: "call the tool",
+            Model: "gpt-5.4",
+            CorrelationId: "corr",
+            SessionId: "sess",
+            HasToolCalls: true));
+
+        queue.Verify(expression: q => q.TryEnqueue(It.IsAny<QualityRequest>()), times: Times.Never);
+        aggregator.Verify(
+            expression: a => a.SubmitAsync(It.IsAny<QualityResult>(), It.IsAny<CancellationToken>()),
+            times: Times.Never);
+    }
+
+    [Fact]
+    public async Task TryIngest_QueueFull_LogsAndDoesNotThrow()
     {
         var extractor = new Mock<ISignalExtractor>();
         extractor.Setup(e => e.Extract(It.IsAny<SignalExtractionContext>())).Returns(Request());
         var queue = new Mock<IQualityQueue>();
         queue.Setup(q => q.TryEnqueue(It.IsAny<QualityRequest>())).Returns(false);
-        var ingress = CreateIngress(options: new QualityOptions(), extractor: extractor, queue: queue);
+        var submitted = new TaskCompletionSource<QualityResult>();
+        var aggregator = new Mock<IQualityScoreAggregator>();
+        aggregator.Setup(a => a.SubmitAsync(It.IsAny<QualityResult>(), It.IsAny<CancellationToken>()))
+            .Callback<QualityResult, CancellationToken>((result, _) => submitted.TrySetResult(result))
+            .Returns(Task.CompletedTask);
+        var ingress = CreateIngress(options: new QualityOptions(), extractor: extractor, queue: queue,
+            aggregator: aggregator.Object);
 
         // Must not throw even though the enqueue is rejected - a full queue is a drop, not a failure.
         ingress.TryIngest(Context());
 
         queue.Verify(expression: q => q.TryEnqueue(It.IsAny<QualityRequest>()), times: Times.Once);
+        var observed = await submitted.Task.WaitAsync(TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(expected: IncompleteReasons.QueueFull, actual: observed.IncompleteReason);
     }
 
     [Fact]

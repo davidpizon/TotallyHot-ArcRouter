@@ -10,21 +10,18 @@ namespace TotallyHot.ArcRouter.Tests.Judge;
 
 /// <summary>
 /// Covers <see cref="JudgeModelSelector"/> - which Providers-screen model the shadow judge runs on. The
-/// behaviors that matter: only free, enabled, OpenAI-shaped models are eligible; the operator's pick wins
-/// while it stays eligible; and an ineligible or absent pick degrades to a fallback or an honest
-/// abstention rather than an error.
+/// behaviors that matter: only free, enabled, OpenAI-shaped models are eligible; the operator's pin is
+/// used when it is eligible; and an ineligible or absent pin is an honest abstention rather than a
+/// fallback to some other agent (ADR-0027).
 /// </summary>
 public class JudgeModelSelectorTests
 {
     [Fact]
-    public void Resolve_NoConfiguredPick_TakesFirstEligibleFreeModel()
+    public void Resolve_NoConfiguredPick_ReturnsNull()
     {
         var selector = CreateSelector(resolver: TwoFreeModels(), chosenModel: string.Empty);
 
-        var route = selector.Resolve();
-
-        Assert.NotNull(route);
-        Assert.Equal(expected: "free-a", actual: route.ModelName);
+        Assert.Null(selector.Resolve());
     }
 
     [Fact]
@@ -38,11 +35,11 @@ public class JudgeModelSelectorTests
     }
 
     /// <summary>
-    /// A pick whose provider was switched off in the Providers screen must not fail the judge - it falls
-    /// back, because shadow scoring degrades quietly rather than erroring.
+    /// A pick whose provider was switched off is an abstention, not a fallback to some other agent
+    /// (ADR-0027).
     /// </summary>
     [Fact]
-    public void Resolve_ConfiguredPicksDisabledProvider_FallsBackToAnEligibleModel()
+    public void Resolve_ConfiguredPicksDisabledProvider_ReturnsNull()
     {
         var options = new ModelRoutingOptions
         {
@@ -60,9 +57,7 @@ public class JudgeModelSelectorTests
 
         var selector = CreateSelector(resolver: Resolver(options), chosenModel: "switched-off");
 
-        var route = selector.Resolve();
-
-        Assert.Equal(expected: "still-on", actual: route!.ModelName);
+        Assert.Null(selector.Resolve());
         Assert.Equal(expected: ["still-on"], actual: selector.ListEligibleModels());
     }
 
@@ -134,7 +129,7 @@ public class JudgeModelSelectorTests
     [Fact]
     public void ListEligibleModels_MatchesWhatResolveWouldPick()
     {
-        var selector = CreateSelector(resolver: TwoFreeModels(), chosenModel: string.Empty);
+        var selector = CreateSelector(resolver: TwoFreeModels(), chosenModel: "free-a");
 
         Assert.Equal(expected: selector.ListEligibleModels()[0], actual: selector.Resolve()!.ModelName);
     }

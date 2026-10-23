@@ -264,7 +264,7 @@ public class PortfolioGraderClientTests
     private static JudgeModelSelector CreateSelector(IModelRouteResolver resolver)
     {
         return new JudgeModelSelector(routeResolver: resolver,
-            options: new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions()),
+            options: new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions { ModelName = "local-judge" }),
             logger: NullLogger<JudgeModelSelector>.Instance);
     }
 

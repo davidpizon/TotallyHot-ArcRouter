@@ -30,9 +30,9 @@ namespace TotallyHot.ArcRouter.Judge;
 /// free provider never appears in the dropdown.
 /// </para>
 /// <para>
-/// Returning <see langword="null"/> - no free provider configured at all - is an honest state, not an
-/// error: the judge abstains and writes no row, the same posture <c>LogRegVoter</c> and
-/// <c>ClusterBestVoter</c> take when their artifact is absent.
+/// Returning <see langword="null"/> - no pin, or a pin that is paid, switched off, or gone - is an
+/// honest state, not an error: the judge abstains and the grade is <c>Incomplete</c> reason
+/// <c>no_judge</c> rather than falling back to some other agent (ADR-0027).
 /// </para>
 /// </remarks>
 public sealed class JudgeModelSelector
@@ -41,8 +41,8 @@ public sealed class JudgeModelSelector
     private readonly IOptionsMonitor<JudgeOptions> _options;
     private readonly IModelRouteResolver _routeResolver;
 
-    /// <summary>Guards the substitution log below so a persistent fallback logs once, not once per scored request.</summary>
-    private string? _lastLoggedSubstitution;
+    /// <summary>Guards the ineligible-pin log so a missing pin logs once, not once per scored request.</summary>
+    private string? _lastLoggedMissingPin;
 
     /// <summary>Initializes a new instance of the <see cref="JudgeModelSelector"/> class.</summary>
     /// <param name="routeResolver">Supplies the configured models and their resolved provider routes.</param>
@@ -78,41 +78,34 @@ public sealed class JudgeModelSelector
     }
 
     /// <summary>
-    /// Resolves the route the judge should call for this scoring attempt: the operator's chosen model when
-    /// it is still eligible, otherwise the first eligible free model.
+    /// Resolves the route the judge should call for this scoring attempt: the operator's pinned free
+    /// model, and nothing else (ADR-0027). A missing, paid, or switched-off pin is an abstention.
     /// </summary>
-    /// <returns>The resolved route, or <see langword="null"/> when no free model is currently eligible.</returns>
+    /// <returns>The pinned route, or <see langword="null"/> when no pin is currently eligible.</returns>
     public ResolvedModelRoute? Resolve()
     {
-        var eligible = EnumerateEligible().ToList();
-        if (eligible.Count == 0)
+        var chosenName = _options.CurrentValue.ModelName;
+        if (string.IsNullOrWhiteSpace(chosenName))
         {
-            _logger.LogDebug(
-                "No free, enabled, OpenAI-compatible model is configured; the shadow judge has nothing to call.");
+            _logger.LogDebug("No judge model is pinned; the shadow judge has nothing to call.");
             return null;
         }
 
-        var chosenName = _options.CurrentValue.ModelName;
-        if (string.IsNullOrWhiteSpace(chosenName)) return eligible[0];
-
-        var match = eligible.FirstOrDefault(route =>
+        var match = EnumerateEligible().FirstOrDefault(route =>
             string.Equals(a: route.ModelName, b: chosenName, comparisonType: StringComparison.OrdinalIgnoreCase));
         if (match is not null) return match;
 
-        // Logged once per distinct substitution rather than per request: the judge scores continuously, and
-        // a provider left switched off would otherwise emit this on every single scored response.
-        if (!string.Equals(a: _lastLoggedSubstitution, b: chosenName,
+        if (!string.Equals(a: _lastLoggedMissingPin, b: chosenName,
                 comparisonType: StringComparison.OrdinalIgnoreCase))
         {
-            _lastLoggedSubstitution = chosenName;
+            _lastLoggedMissingPin = chosenName;
             _logger.LogInformation(
                 message:
-                "Configured judge model {ConfiguredModel} is not currently eligible; falling back to {FallbackModel}.",
-                chosenName,
-                eligible[0].ModelName);
+                "Configured judge model {ConfiguredModel} is not currently eligible; the shadow judge will not run.",
+                chosenName);
         }
 
-        return eligible[0];
+        return null;
     }
 
     /// <summary>

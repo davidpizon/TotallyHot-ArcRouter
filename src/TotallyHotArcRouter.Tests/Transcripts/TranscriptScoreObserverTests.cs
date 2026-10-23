@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Transcripts;
 
@@ -65,11 +66,62 @@ public class TranscriptScoreObserverTests
         Assert.Empty(store.Updates);
     }
 
+    [Fact]
+    public async Task ObserveAsync_BootstrapRecipe_StampsScorerVersion()
+    {
+        var store = new FakeTranscriptStore();
+        var observer = new TranscriptScoreObserver(
+            store: store,
+            logger: NullLogger<TranscriptScoreObserver>.Instance,
+            qualityOptions: Options.Create(new QualityOptions { ScorerVersion = "3.0" }));
+
+        await observer.ObserveAsync(result: new QualityResult
+        {
+            RequestCorrelationId = "corr-prose",
+            Model = "kimi-k2.5",
+            UnifiedScore = 0.81,
+            JudgeScore = 0.81,
+            RecipeId = GradingRecipes.Bootstrap
+        }, cancellationToken: TestContext.Current.CancellationToken);
+
+        var update = Assert.Single(store.VersionedUpdates);
+        Assert.Equal(expected: "corr-prose", actual: update.CorrelationId);
+        Assert.Equal(0.81, actual: update.Score);
+        Assert.True(update.IsJudgeScored);
+        Assert.Equal(expected: "3.0", actual: update.ScorerVersion);
+    }
+
+    [Fact]
+    public async Task ObserveAsync_CodeRecipe_DoesNotStampScorerVersion()
+    {
+        var store = new FakeTranscriptStore();
+        var observer = new TranscriptScoreObserver(
+            store: store,
+            logger: NullLogger<TranscriptScoreObserver>.Instance,
+            qualityOptions: Options.Create(new QualityOptions { ScorerVersion = "3.0" }));
+
+        await observer.ObserveAsync(result: new QualityResult
+        {
+            RequestCorrelationId = "corr-code",
+            Model = "kimi-k2.5",
+            UnifiedScore = 0.5,
+            RecipeId = GradingRecipes.Code
+        }, cancellationToken: TestContext.Current.CancellationToken);
+
+        var update = Assert.Single(store.VersionedUpdates);
+        Assert.Null(update.ScorerVersion);
+    }
+
     private sealed class FakeTranscriptStore : ITranscriptStore
     {
         private readonly List<(string CorrelationId, double? Score, bool IsJudgeScored)> _updates = [];
+        private readonly List<(string CorrelationId, double? Score, bool IsJudgeScored, string? ScorerVersion)>
+            _versionedUpdates = [];
 
         public IReadOnlyList<(string CorrelationId, double? Score, bool IsJudgeScored)> Updates => _updates;
+
+        public IReadOnlyList<(string CorrelationId, double? Score, bool IsJudgeScored, string? ScorerVersion)>
+            VersionedUpdates => _versionedUpdates;
 
         public Task<long?> InsertAsync(TranscriptRecord record, CancellationToken cancellationToken = default)
         {
@@ -80,6 +132,18 @@ public class TranscriptScoreObserverTests
             CancellationToken cancellationToken = default)
         {
             _updates.Add((correlationId, score, isJudgeScored));
+            return Task.CompletedTask;
+        }
+
+        public Task UpdateOutcomeAsync(
+            string correlationId,
+            double? score,
+            bool isJudgeScored,
+            string? scorerVersion,
+            CancellationToken cancellationToken = default)
+        {
+            _updates.Add((correlationId, score, isJudgeScored));
+            _versionedUpdates.Add((correlationId, score, isJudgeScored, scorerVersion));
             return Task.CompletedTask;
         }
 

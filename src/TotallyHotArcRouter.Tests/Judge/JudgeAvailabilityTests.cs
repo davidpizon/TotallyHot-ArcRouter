@@ -31,14 +31,19 @@ public class JudgeAvailabilityTests
         var resolver = ModelRouteResolverTestFactory.Create(
             modelName: "local-judge", providerModelId: "qwen2.5-7b-instruct", baseUrl: "http://localhost:1234/v1",
             isFree: true);
+        var judgeOptions = new StaticOptionsMonitor<JudgeOptions>(
+            new JudgeOptions { Enabled = true, ModelName = "local-judge" });
         var availability = new JudgeAvailability(
-            options: new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions { Enabled = true }),
+            options: judgeOptions,
             modelSelector: new JudgeModelSelector(
                 routeResolver: resolver,
-                options: new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions()),
+                options: judgeOptions,
                 logger: Microsoft.Extensions.Logging.Abstractions.NullLogger<JudgeModelSelector>.Instance));
 
         Assert.True(availability.WillJudge(new QualityResult { RequestCorrelationId = "corr-1" }));
+        Assert.False(availability.IsPinMissing());
+        Assert.True(availability.IsAnswererTheJudge(new QualityResult { Model = "local-judge" }));
+        Assert.False(availability.IsAnswererTheJudge(new QualityResult { Model = "other-model" }));
     }
 
     /// <summary>A resolver that fails any call, proving a code path never reaches it.</summary>

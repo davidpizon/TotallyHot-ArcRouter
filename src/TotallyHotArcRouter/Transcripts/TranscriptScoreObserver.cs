@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Quality.Grading;
 
@@ -14,18 +15,27 @@ namespace TotallyHot.ArcRouter.Transcripts;
 public sealed class TranscriptScoreObserver : IQualityScoreObserver
 {
     private readonly ILogger<TranscriptScoreObserver> _logger;
+    private readonly string? _scorerVersion;
     private readonly ITranscriptStore _store;
 
     /// <summary>Initializes a new instance of the <see cref="TranscriptScoreObserver"/> class.</summary>
     /// <param name="store">The transcript store to backfill into.</param>
     /// <param name="logger">The logger.</param>
-    public TranscriptScoreObserver(ITranscriptStore store, ILogger<TranscriptScoreObserver> logger)
+    /// <param name="qualityOptions">
+    /// Supplies <see cref="QualityOptions.ScorerVersion"/> so a live non-code grade can stamp the row
+    /// and keep the code-only rescan from overwriting it with null. Optional so existing tests compile.
+    /// </param>
+    public TranscriptScoreObserver(
+        ITranscriptStore store,
+        ILogger<TranscriptScoreObserver> logger,
+        IOptions<QualityOptions>? qualityOptions = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(logger);
 
         _store = store;
         _logger = logger;
+        _scorerVersion = qualityOptions?.Value.ScorerVersion;
     }
 
     /// <inheritdoc/>
@@ -40,8 +50,13 @@ public sealed class TranscriptScoreObserver : IQualityScoreObserver
         }
 
         var score = Math.Clamp(value: result.UnifiedScore, 0.0, 1.0);
-        await _store.UpdateOutcomeAsync(correlationId: result.RequestCorrelationId, score: score,
-            isJudgeScored: result.JudgeScore.HasValue, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var scorerVersion = GradingRecipes.IsCodeRecipe(result.RecipeId) ? null : _scorerVersion;
+        await _store.UpdateOutcomeAsync(
+            correlationId: result.RequestCorrelationId,
+            score: score,
+            isJudgeScored: result.JudgeScore.HasValue,
+            scorerVersion: scorerVersion,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
 
         if (_logger.IsEnabled(LogLevel.Debug))
             _logger.LogDebug(

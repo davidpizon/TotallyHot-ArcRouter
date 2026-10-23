@@ -48,25 +48,52 @@ public sealed class QualityGrader : IQualityGrader
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var syntax = _structuralParser.Check(code: request.Code, language: request.Language);
-        var analysis = _analyzer.Report(code: request.Code, language: request.Language, prompt: request.Prompt);
-
         var questionPresent = !string.IsNullOrWhiteSpace(request.Prompt);
-        var result = new QualityResult
+        var isBootstrap = string.Equals(request.RecipeId, GradingRecipes.Bootstrap,
+            StringComparison.OrdinalIgnoreCase);
+
+        QualityResult result;
+        if (isBootstrap)
         {
-            RequestCorrelationId = request.CorrelationId,
-            SessionId = request.SessionId,
-            Dimension = request.Dimension,
-            Model = request.Model,
-            Language = request.Language.ToString(),
-            SyntaxValid = syntax.IsValid,
-            SyntaxAuthoritative = syntax.IsAuthoritative,
-            SyntaxConfidence = syntax.Confidence,
-            QuestionPresent = questionPresent,
-            AnalysisScore = analysis.Score,
-            AnalysisFindings = analysis.Notes,
-            DegradedReason = syntax.IsAuthoritative ? null : "heuristic-syntax-check"
-        };
+            // Parser and static analyzer stay code-only (shared with rescan). SyntaxConfidence keeps
+            // its default 1.0 so a zero syntax weight cannot withhold Complete via the 0.70 gate.
+            result = new QualityResult
+            {
+                RequestCorrelationId = request.CorrelationId,
+                SessionId = request.SessionId,
+                Dimension = request.Dimension,
+                Model = request.Model,
+                Language = request.Language.ToString(),
+                QuestionPresent = questionPresent,
+                RecipeId = GradingRecipes.Bootstrap,
+                IncompleteReason = request.IncompleteReason,
+                ResponseHasCode = false
+            };
+        }
+        else
+        {
+            var syntax = _structuralParser.Check(code: request.Code, language: request.Language);
+            var analysis = _analyzer.Report(code: request.Code, language: request.Language, prompt: request.Prompt);
+
+            result = new QualityResult
+            {
+                RequestCorrelationId = request.CorrelationId,
+                SessionId = request.SessionId,
+                Dimension = request.Dimension,
+                Model = request.Model,
+                Language = request.Language.ToString(),
+                SyntaxValid = syntax.IsValid,
+                SyntaxAuthoritative = syntax.IsAuthoritative,
+                SyntaxConfidence = syntax.Confidence,
+                QuestionPresent = questionPresent,
+                AnalysisScore = analysis.Score,
+                AnalysisFindings = analysis.Notes,
+                DegradedReason = syntax.IsAuthoritative ? null : "heuristic-syntax-check",
+                RecipeId = string.IsNullOrEmpty(request.RecipeId) ? GradingRecipes.Code : request.RecipeId,
+                IncompleteReason = request.IncompleteReason,
+                ResponseHasCode = true
+            };
+        }
 
         // Status is finalized by the aggregator once pending LLM graders resolve; a provisional Incomplete
         // here keeps observers honest if anything observes before the join closes.

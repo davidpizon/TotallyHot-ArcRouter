@@ -33,13 +33,14 @@ public class QualityScoreAggregatorTests
         ManualTimeProvider? clock = null,
         QualityOptions? options = null,
         IAsyncGraderDispatcher? dispatcher = null,
-        IPortfolioGraderAvailability? portfolioAvailability = null)
+        IPortfolioGraderAvailability? portfolioAvailability = null,
+        IJudgeAvailability? judgeAvailability = null)
     {
         var opts = options ?? Options_();
         return new QualityScoreAggregator(
             observer: observer,
             scorer: new QualityScorer(Options.Create(opts)),
-            judgeAvailability: new StubJudge(willJudge),
+            judgeAvailability: judgeAvailability ?? new StubJudge(willJudge),
             // Accepts every requested key by default, matching every pre-existing test's expectation that
             // a result nominally expecting a judge (StubJudge(true)) is actually held rather than written
             // immediately with a "not dispatched" reason.
@@ -91,6 +92,40 @@ public class QualityScoreAggregatorTests
     }
 
     [Fact]
+    public async Task SubmitAsync_AnswererIsThePinnedJudge_WritesJudgeIsAnswererWithoutHolding()
+    {
+        var observer = new RecordingObserver();
+        var dispatcher = new StubDispatcher();
+        var aggregator = Create(observer: observer, true, dispatcher: dispatcher,
+            judgeAvailability: new AnswererIsJudge());
+
+        await aggregator.SubmitAsync(result: Result(), cancellationToken: TestContext.Current.CancellationToken);
+
+        var written = Assert.Single(observer.Observed);
+        Assert.Equal(expected: IncompleteReasons.JudgeIsAnswerer, actual: written.IncompleteReason);
+        Assert.Equal(GradeStatus.Incomplete, actual: written.GradeStatus);
+        Assert.Equal(0, actual: aggregator.PendingCount);
+        Assert.Equal(0, actual: dispatcher.DispatchCount);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_PinMissing_WritesNoJudgeWithoutHolding()
+    {
+        var observer = new RecordingObserver();
+        var dispatcher = new StubDispatcher();
+        var aggregator = Create(observer: observer, true, dispatcher: dispatcher,
+            judgeAvailability: new PinMissingJudge());
+
+        await aggregator.SubmitAsync(result: Result(), cancellationToken: TestContext.Current.CancellationToken);
+
+        var written = Assert.Single(observer.Observed);
+        Assert.Equal(expected: IncompleteReasons.NoJudge, actual: written.IncompleteReason);
+        Assert.Equal(GradeStatus.Incomplete, actual: written.GradeStatus);
+        Assert.Equal(0, actual: aggregator.PendingCount);
+        Assert.Equal(0, actual: dispatcher.DispatchCount);
+    }
+
+    [Fact]
     public async Task SubmitAsync_JudgeExpected_WritesNothingUntilTheJudgeAnswers()
     {
         var observer = new RecordingObserver();
@@ -120,6 +155,31 @@ public class QualityScoreAggregatorTests
         // judge's opinion demonstrably moved the number the router learns from.
         Assert.Equal(0.5, actual: written.UnifiedScore);
         Assert.Equal(0, actual: aggregator.PendingCount);
+    }
+
+    [Fact]
+    public async Task CompleteGraderAsync_BootstrapRecipe_UnifiedScoreEqualsTeacherAndIsComplete()
+    {
+        var observer = new RecordingObserver();
+        var aggregator = Create(observer: observer, true);
+        await aggregator.SubmitAsync(
+            result: Result() with
+            {
+                RecipeId = GradingRecipes.Bootstrap,
+                SyntaxConfidence = 0.1,
+                AnalysisScore = null
+            },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(await aggregator.CompleteGraderAsync(correlationId: "corr-1", graderKey: GraderKeys.Judge,
+            score: 0.73, cancellationToken: TestContext.Current.CancellationToken));
+
+        var written = Assert.Single(observer.Observed);
+        Assert.Equal(GradeStatus.Complete, actual: written.GradeStatus);
+        Assert.Equal(0.73, actual: written.JudgeScore);
+        Assert.Equal(0.73, actual: written.UnifiedScore, 10);
+        Assert.Equal(expected: GradeSources.Teacher, actual: written.GradeSource);
+        Assert.Null(written.IncompleteReason);
     }
 
     // The race this design exists to prevent: a judge grade arriving after a sweep already wrote the
@@ -478,6 +538,24 @@ public class QualityScoreAggregatorTests
         }
     }
 
+    /// <summary>The answering model is the pinned judge: the grade must not be held.</summary>
+    private sealed class AnswererIsJudge : IJudgeAvailability
+    {
+        public bool WillJudge(QualityResult result) => true;
+
+        public bool IsAnswererTheJudge(QualityResult result) => true;
+    }
+
+    /// <summary>The judge is on but no pin is eligible.</summary>
+    private sealed class PinMissingJudge : IJudgeAvailability
+    {
+        public bool WillJudge(QualityResult result) => false;
+
+        public bool IsJudgeEnabled() => true;
+
+        public bool IsPinMissing() => true;
+    }
+
     /// <summary>A portfolio-grader-availability stub with a fixed set of keys.</summary>
     private sealed class StubPortfolioAvailability(IReadOnlySet<string> keys) : IPortfolioGraderAvailability
     {
@@ -502,11 +580,14 @@ public class QualityScoreAggregatorTests
     /// </summary>
     private sealed class StubDispatcher(bool acceptAll = true) : IAsyncGraderDispatcher
     {
+        public int DispatchCount { get; private set; }
+
         public Task<IReadOnlySet<string>> DispatchAsync(
             QualityResult result,
             IReadOnlySet<string> pendingGraderKeys,
             CancellationToken cancellationToken = default)
         {
+            DispatchCount++;
             IReadOnlySet<string> accepted = acceptAll
                 ? new HashSet<string>(pendingGraderKeys, StringComparer.OrdinalIgnoreCase)
                 : new HashSet<string>(StringComparer.OrdinalIgnoreCase);

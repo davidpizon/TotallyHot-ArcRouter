@@ -63,7 +63,7 @@ public sealed class RouterMemoryScoreObserver : IQualityScoreObserver
         var dimension =
             RouterDimension.ToLiveKey(liveMemoryPrefix: _options.LiveMemoryPrefix, dimension: result.Dimension);
 
-        if (result.GradeStatus == GradeStatus.Complete)
+        if (result.GradeStatus == GradeStatus.Complete && GradingRecipes.IsCodeRecipe(result.RecipeId))
             await _memory.AddScoreAsync(dimension: dimension, model: result.Model, score: score).ConfigureAwait(false);
         else if (_logger.IsEnabled(LogLevel.Debug))
             _logger.LogDebug(
