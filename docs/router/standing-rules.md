@@ -52,6 +52,21 @@ flowchart LR
   the change, and say why in a pull request comment.
 - **Dependabot pull requests** do not need a Copilot review.
 
+## Do not push to main
+
+**Set by David on 2026-10-23.**
+
+Never push commits to `main`. GitHub's "Preserve main" ruleset rejects it: changes must land
+through a pull request, and coverage plus CodeQL wait on merge via the API or UI. A Cursor
+"push this branch" action that is sitting on `main` is not an exception.
+
+- **Push a feature branch instead.** Create `issue-<N>-<slug>` (or keep the branch you already
+  have), `git push -u origin HEAD`, and open a **draft** pull request against `main`.
+- **Do not `git push origin main`.** Do not force-push `main`. Do not treat a local commit on
+  `main` as something to publish there.
+- **If the work was committed on local `main` by mistake,** branch from that commit, push the
+  branch, and open the draft PR from it. Leave remote `main` untouched.
+
 ## Nightly audits file issues only
 
 **Set by David on 2026-10-07**, recorded in
