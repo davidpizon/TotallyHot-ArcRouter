@@ -1,6 +1,6 @@
 # Plan: Unjudged grades never outweigh judge-scored grades (#326)
 
-**Status:** Proposed. This pull request is the plan and the ADR-0026 amendment. It does not change C# or tests. Implementation waits for David's sign-off on this file.
+**Status:** Proposed. David's 2026-10-22 answers on the three review items are recorded as decided (§3.1, §6, §10). This pull request is the plan and the ADR-0026 amendment. It does not change C# or tests. Implementation waits for David's sign-off on this file.
 **Issue:** [#326](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/326). Part of #326. This plan does not close it.
 **Standing rule:** [Approved plan before coding](../router/standing-rules.md#approved-plan-before-coding). The implementation pull request links this file.
 **Audit base:** `8ca7a35f` (`main`, merge of #328). Line numbers below are that commit.
@@ -12,7 +12,7 @@
 
 **Classification: Major.** The cost is that unverified evidence outweighs verified evidence whenever `JudgeScoredRowPolicy` is not `Include`. `JudgeRowWeighting.ResolveWeight` (`src/TotallyHotArcRouter/Models/JudgeRowWeighting.cs` line 28) returns `1.0` for a row with `isJudgeScored` false, and the switch on lines 30-35 never runs for that row. `DownWeight` and `Exclude` then scale or drop the judge-scored row only. [ADR-0026](../adr/0026-grade-a-response-only-against-its-question-and-learn-only-from-complete-grades.md) option B already named the inversion: "question-aware rows count less." Decision point 6 changed the default to `Include`, which hides it. It did not remove it.
 
-The cost is latent on the shipped default. It is live as soon as a stored row has `is_judge_scored = 0` and the operator sets `DownWeight` or `Exclude`. [#304](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/304) is the planned writer of new `Complete` grades outside the nine code dimensions. Section 10 says which of those grades are actually unjudged. The #319 plan's sentence is the one this cost follows: a `Complete` grade with no `JudgeScore` is stored, and learning from it at full strength while judged rows are discounted is the failure.
+The cost is latent on the shipped default. It is live as soon as a stored row has `is_judge_scored = 0` and the operator sets `DownWeight` or `Exclude`. [#304](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/304) is the planned writer of new `Complete` grades outside the nine code dimensions. Which of those grades leave `JudgeScore` empty is #304's question (§10). It does not block this change. The #319 plan's sentence is the one this cost follows: a `Complete` grade with no `JudgeScore` is stored, and learning from it at full strength while judged rows are discounted is the failure.
 
 The matrix in ADR-0008 uses file size and coupling as the usual evidence for Major. This item is Major because of the learning inversion, which is the observed cost the issue records. It is not a size finding.
 
@@ -79,16 +79,16 @@ flowchart TD
 
 ### 3.1 Names
 
-**Decided 2026-10-22.**
+**Decided 2026-10-22.** The two property names were decided with Option C. David confirmed the type, method, and parameter renames the same day.
 
 | Current | New |
 |---|---|
 | `RoutingOptions.JudgeScoredRowPolicy` | `UnjudgedRowPolicy` |
 | `RoutingOptions.JudgeScoredRowWeight` | `UnjudgedRowWeight` |
 
-**Proposed in this plan, for confirmation in review.** The type and method names still say the policy acts on judge-scored rows. Keeping them next to `UnjudgedRowPolicy` leaves the inverted name in every signature. The implementation uses the names in this table unless a review comment keeps one.
+The type and method names still say the policy acts on judge-scored rows. Keeping them next to `UnjudgedRowPolicy` would leave the inverted name in every signature.
 
-| Current | Proposed | Why this name |
+| Current | New | Why this name |
 |---|---|---|
 | enum `JudgeRowPolicy` | `UnjudgedRowPolicy` | The property and the enum then share a name (`public UnjudgedRowPolicy UnjudgedRowPolicy`). That is legal, and `options.UnjudgedRowPolicy` versus `UnjudgedRowPolicy.Exclude` stays readable. A property `UnjudgedRowPolicy` of type `JudgeRowPolicy` says the opposite of what the type does. |
 | `JudgeRowWeighting` | `UnjudgedRowWeighting` | It is the one rule. The file moves with the class. |
@@ -98,7 +98,7 @@ flowchart TD
 | `EmbeddingMemory.FindNearest` parameters `judgeRowPolicy`, `judgeRowWeight` | `unjudgedRowPolicy`, `unjudgedRowWeight` | A null policy still means "do not filter" (lines 291-293). The weight is still ignored unless a policy is passed. |
 | local `skippedForJudgePolicy` in both trainers | `skippedForUnjudgedPolicy` | The counter counts dropped unjudged rows. |
 
-The two trainer log templates are not optional, even if a review comment keeps the variable name. They currently say the excluded rows are judge-scored (`EmbeddingLogRegTrainingService.cs` lines 175-176, `ClusterTrainingService.cs` lines 179-180). After the flip that sentence is false. Replace the text and keep a static string literal:
+The two trainer log templates currently say the excluded rows are judge-scored (`EmbeddingLogRegTrainingService.cs` lines 175-176, `ClusterTrainingService.cs` lines 179-180). After the flip that sentence is false. Replace the text and keep a static string literal:
 
 - `"Excluded {SkippedCount} unjudged memory entry/entries from logreg training per the configured unjudged-row policy."`
 - `"Excluded {SkippedCount} unjudged memory entry/entries from cluster training per the configured unjudged-row policy."`
@@ -155,7 +155,7 @@ Each of these reads the resolver. There is no second copy of the switch. Grep of
 | `EmbeddingLogRegTrainingService` | lines 150-161, log lines 172-176 | Null increments `skippedForJudgePolicy` and skips. Otherwise the sample weight is `LogRegLiveSampleWeight *` the resolved weight. | Judged rows keep `LogRegLiveSampleWeight` (times `1.0`). Unjudged `DownWeight` scales that product. Unjudged `Exclude` skips. The log text in §3.1. |
 | `ClusterTrainingService` | lines 156-164, log lines 176-180 | Same shape, with `ClusterLiveSampleWeight`. | Same split. The log text in §3.1. |
 | `ClusterLedger.Build` | `ClusterLedger.cs` lines 74-81 | Null skips. Otherwise adds `score * weight` and the weight, and increments `ObservationCount` (line 81) for every kept row, including a down-weighted one. | An unjudged `Exclude` row is absent from the mean, the weight total, and the count. A down-weighted unjudged row moves the mean and still counts as one observation. A judged row always contributes at `1.0` and counts. |
-| `TaxonomyComparisonService` | `GetClusteringInputsAsync` lines 414-417, and `Compare` lines 473-475 | Builds the ledger with the two properties, then leave-one-out uses `ResolveJudgeRowWeight(...) ?? 1.0`. | The build follows `ClusterLedger.Build`. The `?? 1.0` is §6. |
+| `TaxonomyComparisonService` | `GetClusteringInputsAsync` lines 414-417, and `Compare` lines 473-475 | Builds the ledger with the two properties, then leave-one-out uses `ResolveJudgeRowWeight(...) ?? 1.0`. | The build follows `ClusterLedger.Build`. Leave-one-out for a dropped row is the decided fix in §6. |
 
 `ClusterBestVoter.GetModelAsync` (`ClusterBestVoter.cs` lines 198-201) passes the two properties into `ClusterLedger.Build`. It does not call the resolver again. Vote time reads the ledger `Build` already weighted. Rename the arguments. Do not add a second weighting.
 
@@ -167,7 +167,7 @@ The watermark comments stay true and only need the renamed cref. `ClusterRetrain
 
 ## 6. Leave-one-out when a row was dropped
 
-**Proposed. Confirm in review.** Included in the implementation unless a review comment rejects it.
+**Decided 2026-10-22.** In scope for #326. A dropped row uses the cell mean as-is, and the four assertions below land in the implementation.
 
 `TaxonomyComparisonService.Compare` (`TaxonomyComparisonService.cs` lines 473-475):
 
@@ -264,7 +264,7 @@ An enum member the loop does not know fails the test, so a new value cannot ship
 
 **`FindNearest`.** `EmbeddingMemoryTests` does not pass a policy today. One test: under `Exclude`, an unjudged neighbor is absent and a judged neighbor is present, and the absent row does not consume `MaxNeighborCount`. Under a null policy, the unjudged neighbor is still returned.
 
-**Leave-one-out.** The test in §6, if that section is confirmed.
+**Leave-one-out.** The test in §6.
 
 ## 9. Docs
 
@@ -273,6 +273,7 @@ An enum member the loop does not know fails the test, so a new value cannot ship
 - This file.
 - [ADR-0026](../adr/0026-grade-a-response-only-against-its-question-and-learn-only-from-complete-grades.md) Amendment 1. The decision text lives there. It is not copied into this plan.
 - [`docs/adr/README.md`](../adr/README.md). The index row for 0026 said `proposed`. The ADR file has said `accepted` since 2026-10-14. The row now says accepted and links Amendment 1. That status word was already wrong; this edit is the row being touched for the amendment.
+- [`docs/plans/issue-304-grade-non-coding-responses.md`](issue-304-grade-non-coding-responses.md) §12. The question David deferred. It is an open question on that plan.
 
 This pull request does not edit the other docs in §9.2. The implementation does, after the code matches them.
 
@@ -311,7 +312,9 @@ New live writes under the shipped weights are judge-scored, for the reason in §
 
 #304's bootstrap recipe for unfenced text is judge weight `1.0`, syntax `0`, analysis `0` (`docs/plans/issue-304-grade-non-coding-responses.md` lines 109-114). A `Complete` grade on that recipe has a judge score, so the #319 stamp is true. Those rows are not the unjudged population. The phrase "prose dimensions with Judge=0" does not match that table. Syntax and analysis start at `0` on a non-code recipe (line 118). The judge axis does not.
 
-The unjudged `Complete` rows #319 named are a grade whose `JudgeScore` has no value: a recipe whose judge weight is `0` (not shipped, and not #304's bootstrap), or a writer that sets `GradeStatus.Complete` without going through the calculator. #304's takeover (`§3.2`) says the local score fills the judge axis. If that implementation sets `JudgeScore`, the row is judge-scored. If it fills the unified score and leaves `JudgeScore` empty, the row is unjudged, and this policy is what keeps it from outweighing a judged row. Section 13 asks which of those two writes #304 will make. Either way, this change does not wait on #304, and it does not edit #304's plan.
+The unjudged `Complete` rows #319 named are a grade whose `JudgeScore` has no value: a recipe whose judge weight is `0` (not shipped, and not #304's bootstrap), or a writer that sets `GradeStatus.Complete` without going through the calculator. #304's takeover (`§3.2` of that plan) says the local score fills the judge axis. If that implementation sets `JudgeScore`, the row is judge-scored. If it fills the unified score and leaves `JudgeScore` empty, the row is unjudged, and this policy is what keeps it from outweighing a judged row.
+
+**Deferred 2026-10-22.** Which of those writes #304 will make is an open question for #304's planning, recorded in [that plan §12](issue-304-grade-non-coding-responses.md#12-open-question-2026-10-22-from-326). It does not block #326. This plan does not choose the answer.
 
 ## 11. Out of scope
 
@@ -332,6 +335,4 @@ The implementation pull request links this file and says Part of #326.
 
 ## 13. Open questions
 
-1. **Leave-one-out (§6).** Confirm the fix: a dropped row uses the cell mean as-is, and the four assertions in that section land in the implementation. A review comment that rejects it leaves lines 473-475 as a rename only (`ResolveRowWeight(...) ?? 1.0`), and the bug stays on the null path.
-2. **Type and method names (§3.1).** Confirm the proposed renames, in particular the enum `UnjudgedRowPolicy` sharing the property's name, and `ResolveRowWeight`. A review comment that keeps a name overrides that one name. The two property names are already decided.
-3. **Which #304 grades are unjudged (§10).** The #304 plan's bootstrap judge weight is `1.0`, not `0`. Confirm the population this policy is aimed at: post-takeover local grades that do not set `JudgeScore`, a later recipe whose judge weight is `0`, or both. The resolver change does not depend on the answer. The answer decides when the non-default policy starts to see new rows.
+None. The leave-one-out fix and the renames were decided on 2026-10-22 (§6, §3.1). Which #304 grades leave `JudgeScore` empty is #304's question, not this plan's (§10).

@@ -184,8 +184,10 @@ flowchart TD
 - A judge-scored row (`JudgeScore.HasValue`, the #319 stamp) always has weight `1.0`. The policy switch does not run for it.
 - The policy applies to unjudged rows. `Include` gives weight `1.0`. `DownWeight` gives the configured weight when that weight is greater than 0 and at most 1, and drops the row when the weight is 0 or less. `Exclude` drops the row.
 - The default stays `Include`. Under `Include` both populations have weight `1.0`, so a deployment that never changes the setting learns what it learns today.
-- The options properties are `UnjudgedRowPolicy` and `UnjudgedRowWeight`. A configuration that still contains `Routing:JudgeScoredRowPolicy` or `Routing:JudgeScoredRowWeight` fails startup with a validation error that names the new key. The old value is not copied across and not inverted. Copying `Exclude` onto the new key by hand would drop unjudged rows, which is the new meaning, not the old one.
+- The options properties are `UnjudgedRowPolicy` and `UnjudgedRowWeight`. David confirmed the same day that the enum `JudgeRowPolicy` becomes `UnjudgedRowPolicy`, `JudgeRowWeighting` becomes `UnjudgedRowWeighting`, and `RoutingOptions.ResolveJudgeRowWeight` becomes `ResolveRowWeight`. The parameter renames are in the plan.
+- A configuration that still contains `Routing:JudgeScoredRowPolicy` or `Routing:JudgeScoredRowWeight` fails startup with a validation error that names the new key. The old value is not copied across and not inverted. Copying `Exclude` onto the new key by hand would drop unjudged rows, which is the new meaning, not the old one.
 - `[Range(0, 1)]` stays on the weight. Startup still rejects a non-positive weight when the policy is `DownWeight`.
+- Leave-one-out is in scope for #326. `TaxonomyComparisonService` subtracts a row's resolved weight from the cluster cell. When the resolver returns null, `ClusterLedger.Build` never added that row, so the comparison uses the cell mean as-is and does not subtract. A missing cell stays null.
 
 The plan is [`docs/plans/issue-326-unjudged-row-policy.md`](../plans/issue-326-unjudged-row-policy.md).
 
@@ -211,3 +213,4 @@ The plan is [`docs/plans/issue-326-unjudged-row-policy.md`](../plans/issue-326-u
 - Bad, because `Exclude` and `DownWeight` now change which rows move the router, and an operator reading the old names would predict the opposite. The startup error and the renamed keys are what make that visible.
 - Bad, because the one-time #293 purge and the #319 purge are not re-run. Rows already stored with `is_judge_scored = 0` become the population the non-default policy down-weights or drops the next time a consumer reads them. No migration deletes them.
 - The 2026-10-21 correction stands. A `Complete` grade is judge-scored only when `JudgeScore` has a value. This amendment changes the weight of the other rows. It does not change the learning gate.
+- Which [#304](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/304) grades leave `JudgeScore` empty is deferred to that issue's planning (David, 2026-10-22). It does not change this decision and does not block #326.
