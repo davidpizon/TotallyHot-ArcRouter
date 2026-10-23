@@ -613,27 +613,32 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
     }
 
     /// <inheritdoc/>
-    public IReadOnlyList<long> DeleteByArchiveSessions(IReadOnlyCollection<Guid> archiveSessionIds)
+    public TranscriptLinkDeletion DeleteByArchiveSessions(IReadOnlyCollection<Guid> archiveSessionIds)
     {
         ArgumentNullException.ThrowIfNull(archiveSessionIds);
-        if (archiveSessionIds.Count == 0) return [];
+        if (archiveSessionIds.Count == 0) return TranscriptLinkDeletion.Empty;
 
         EnsureSchema();
         using var connection = _database.OpenConnection();
         using var transaction = connection.BeginTransaction();
         var memoryIds = new List<long>();
+        var correlationIds = new List<string>();
         foreach (var archiveSessionId in archiveSessionIds.Distinct())
         {
             using var select = connection.CreateCommand();
             select.Transaction = transaction;
             select.CommandText = """
-                                 SELECT memory_entry_id FROM request_transcripts
-                                 WHERE archive_session_id = $id AND memory_entry_id IS NOT NULL;
+                                 SELECT correlation_id, memory_entry_id FROM request_transcripts
+                                 WHERE archive_session_id = $id;
                                  """;
             select.Parameters.AddWithValue("$id", archiveSessionId.ToString("D"));
             using (var reader = select.ExecuteReader())
             {
-                while (reader.Read()) memoryIds.Add(reader.GetInt64(0));
+                while (reader.Read())
+                {
+                    correlationIds.Add(reader.GetString(0));
+                    if (!reader.IsDBNull(1)) memoryIds.Add(reader.GetInt64(1));
+                }
             }
 
             using var delete = connection.CreateCommand();
@@ -645,31 +650,36 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
 
         transaction.Commit();
         TruncateWalAfterDelete(connection);
-        return memoryIds;
+        return new TranscriptLinkDeletion(memoryIds, correlationIds);
     }
 
     /// <inheritdoc/>
-    public IReadOnlyList<long> DeleteByArchiveTurns(IReadOnlyCollection<Guid> archiveTurnIds)
+    public TranscriptLinkDeletion DeleteByArchiveTurns(IReadOnlyCollection<Guid> archiveTurnIds)
     {
         ArgumentNullException.ThrowIfNull(archiveTurnIds);
-        if (archiveTurnIds.Count == 0) return [];
+        if (archiveTurnIds.Count == 0) return TranscriptLinkDeletion.Empty;
 
         EnsureSchema();
         using var connection = _database.OpenConnection();
         using var transaction = connection.BeginTransaction();
         var memoryIds = new List<long>();
+        var correlationIds = new List<string>();
         foreach (var archiveTurnId in archiveTurnIds.Distinct())
         {
             using var select = connection.CreateCommand();
             select.Transaction = transaction;
             select.CommandText = """
-                                 SELECT memory_entry_id FROM request_transcripts
-                                 WHERE archive_turn_id = $id AND memory_entry_id IS NOT NULL;
+                                 SELECT correlation_id, memory_entry_id FROM request_transcripts
+                                 WHERE archive_turn_id = $id;
                                  """;
             select.Parameters.AddWithValue("$id", archiveTurnId.ToString("D"));
             using (var reader = select.ExecuteReader())
             {
-                while (reader.Read()) memoryIds.Add(reader.GetInt64(0));
+                while (reader.Read())
+                {
+                    correlationIds.Add(reader.GetString(0));
+                    if (!reader.IsDBNull(1)) memoryIds.Add(reader.GetInt64(1));
+                }
             }
 
             using var delete = connection.CreateCommand();
@@ -681,7 +691,7 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
 
         transaction.Commit();
         TruncateWalAfterDelete(connection);
-        return memoryIds;
+        return new TranscriptLinkDeletion(memoryIds, correlationIds);
     }
 
     /// <inheritdoc/>
@@ -695,24 +705,26 @@ public sealed class SqliteTranscriptStore : ITranscriptStore
         // SQLITE_BUSY_SNAPSHOT whenever another connection commits between the two, and the busy timeout cannot
         // retry that; this runs on every retention pass against a database every request writes to.
         var memoryIds = new List<long>();
+        var correlationIds = new List<string>();
         var deleted = 0;
         using (var delete = connection.CreateCommand())
         {
             delete.CommandText = """
                                  DELETE FROM request_transcripts
                                  WHERE archive_session_id IS NULL
-                                 RETURNING memory_entry_id;
+                                 RETURNING correlation_id, memory_entry_id;
                                  """;
             using var reader = delete.ExecuteReader();
             while (reader.Read())
             {
                 deleted++;
-                if (!reader.IsDBNull(0)) memoryIds.Add(reader.GetInt64(0));
+                correlationIds.Add(reader.GetString(0));
+                if (!reader.IsDBNull(1)) memoryIds.Add(reader.GetInt64(1));
             }
         }
 
         if (deleted > 0) TruncateWalAfterDelete(connection);
-        return new NullArchivePurgeResult(deleted, memoryIds);
+        return new NullArchivePurgeResult(deleted, memoryIds, correlationIds);
     }
 
     /// <inheritdoc/>

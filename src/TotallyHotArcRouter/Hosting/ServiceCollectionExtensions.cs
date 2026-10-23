@@ -85,8 +85,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(sp => new PendingValueCache<decimal>(sp.GetRequiredService<IOptions<RoutingOptions>>()));
         services.AddSingleton(sp =>
             new PendingValueCache<PendingRequestProvenance>(sp.GetRequiredService<IOptions<RoutingOptions>>()));
+        services.AddSingleton<PendingQuestionVectorGradeReader>();
         services.AddSingleton<RouterMemoryScoreObserver>();
         services.AddSingleton<EmbeddingMemoryScoreObserver>();
+        services.AddSingleton<ResponseVectorKeyHolder>();
+        services.AddSingleton<SqliteResponseVectorStore>();
+        services.AddSingleton<IResponseVectorStore>(sp => sp.GetRequiredService<SqliteResponseVectorStore>());
+        services.AddSingleton<ResponseVectorGradeObserver>();
 
         services.AddTranscripts();
         services.AddJudge();
@@ -95,6 +100,9 @@ public static class ServiceCollectionExtensions
         {
             var observers = new List<IQualityScoreObserver>
             {
+                // Peek before EmbeddingMemoryScoreObserver takes the pending question vector. A peek
+                // after that take would record a hit as missing.
+                sp.GetRequiredService<PendingQuestionVectorGradeReader>(),
                 sp.GetRequiredService<RouterMemoryScoreObserver>(),
                 sp.GetRequiredService<EmbeddingMemoryScoreObserver>(),
                 // docs/router/self-organizing-classification-plan.md Phase T6: joins the fan-out
@@ -119,6 +127,7 @@ public static class ServiceCollectionExtensions
                 // flag, since GraderKeys.Analysis always fires regardless of which (if any) LLM grader
                 // is live.
                 sp.GetRequiredService<GraderScoreRecordObserver>(),
+                sp.GetRequiredService<ResponseVectorGradeObserver>(),
                 sp.GetRequiredService<GradeReceiptRecordObserver>()
             };
 
@@ -217,6 +226,15 @@ public static class ServiceCollectionExtensions
             maxRows: static o => o.GraderScoreMaxRows,
             retentionDays: static o => o.GraderScoreRetentionDays,
             tableLabel: "Grade-receipt"));
+        services.AddSingleton<IHostedService>(sp => new ScoreTableRetentionService(
+            logger: sp.GetRequiredService<ILogger<ScoreTableRetentionService>>(),
+            store: sp.GetRequiredService<SqliteResponseVectorStore>(),
+            options: sp.GetRequiredService<IOptionsMonitor<JudgeOptions>>(),
+            isEnabled: static _ => true,
+            maxRows: static o => o.GraderScoreMaxRows,
+            retentionDays: static o => o.GraderScoreRetentionDays,
+            tableLabel: "Response-vector"));
+        services.AddHostedService<ResponseVectorKeyHostedService>();
 
         // docs/router/self-organizing-classification-plan.md Phase T4: drains the comparison queue on a
         // timer. Deliberately off the request path - a comparison needs both a verifier score and a

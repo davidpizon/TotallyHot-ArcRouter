@@ -122,4 +122,19 @@ public sealed record QualityResult
     /// The pinned judge model that produced <see cref="JudgeScore"/>, or null when the judge did not run.
     /// </summary>
     public string? JudgeModel { get; init; }
+
+    /// <summary>
+    /// The local grader's normalized score, or null when that grader did not run. A value here is not
+    /// <see cref="JudgeScore"/>. Phase 3's response-vector write treats a set value as "a grader scored
+    /// this reply," including a shadow score whose <see cref="JudgeScore"/> is empty.
+    /// </summary>
+    public double? LocalScore { get; init; }
+
+    /// <summary>
+    /// Whether the pending question vector was missing at grade time. <see langword="true"/> is a
+    /// <c>TryPeek</c> miss (expired, evicted, or never stored). <see langword="false"/> is a hit.
+    /// Null until the grade-time reader stamps it. Mutable because that reader and the receipt observer
+    /// share this instance, and the reader must stamp the flag before the kNN observer takes the vector.
+    /// </summary>
+    public bool? QuestionVectorMissing { get; set; }
 }

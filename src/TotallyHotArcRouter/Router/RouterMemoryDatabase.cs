@@ -117,8 +117,19 @@ public sealed class RouterMemoryDatabase
                                          grade_source         TEXT    NULL,
                                          response_has_code    INTEGER NOT NULL DEFAULT 0,
                                          judge_model          TEXT    NULL,
-                                         answer_model         TEXT    NULL
+                                         answer_model         TEXT    NULL,
+                                         question_vector_missing INTEGER NULL
                                      );
+
+                                     CREATE TABLE IF NOT EXISTS response_vectors (
+                                         correlation_id       TEXT    PRIMARY KEY,
+                                         created_at_utc       TEXT    NOT NULL,
+                                         embedding_model      TEXT    NOT NULL,
+                                         vector               BLOB    NOT NULL
+                                     );
+
+                                     CREATE INDEX IF NOT EXISTS ix_response_vectors_created_at
+                                         ON response_vectors (created_at_utc);
 
                                      CREATE INDEX IF NOT EXISTS ix_grade_receipts_created_at
                                          ON grade_receipts (created_at_utc);
@@ -577,6 +588,13 @@ public sealed class RouterMemoryDatabase
 
         AddNullableTextColumn(connection: connection, table: "grade_receipts", column: "judge_model");
         AddNullableTextColumn(connection: connection, table: "grade_receipts", column: "answer_model");
+        if (!ColumnExists(connection: connection, table: "grade_receipts", column: "question_vector_missing"))
+        {
+            using var alter = connection.CreateCommand();
+            // No DEFAULT: a 0 would mark receipts written before the peek existed as hits.
+            alter.CommandText = "ALTER TABLE grade_receipts ADD COLUMN question_vector_missing INTEGER NULL;";
+            alter.ExecuteNonQuery();
+        }
     }
 
     /// <summary>Adds a nullable TEXT column when the table exists and the column does not.</summary>

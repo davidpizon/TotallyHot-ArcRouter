@@ -29,6 +29,8 @@ public class GradeReceiptStoreTests
         Assert.True(ColumnExists(connection: connection, table: "grade_receipts", column: "response_has_code"));
         Assert.True(ColumnExists(connection: connection, table: "grade_receipts", column: "judge_model"));
         Assert.True(ColumnExists(connection: connection, table: "grade_receipts", column: "answer_model"));
+        Assert.True(ColumnExists(connection: connection, table: "grade_receipts", column: "question_vector_missing"));
+        Assert.True(ColumnExists(connection: connection, table: "response_vectors", column: "vector"));
         Assert.True(ColumnExists(connection: connection, table: "grader_scores", column: "question_hmac"));
         Assert.True(ColumnExists(connection: connection, table: "grader_scores", column: "prompt_version"));
     }

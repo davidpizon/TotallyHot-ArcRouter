@@ -264,8 +264,12 @@ public interface ITranscriptStore
     /// embeddings with the session (#165 phase 2).
     /// </summary>
     /// <param name="archiveSessionIds">The sessions that were just removed.</param>
-    /// <returns>Memory entry ids that belonged to the deleted rows. Empty when this store keeps no such link.</returns>
-    IReadOnlyList<long> DeleteByArchiveSessions(IReadOnlyCollection<Guid> archiveSessionIds) => [];
+    /// <returns>
+    /// Memory entry ids and correlation ids that belonged to the deleted rows. Empty when this store keeps
+    /// no such link. Correlation ids let the caller delete <c>response_vectors</c> rows with the session.
+    /// </returns>
+    TranscriptLinkDeletion DeleteByArchiveSessions(IReadOnlyCollection<Guid> archiveSessionIds) =>
+        TranscriptLinkDeletion.Empty;
 
     /// <summary>
     /// Deletes transcript rows whose <c>archive_turn_id</c> is one of <paramref name="archiveTurnIds"/> and returns
@@ -274,8 +278,12 @@ public interface ITranscriptStore
     /// does not outlive it (#165 phase 4).
     /// </summary>
     /// <param name="archiveTurnIds">The turns that were just retired.</param>
-    /// <returns>Memory entry ids that belonged to the deleted rows. Empty when this store keeps no such link.</returns>
-    IReadOnlyList<long> DeleteByArchiveTurns(IReadOnlyCollection<Guid> archiveTurnIds) => [];
+    /// <returns>
+    /// Memory entry ids and correlation ids that belonged to the deleted rows. Empty when this store keeps
+    /// no such link.
+    /// </returns>
+    TranscriptLinkDeletion DeleteByArchiveTurns(IReadOnlyCollection<Guid> archiveTurnIds) =>
+        TranscriptLinkDeletion.Empty;
 
     /// <summary>
     /// Deletes every <c>request_transcripts</c> row with a null <c>archive_session_id</c> (legacy rows and
@@ -381,8 +389,29 @@ public sealed record ModelTokenAverage(double InputTokens, double OutputTokens, 
 /// </summary>
 /// <param name="DeletedRows">How many <c>request_transcripts</c> rows were deleted.</param>
 /// <param name="MemoryEntryIds">The <c>memory_entry_id</c> values those rows linked, for the caller to delete.</param>
-public readonly record struct NullArchivePurgeResult(int DeletedRows, IReadOnlyList<long> MemoryEntryIds)
+/// <param name="CorrelationIds">
+/// The <c>correlation_id</c> values those rows carried, so a caller can delete matching
+/// <c>response_vectors</c> rows. Empty when none were deleted.
+/// </param>
+public readonly record struct NullArchivePurgeResult(
+    int DeletedRows,
+    IReadOnlyList<long> MemoryEntryIds,
+    IReadOnlyList<string> CorrelationIds)
 {
     /// <summary>An empty purge: nothing deleted.</summary>
-    public static NullArchivePurgeResult Empty { get; } = new(0, []);
+    public static NullArchivePurgeResult Empty { get; } = new(0, [], []);
+}
+
+/// <summary>
+/// Links a deleted transcript row still owns: the memory-entry id, when one was stored, and the
+/// correlation id the response-vector table is keyed by.
+/// </summary>
+/// <param name="MemoryEntryIds">Memory-entry ids to delete. Empty when the rows had none.</param>
+/// <param name="CorrelationIds">Correlation ids of the deleted rows.</param>
+public readonly record struct TranscriptLinkDeletion(
+    IReadOnlyList<long> MemoryEntryIds,
+    IReadOnlyList<string> CorrelationIds)
+{
+    /// <summary>Nothing was deleted.</summary>
+    public static TranscriptLinkDeletion Empty { get; } = new([], []);
 }

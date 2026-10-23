@@ -31,6 +31,10 @@ namespace TotallyHot.ArcRouter.Judge;
 /// <param name="ResponseHasCode">Whether the graded reply contained a fenced code block.</param>
 /// <param name="JudgeModel">The pinned judge model when a teacher score ran; null otherwise.</param>
 /// <param name="AnswerModel">The answering model; duplicates <paramref name="Model"/> for the receipt audit columns.</param>
+/// <param name="QuestionVectorMissing">
+/// <see langword="true"/> when the grade-time question-vector peek missed, <see langword="false"/> when it
+/// hit, and null on a receipt stored before the column existed. Not a vector and not text.
+/// </param>
 public sealed record GradeReceiptRecord(
     string CorrelationId,
     DateTimeOffset CreatedAtUtc,
@@ -51,4 +55,5 @@ public sealed record GradeReceiptRecord(
     string? GradeSource = null,
     bool ResponseHasCode = false,
     string? JudgeModel = null,
-    string? AnswerModel = null);
+    string? AnswerModel = null,
+    bool? QuestionVectorMissing = null);

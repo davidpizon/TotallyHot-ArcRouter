@@ -153,6 +153,23 @@ flowchart TD
   `RoutingCandidateBuilder`.
 - Later phases of the same plan, not a second ADR: local grader epoch, encrypted `response_vectors`,
   user-signal dispute, tool-loop receipts.
+
+## Amendment 1 (2026-10-23) — phase 3 stores the sealed response vector and the question-vector miss
+
+Phase 3 of the same plan adds two pieces of storage. Neither is a second ADR.
+
+`grade_receipts.question_vector_missing` is `INTEGER NULL`. A grade-time `TryPeek` hit writes 0 and a miss
+writes 1. There is no default, so a receipt stored before the column stays null and is not backfilled.
+The column is a flag, not a vector and not text. `fingerprint_ref` stays null.
+
+`response_vectors` lives in the router memory database, keyed by `correlation_id`. Each row stores the BGE
+model id and a blob `nonce (12) || tag (16) || ciphertext` sealed with AES-256-GCM under one 256-bit key
+in `secrets.dat` (`response-vector-key`). Associated data is the table name, the correlation id, and the
+model id. The plaintext is the same little-endian `float32` layout as `memory_entries`, and it is not
+stored. A row is written only when the reply has non-blank text still on the grade path and `JudgeScore`
+or `LocalScore` is set. Deleting the session deletes the row. Shred destroys the key; the next start
+deletes every row and creates a new key. Question vectors in `memory_entries` stay unencrypted
+([#306](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/306)).
 - Related: [#293](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/293),
   [#294](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/294),
   [#319](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/319),

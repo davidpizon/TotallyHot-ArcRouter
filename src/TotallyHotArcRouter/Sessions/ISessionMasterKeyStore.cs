@@ -52,8 +52,8 @@ public interface ISessionMasterKeyStore
     void ClearRotationRequired();
 
     /// <summary>
-    /// Destroys the current and staged keys, which makes every session file unreadable. Used by the
-    /// uninstall shred.
+    /// Destroys the current and staged keys, which makes every session file unreadable, and the
+    /// response-vector key in the same store. Used by the uninstall shred.
     /// </summary>
     void DestroyAll();
 }

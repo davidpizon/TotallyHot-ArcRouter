@@ -954,9 +954,10 @@ public class SqliteTranscriptStoreTests : IDisposable
             record: MakeRecord("kept:1") with { ArchiveSessionId = kept, ArchiveTurnId = Guid.CreateVersion7() },
             cancellationToken: TestContext.Current.CancellationToken);
 
-        var memoryIds = store.DeleteByArchiveSessions([gone]);
+        var links = store.DeleteByArchiveSessions([gone]);
 
-        Assert.Equal([7L], memoryIds);
+        Assert.Equal([7L], links.MemoryEntryIds);
+        Assert.Equal(["gone:1"], links.CorrelationIds);
         Assert.Null(await store.GetTranscriptAsync(1, TestContext.Current.CancellationToken));
         Assert.Equal(keptId, (await store.GetTranscriptAsync(keptId!.Value, TestContext.Current.CancellationToken))!.Id);
     }
