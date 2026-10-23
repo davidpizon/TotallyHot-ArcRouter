@@ -49,6 +49,27 @@ public class EmbeddingMemoryTests
     }
 
     [Fact]
+    public async Task FindNearest_ExcludePolicy_DropsUnjudgedNeighborsWithoutConsumingTheNeighborBudget()
+    {
+        var store = new FakeMemoryEntryStore();
+        var memory = CreateMemory(store: store, 0.0, 1);
+        await memory.InitializeAsync(TestContext.Current.CancellationToken);
+
+        await memory.AddEntryAsync(taskEmbedding: UnitVector(1, 0, 0), chosenModel: "model-unjudged", 0.9, 0.01, null,
+            cancellationToken: TestContext.Current.CancellationToken);
+        await memory.AddEntryAsync(taskEmbedding: UnitVector(1, 0, 0), chosenModel: "model-judged", 0.3, 0.01, null,
+            cancellationToken: TestContext.Current.CancellationToken, isJudgeScored: true);
+
+        var excluded = memory.FindNearest(UnitVector(1, 0, 0), unjudgedRowPolicy: UnjudgedRowPolicy.Exclude);
+        var kept = Assert.Single(excluded);
+        Assert.Equal(expected: "model-judged", actual: kept.Entry.ChosenModel);
+
+        var unfiltered = memory.FindNearest(UnitVector(1, 0, 0));
+        var stillPresent = Assert.Single(unfiltered);
+        Assert.Equal(expected: "model-unjudged", actual: stillPresent.Entry.ChosenModel);
+    }
+
+    [Fact]
     public async Task FindNearest_OrdersBySimilarityDescending()
     {
         var store = new FakeMemoryEntryStore();

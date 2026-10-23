@@ -152,18 +152,18 @@ public class EmbeddingLogRegTrainingServiceTests
     }
 
     [Fact]
-    public async Task RetrainAsync_ExcludePolicy_JudgeScoredEntriesAreNotCounted()
+    public async Task RetrainAsync_ExcludePolicy_UnjudgedEntriesAreNotCounted()
     {
         var memoryStore = new FakeMemoryEntryStore();
         for (var i = 0; i < 15; i++)
         {
-            memoryStore.Add(embedding: UnitVector(1, 0), chosenModel: "model-a", 1.0);
-            memoryStore.Add(embedding: UnitVector(0, 1), chosenModel: "model-b", 1.0);
+            memoryStore.Add(embedding: UnitVector(1, 0), chosenModel: "model-a", 1.0, isJudgeScored: true);
+            memoryStore.Add(embedding: UnitVector(0, 1), chosenModel: "model-b", 1.0, isJudgeScored: true);
         }
 
         // These would otherwise push MemoryEntryCount to 32 and still train - Exclude must drop them instead.
-        memoryStore.Add(embedding: UnitVector(1, 0), chosenModel: "model-a", 1.0, isJudgeScored: true);
-        memoryStore.Add(embedding: UnitVector(0, 1), chosenModel: "model-b", 1.0, isJudgeScored: true);
+        memoryStore.Add(embedding: UnitVector(1, 0), chosenModel: "model-a", 1.0);
+        memoryStore.Add(embedding: UnitVector(0, 1), chosenModel: "model-b", 1.0);
 
         var modelPath = TempModelPath();
         var voter = new LogRegVoter(logger: NullLogger<LogRegVoter>.Instance,
@@ -174,7 +174,7 @@ public class EmbeddingLogRegTrainingServiceTests
             routingOptions: new RoutingOptions
             {
                 LogRegLiveSampleWeight = 1.0, LogRegMinTrainingRows = 20, LogRegMinModelsRepresented = 2,
-                JudgeScoredRowPolicy = JudgeRowPolicy.Exclude
+                UnjudgedRowPolicy = UnjudgedRowPolicy.Exclude
             });
 
         try

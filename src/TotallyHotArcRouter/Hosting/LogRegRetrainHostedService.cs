@@ -117,7 +117,7 @@ public sealed class LogRegRetrainHostedService : BackgroundService
     /// honest baseline when no artifact has ever been trained. This is the raw, policy-unfiltered watermark
     /// comparable to <see cref="IMemoryEntryStore.LoadAllAsync"/>'s count - not
     /// <see cref="EmbeddingLogRegModelArtifact.MemoryEntryCount"/>, which under
-    /// <see cref="Models.JudgeRowPolicy.Exclude"/> omits policy-excluded rows and would never let this
+    /// <see cref="Models.UnjudgedRowPolicy.Exclude"/> omits policy-excluded rows and would never let this
     /// comparison converge.
     /// </summary>
     private int TryReadLastTrainedMemoryEntryCount()

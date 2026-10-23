@@ -9,7 +9,8 @@ namespace TotallyHot.ArcRouter.Router.Orchestrator;
 /// score among them, restricted to models present in <see cref="VotingContext.Candidates"/> - research-doc
 /// §3.3's "top-10 historical neighbors from Memory (cosine kNN)" input to the Orchestrator. A neighbor's
 /// similarity weight is further scaled (or the neighbor dropped) by
-/// <see cref="RoutingOptions.JudgeScoredRowPolicy"/> when it is judge-scored
+/// <see cref="RoutingOptions.UnjudgedRowPolicy"/> when it is not judge-scored; a judge-scored neighbor keeps
+/// its full similarity weight
 /// (docs/router/geval-shadow-scoring-plan.md's G3 "still owed" item).
 /// </summary>
 public sealed class MemoryKnnVoter : IRoutingVoter
@@ -21,7 +22,7 @@ public sealed class MemoryKnnVoter : IRoutingVoter
     /// Initializes a new instance of the <see cref="MemoryKnnVoter"/> class.
     /// </summary>
     /// <param name="embeddingMemory">The task-embedding-keyed memory this voter retrieves neighbors from.</param>
-    /// <param name="routingOptions">Supplies the judge-scored-row policy applied to retrieved neighbors.</param>
+    /// <param name="routingOptions">Supplies the unjudged-row policy applied to retrieved neighbors.</param>
     public MemoryKnnVoter(EmbeddingMemory embeddingMemory, IOptions<RoutingOptions> routingOptions)
     {
         ArgumentNullException.ThrowIfNull(embeddingMemory);
@@ -42,8 +43,8 @@ public sealed class MemoryKnnVoter : IRoutingVoter
         if (context.TaskEmbedding is null) return Task.FromResult(VoterVote.Abstain(Name));
 
         var neighbors = _embeddingMemory.FindNearest(context.TaskEmbedding,
-            judgeRowPolicy: _routingOptions.JudgeScoredRowPolicy,
-            judgeRowWeight: _routingOptions.JudgeScoredRowWeight);
+            unjudgedRowPolicy: _routingOptions.UnjudgedRowPolicy,
+            unjudgedRowWeight: _routingOptions.UnjudgedRowWeight);
         if (neighbors.Count == 0) return Task.FromResult(VoterVote.Abstain(Name));
 
         var candidateNames = new HashSet<string>(
@@ -56,7 +57,7 @@ public sealed class MemoryKnnVoter : IRoutingVoter
         {
             if (!candidateNames.Contains(entry.ChosenModel) || similarity <= 0) continue;
 
-            var judgeWeight = _routingOptions.ResolveJudgeRowWeight(entry.IsJudgeScored);
+            var judgeWeight = _routingOptions.ResolveRowWeight(entry.IsJudgeScored);
             // FindNearest already filtered by policy, so judgeWeight should not be null
             if (judgeWeight is null) continue;
 

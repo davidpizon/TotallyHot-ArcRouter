@@ -252,14 +252,19 @@ public sealed class EmbeddingMemory : IDisposable
     /// </remarks>
     /// <summary>
     /// Retrieves the nearest memory entries to <paramref name="queryEmbedding"/>, optionally filtering
-    /// by a judge-row policy before applying the neighbor limit (so excluded judge rows don't consume the budget).
+    /// by an unjudged-row policy before applying the neighbor limit (so dropped unjudged rows don't consume
+    /// the budget). A judge-scored row is never dropped by the policy.
     /// </summary>
     /// <param name="queryEmbedding">The embedding to find neighbors for.</param>
-    /// <param name="judgeRowPolicy">Optional policy for judge-scored rows; if provided, Exclude skips those rows entirely.</param>
-    /// <param name="judgeRowWeight">Ignored unless <paramref name="judgeRowPolicy"/> is provided.</param>
+    /// <param name="unjudgedRowPolicy">
+    /// Optional policy for unjudged rows; if provided, <see cref="UnjudgedRowPolicy.Exclude"/> (or
+    /// <see cref="UnjudgedRowPolicy.DownWeight"/> with a weight of 0 or less) skips those rows entirely.
+    /// A <see langword="null"/> policy does not filter.
+    /// </param>
+    /// <param name="unjudgedRowWeight">Ignored unless <paramref name="unjudgedRowPolicy"/> is provided.</param>
     /// <returns>Up to <see cref="RoutingOptions.MaxNeighborCount"/> entries sorted by decreasing similarity.</returns>
     public IReadOnlyList<(MemoryEntry Entry, double Similarity)> FindNearest(float[] queryEmbedding,
-        JudgeRowPolicy? judgeRowPolicy = null, double judgeRowWeight = 1.0)
+        UnjudgedRowPolicy? unjudgedRowPolicy = null, double unjudgedRowWeight = 1.0)
     {
         ArgumentNullException.ThrowIfNull(queryEmbedding);
 
@@ -272,9 +277,9 @@ public sealed class EmbeddingMemory : IDisposable
             snapshot = [.. _entries];
         }
 
-        // One pass, no intermediate lists: comparability and the judge-row policy are cheap per-entry
+        // One pass, no intermediate lists: comparability and the unjudged-row policy are cheap per-entry
         // checks, applied before the expensive dot product so a skipped row never pays for scoring. The
-        // query's magnitude is computed once rather than once per entry. Filtering judge rows before
+        // query's magnitude is computed once rather than once per entry. Filtering unjudged rows before
         // ranking is equivalent to filtering after it - the filter never reorders - and the final ordering
         // is the same stable descending sort as before, so ties keep insertion (oldest-first) order.
         var queryMagnitude = Math.Sqrt(SumOfSquares(queryEmbedding));
@@ -288,8 +293,8 @@ public sealed class EmbeddingMemory : IDisposable
                 continue;
             }
 
-            if (judgeRowPolicy is not null &&
-                JudgeRowWeighting.ResolveWeight(entry.IsJudgeScored, judgeRowPolicy.Value, judgeRowWeight) is null)
+            if (unjudgedRowPolicy is not null &&
+                UnjudgedRowWeighting.ResolveWeight(entry.IsJudgeScored, unjudgedRowPolicy.Value, unjudgedRowWeight) is null)
                 continue;
 
             var similarity = CosineSimilarityToQuery(query: queryEmbedding, queryMagnitude: queryMagnitude,

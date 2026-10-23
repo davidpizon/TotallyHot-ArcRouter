@@ -393,38 +393,47 @@ public sealed class RoutingOptions
     /// <summary>
     /// Gets how <see cref="Router.Orchestrator.MemoryKnnVoter"/>, the <c>logreg</c>/cluster trainers, and
     /// <see cref="Router.Orchestrator.ClusterLedger"/> treat a <see cref="Router.MemoryEntry"/> whose score
-    /// came from the G-Eval judge (<see cref="Router.MemoryEntry.IsJudgeScored"/>) rather than from
-    /// execution or heuristic signals alone. Defaults to <see cref="Models.JudgeRowPolicy.Include"/> after
-    /// issue #293: only <see cref="TotallyHot.ArcRouter.Quality.GradeStatus.Complete"/> grades enter live
-    /// memory (ADR-0026). After issue #319 a surviving row is judge-scored only when <c>JudgeScore</c> has a
-    /// value. A row with <c>is_judge_scored = 0</c> keeps multiplier <c>1.0</c> under every value of this
-    /// property. <see cref="Models.JudgeRowWeighting.ResolveWeight"/> returns <c>1.0</c> for that row before
-    /// <see cref="Models.JudgeRowPolicy.Include"/>, <see cref="Models.JudgeRowPolicy.Exclude"/>, or
-    /// <see cref="Models.JudgeRowPolicy.DownWeight"/> is applied, so none of those values removes it from
-    /// retrieval, from the weighted mean, or from training.
+    /// did not come from the G-Eval judge (<see cref="Router.MemoryEntry.IsJudgeScored"/> is
+    /// <see langword="false"/>). A judge-scored row always has weight <c>1.0</c> and this policy does not
+    /// apply to it, so an unjudged row never counts more than a judge-scored row (issue #326, ADR-0026
+    /// Amendment 1). Defaults to <see cref="Models.UnjudgedRowPolicy.Include"/>, which weights both
+    /// populations at <c>1.0</c>. After issue #293 only
+    /// <see cref="TotallyHot.ArcRouter.Quality.GradeStatus.Complete"/> grades enter live memory (ADR-0026).
+    /// After issue #319 a surviving row is judge-scored only when <c>JudgeScore</c> has a value.
     /// </summary>
-    public JudgeRowPolicy JudgeScoredRowPolicy { get; init; } = JudgeRowPolicy.Include;
+    /// <remarks>
+    /// Issue #326 renamed this setting from <c>JudgeScoredRowPolicy</c> and flipped which rows it governs.
+    /// A configuration that still sets <c>Routing:JudgeScoredRowPolicy</c> fails startup rather than being
+    /// silently ignored - see <see cref="Router.RouterServiceCollectionExtensions"/>.
+    /// </remarks>
+    public UnjudgedRowPolicy UnjudgedRowPolicy { get; init; } = UnjudgedRowPolicy.Include;
 
     /// <summary>
-    /// Gets the multiplier applied to a judge-scored row's contribution when
-    /// <see cref="JudgeScoredRowPolicy"/> is <see cref="Models.JudgeRowPolicy.DownWeight"/>. Ignored for
-    /// the other two policies. Defaults to half strength - a starting point pending G2's agreement/
-    /// calibration analysis, not a measured value.
+    /// Gets the multiplier applied to an unjudged row's contribution when
+    /// <see cref="UnjudgedRowPolicy"/> is <see cref="Models.UnjudgedRowPolicy.DownWeight"/>. Ignored for
+    /// the other two policies and for judge-scored rows, which always have weight <c>1.0</c>. The
+    /// <c>[0, 1]</c> range keeps a down-weighted unjudged row at or below a judge-scored row. Defaults to
+    /// half strength - a starting point pending G2's agreement/calibration analysis, not a measured value.
     /// </summary>
+    /// <remarks>
+    /// Issue #326 renamed this setting from <c>JudgeScoredRowWeight</c>. A configuration that still sets
+    /// <c>Routing:JudgeScoredRowWeight</c> fails startup.
+    /// </remarks>
     [Range(0d, 1d)]
-    public double JudgeScoredRowWeight { get; init; } = 0.5;
+    public double UnjudgedRowWeight { get; init; } = 0.5;
 
     /// <summary>
     /// Resolves the multiplier a learning consumer should apply to a <see cref="Router.MemoryEntry"/>'s
-    /// contribution under <see cref="JudgeScoredRowPolicy"/>/<see cref="JudgeScoredRowWeight"/>. See
-    /// <see cref="Models.JudgeRowWeighting.ResolveWeight"/> for the shared rule every consumer applies.
+    /// contribution under <see cref="UnjudgedRowPolicy"/>/<see cref="UnjudgedRowWeight"/>: <c>1.0</c> for a
+    /// judge-scored row, and the policy's weight for an unjudged row. See
+    /// <see cref="Models.UnjudgedRowWeighting.ResolveWeight"/> for the shared rule every consumer applies.
     /// </summary>
     /// <param name="isJudgeScored">Whether the row's score came from the G-Eval judge.</param>
     /// <returns><see langword="null"/> when the row must be dropped entirely; otherwise the multiplier to apply.</returns>
-    public double? ResolveJudgeRowWeight(bool isJudgeScored)
+    public double? ResolveRowWeight(bool isJudgeScored)
     {
-        return JudgeRowWeighting.ResolveWeight(isJudgeScored: isJudgeScored, policy: JudgeScoredRowPolicy,
-            judgeRowWeight: JudgeScoredRowWeight);
+        return UnjudgedRowWeighting.ResolveWeight(isJudgeScored: isJudgeScored, policy: UnjudgedRowPolicy,
+            unjudgedRowWeight: UnjudgedRowWeight);
     }
 
     /// <summary>
@@ -479,11 +488,11 @@ public sealed class RoutingOptions
                     $"SubagentBias:LightSubagentRelativeFloor ({SubagentBias.LightSubagentRelativeFloor}) must be greater than 0 and at most 1."
                 ]);
 
-        if (JudgeScoredRowPolicy == JudgeRowPolicy.DownWeight && JudgeScoredRowWeight <= 0)
+        if (UnjudgedRowPolicy == UnjudgedRowPolicy.DownWeight && UnjudgedRowWeight <= 0)
             throw new OptionsValidationException(
                 optionsName: nameof(RoutingOptions),
                 optionsType: typeof(RoutingOptions),
                 failureMessages:
-                ["JudgeScoredRowWeight must be positive when JudgeScoredRowPolicy is DownWeight."]);
+                ["UnjudgedRowWeight must be positive when UnjudgedRowPolicy is DownWeight."]);
     }
 }

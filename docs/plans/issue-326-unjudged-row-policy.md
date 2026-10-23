@@ -1,6 +1,6 @@
 # Plan: Unjudged grades never outweigh judge-scored grades (#326)
 
-**Status:** Proposed. David's 2026-10-22 answers on the three review items are recorded as decided (§3.1, §6, §10). This pull request is the plan and the ADR-0026 amendment. It does not change C# or tests. Implementation waits for David's sign-off on this file.
+**Status:** Implementation. Signed off by David on 2026-10-22 (chat). David's 2026-10-22 answers on the three review items are recorded as decided (§3.1, §6, §10). The plan and ADR-0026 Amendment 1 landed in [#329](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/329).
 **Issue:** [#326](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/326). Part of #326. This plan does not close it.
 **Standing rule:** [Approved plan before coding](../router/standing-rules.md#approved-plan-before-coding). The implementation pull request links this file.
 **Audit base:** `8ca7a35f` (`main`, merge of #328). Line numbers below are that commit.

@@ -27,29 +27,31 @@ public static class ClusterLedger
     /// <see cref="TotallyHot.ArcRouter.Router.Orchestrator.ClusterModelArtifact"/>'s eventual voter applies
     /// at vote time (Phase T3).
     /// </param>
-    /// <param name="judgeRowPolicy">
-    /// How a judge-scored entry (<see cref="MemoryEntry.IsJudgeScored"/>) contributes to the ledger's mean
-    /// (docs/router/geval-shadow-scoring-plan.md's G3 "still owed" item). Defaults to
-    /// <see cref="Models.JudgeRowPolicy.Include"/> so every existing caller that does not pass this
-    /// explicitly keeps today's byte-identical behavior; production callers pass the operator's configured
-    /// <see cref="Models.RoutingOptions.JudgeScoredRowPolicy"/>.
+    /// <param name="unjudgedRowPolicy">
+    /// How an unjudged entry (<see cref="MemoryEntry.IsJudgeScored"/> is <see langword="false"/>)
+    /// contributes to the ledger's mean (docs/router/geval-shadow-scoring-plan.md's G3 "still owed" item). A
+    /// judge-scored entry always contributes at weight <c>1.0</c>. Defaults to
+    /// <see cref="Models.UnjudgedRowPolicy.Include"/>, which weights every entry at <c>1.0</c>, so a caller
+    /// that does not pass this keeps an unweighted mean; production callers pass the operator's configured
+    /// <see cref="Models.RoutingOptions.UnjudgedRowPolicy"/>.
     /// </param>
-    /// <param name="judgeRowWeight">
-    /// The multiplier <see cref="Models.JudgeRowPolicy.DownWeight"/> applies; ignored otherwise. See
-    /// <see cref="Models.RoutingOptions.JudgeScoredRowWeight"/>.
+    /// <param name="unjudgedRowWeight">
+    /// The multiplier <see cref="Models.UnjudgedRowPolicy.DownWeight"/> applies to an unjudged entry; ignored
+    /// otherwise. See <see cref="Models.RoutingOptions.UnjudgedRowWeight"/>.
     /// </param>
     /// <returns>
     /// A map from cluster index to that cluster's per-canonicalized-model <see cref="ClusterModelScore"/>.
     /// A cluster with no assigned entries is present with an empty inner map, not omitted, so a caller can
     /// enumerate every cluster in <paramref name="artifact"/> uniformly. <see cref="ClusterModelScore.ObservationCount"/>
-    /// counts entries retained by the judge-row policy (excluded entries are not counted) - it answers
-    /// "how many actual observations support this cell", which <see cref="RoutingOptions.ClusterBestMinObservations"/>'s
-    /// floor uses directly; <see cref="ClusterModelScore.MeanScore"/> and <see cref="ClusterModelScore.WeightTotal"/>
-    /// account for the policy's weight multipliers.
+    /// counts entries the unjudged-row policy kept, including a down-weighted one (dropped entries are not
+    /// counted) - it answers "how many actual observations support this cell", which
+    /// <see cref="RoutingOptions.ClusterBestMinObservations"/>'s floor uses directly;
+    /// <see cref="ClusterModelScore.MeanScore"/> and <see cref="ClusterModelScore.WeightTotal"/> account for
+    /// the policy's weight multipliers.
     /// </returns>
     public static IReadOnlyDictionary<int, IReadOnlyDictionary<string, ClusterModelScore>> Build(
         ClusterModelArtifact artifact, IReadOnlyList<MemoryEntry> entries, double assignmentThreshold = 0.5,
-        JudgeRowPolicy judgeRowPolicy = JudgeRowPolicy.Include, double judgeRowWeight = 1.0)
+        UnjudgedRowPolicy unjudgedRowPolicy = UnjudgedRowPolicy.Include, double unjudgedRowWeight = 1.0)
     {
         ArgumentNullException.ThrowIfNull(artifact);
         ArgumentNullException.ThrowIfNull(entries);
@@ -71,8 +73,8 @@ public static class ClusterLedger
             var (nearest, similarity) = NearestCentroid(embedding: entry.TaskEmbedding, centroids: artifact.Centroids);
             if (similarity < assignmentThreshold) continue;
 
-            var weight = JudgeRowWeighting.ResolveWeight(isJudgeScored: entry.IsJudgeScored, policy: judgeRowPolicy,
-                judgeRowWeight: judgeRowWeight);
+            var weight = UnjudgedRowWeighting.ResolveWeight(isJudgeScored: entry.IsJudgeScored, policy: unjudgedRowPolicy,
+                unjudgedRowWeight: unjudgedRowWeight);
             if (weight is null) continue;
 
             var modelKey = ModelNameCanonicalizer.Canonicalize(entry.ChosenModel);
@@ -140,7 +142,7 @@ public static class ClusterLedger
     /// The contamination this corrects is structural, not incidental: <see cref="Build"/> aggregates the
     /// live <c>memory_entries</c> working set, which by comparison time already contains the very entry
     /// being scored. Both taxonomies are corrected the same way so the comparison stays like-for-like.
-    /// When <paramref name="cell"/> was built with weighted means (due to judge-row policy),
+    /// When <paramref name="cell"/> was built with weighted means (due to the unjudged-row policy),
     /// <paramref name="observedScoreWeight"/> must match the weight that score received in the aggregation.
     /// </remarks>
     public static double? PredictLeaveOneOut(ClusterModelScore? cell, double observedScore, double observedScoreWeight = 1.0)
@@ -197,12 +199,13 @@ public static class ClusterLedger
 
     /// <summary>
     /// One (cluster, model) cell's aggregated score from the ledger. <see cref="MeanScore"/> is weighted
-    /// when judge-row policies apply; <see cref="ObservationCount"/> always counts raw entries regardless of
-    /// policy (answers "how many data points"); and <see cref="WeightTotal"/> stores the sum of weights for
-    /// correct leave-one-out prediction with weighted means.
+    /// when the unjudged-row policy down-weights a row; <see cref="ObservationCount"/> counts the rows the
+    /// policy kept, including a down-weighted row, and omits a dropped row (answers "how many data
+    /// points"); and <see cref="WeightTotal"/> stores the sum of weights for correct leave-one-out
+    /// prediction with weighted means.
     /// </summary>
     /// <param name="MeanScore">The (possibly weighted) mean score across every observation of this model in this cluster.</param>
-    /// <param name="ObservationCount">The unweighted count of observations that contributed to this cell.</param>
+    /// <param name="ObservationCount">The unweighted count of kept observations that contributed to this cell.</param>
     /// <param name="WeightTotal">The sum of weights applied to all observations in this cell.</param>
     public sealed record ClusterModelScore(double MeanScore, int ObservationCount, double WeightTotal);
 }

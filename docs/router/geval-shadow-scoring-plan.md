@@ -374,7 +374,7 @@ they are not comparable with logprob-weighted rows.
 >   same table, so "is the fallback flatter?" is answerable without any absolute standard. Two thresholds
 >   (`JudgeCalibration:MinimumStandardDeviation` 0.05, `MaximumModalShare` 0.80) still exist so the check
 >   can fail on its own when *every* cohort is a fallback cohort — both are documented guesses in the
->   `JudgeScoredRowWeight = 0.5` tradition, retunable from configuration. Modal share is checked alongside
+>   `UnjudgedRowWeight = 0.5` tradition, retunable from configuration. Modal share is checked alongside
 >   the deviation because a distribution of 29×0.6 plus one 0.0 clears a deviation floor on the strength of
 >   a single outlier.
 > - *Condition (3), self-preference, ships as numbers with **no** verdict — deliberately, and pinned by a
@@ -454,26 +454,28 @@ the same thing.
   vs. "contributed more than X of the weight") was the `HasValue` rule, because the blend weight
   itself is a `QualityOptions`/`DimensionWeightOptions` configuration detail that changes
   independently of provenance.
-- ~~**The learning-layer policy was never implemented.**~~ **Shipped.** A new `JudgeRowPolicy` enum
-  (`Include`/`Exclude`/`DownWeight`) and `RoutingOptions.JudgeScoredRowPolicy`/`JudgeScoredRowWeight`
-  (default **`Include`** since issue #293 / ADR-0026; `DownWeight` at `0.5` remains a knob) are applied
-  identically by every learning consumer that reads raw
-  `memory_entries` rows: `MemoryKnnVoter` (scales a judge-scored neighbor's similarity weight, or drops it
-  under `Exclude`), `EmbeddingLogRegTrainingService` and `ClusterTrainingService` (scale the live sample
-  weight the same way when building training rows), and `ClusterLedger.Build` (used by both
-  `ClusterBestVoter`'s live scoring and `TaxonomyComparisonService`'s T4 baseline comparison — a weighted
-  mean rather than a plain one; `ClusterModelScore.ObservationCount` stays an unweighted raw count, since
-  `RoutingOptions.ClusterBestMinObservations`'s floor is about how many real data points support a cell, not
-  how much trust-weighted mass they carry). The shared rule lives in one place
-  (`Models.JudgeRowWeighting.ResolveWeight`) so the policy cannot silently mean something different in one
-  consumer than another.   `0.5` is a starting point pending G2's agreement/calibration analysis, not a
-  measured value — re-tuning it needs no code change.
+- ~~**The learning-layer policy was never implemented.**~~ **Shipped**, and flipped by issue #326 /
+  ADR-0026 Amendment 1. `UnjudgedRowPolicy` (`Include`/`Exclude`/`DownWeight`) and
+  `RoutingOptions.UnjudgedRowPolicy`/`UnjudgedRowWeight` (default **`Include`** since issue #293 /
+  ADR-0026; `DownWeight` at `0.5` remains a starting-point guess for the unjudged-row weight) apply to
+  rows that are **not** judge-scored. A judge-scored row always has weight `1.0`. Every learning consumer
+  that reads raw `memory_entries` rows uses the same rule: `MemoryKnnVoter` (scales an unjudged
+  neighbor's similarity weight, or drops it under `Exclude`), `EmbeddingLogRegTrainingService` and
+  `ClusterTrainingService` (scale the live sample weight the same way when building training rows), and
+  `ClusterLedger.Build` (used by both `ClusterBestVoter`'s live scoring and
+  `TaxonomyComparisonService`'s T4 baseline comparison — a weighted mean rather than a plain one;
+  `ClusterModelScore.ObservationCount` counts rows the policy kept, including a down-weighted row). The
+  shared rule lives in one place (`Models.UnjudgedRowWeighting.ResolveWeight`) so the policy cannot
+  silently mean something different in one consumer than another. `0.5` is a starting point pending G2's
+  agreement/calibration analysis, not a measured value — re-tuning it needs no code change. A
+  configuration that still sets `Routing:JudgeScoredRowPolicy` or `Routing:JudgeScoredRowWeight` fails
+  startup.
 
 **Issue #293 (ADR-0026, shipped).** Live learning writes (`RouterMemoryScoreObserver`,
 `EmbeddingMemoryScoreObserver`) run only when `QualityResult.GradeStatus == Complete`. Structure-only and
 incomplete grades still emit `QualitySignalEvent` (with `GradeStatus`) and land in `grade_receipts`, but
-they do not update `memory_entries` or `live:` tallies. New live rows stamp `IsJudgeScored = true`. A
-one-time purge removed pre-change live learning on upgrade.
+they do not update `memory_entries` or `live:` tallies. A `Complete` grade is judge-scored only when
+`JudgeScore` has a value (issue #319). A one-time purge removed pre-change live learning on upgrade.
 
 ## Non-goals
 

@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Router;
 
 namespace TotallyHot.ArcRouter.Tests.Models;
 
@@ -177,5 +179,120 @@ public class RoutingOptionsTests
         Assert.False(options.SubagentBias.Enabled);
         Assert.False(options.SubagentBias.CodexTurnMetadata);
         Assert.True(options.SubagentBias.ClaudeCodeAgentId);
+    }
+
+    [Fact]
+    public void AddRoutingOptions_RetiredJudgeScoredRowPolicyKey_FailsStartup()
+    {
+        var exception = Assert.Throws<OptionsValidationException>(() =>
+            ResolveRoutingOptions(new Dictionary<string, string?>
+            {
+                ["Routing:JudgeScoredRowPolicy"] = "Exclude"
+            }));
+
+        Assert.Contains(expectedSubstring: "UnjudgedRowPolicy", exception.Message);
+        Assert.Contains(expectedSubstring: "Copying the old value onto the new key does not keep the old behavior.",
+            exception.Message);
+    }
+
+    [Fact]
+    public void AddRoutingOptions_RetiredJudgeScoredRowWeightKey_FailsStartup()
+    {
+        var exception = Assert.Throws<OptionsValidationException>(() =>
+            ResolveRoutingOptions(new Dictionary<string, string?>
+            {
+                ["Routing:JudgeScoredRowWeight"] = "0.25"
+            }));
+
+        Assert.Contains(expectedSubstring: "UnjudgedRowWeight", exception.Message);
+    }
+
+    [Fact]
+    public void AddRoutingOptions_RetiredPolicyKey_IsRejectedCaseInsensitively()
+    {
+        var exception = Assert.Throws<OptionsValidationException>(() =>
+            ResolveRoutingOptions(new Dictionary<string, string?>
+            {
+                ["Routing:judgescoredrowpolicy"] = "Include"
+            }));
+
+        Assert.Contains(expectedSubstring: "UnjudgedRowPolicy", exception.Message);
+    }
+
+    [Fact]
+    public void AddRoutingOptions_RetiredKeysStillFailWhenTheNewKeyIsAlsoSet()
+    {
+        var exception = Assert.Throws<OptionsValidationException>(() =>
+            ResolveRoutingOptions(new Dictionary<string, string?>
+            {
+                ["Routing:JudgeScoredRowPolicy"] = "Exclude",
+                ["Routing:JudgeScoredRowWeight"] = "0.25",
+                ["Routing:UnjudgedRowPolicy"] = "DownWeight"
+            }));
+
+        Assert.Contains(expectedSubstring: "UnjudgedRowPolicy", exception.Message);
+        Assert.Contains(expectedSubstring: "UnjudgedRowWeight", exception.Message);
+    }
+
+    [Fact]
+    public void AddRoutingOptions_NewKeysBindWithoutTheRetiredNames()
+    {
+        var options = ResolveRoutingOptions(new Dictionary<string, string?>
+        {
+            ["Routing:UnjudgedRowPolicy"] = "DownWeight",
+            ["Routing:UnjudgedRowWeight"] = "0.5"
+        });
+
+        options.EnsureValid();
+        Assert.Equal(UnjudgedRowPolicy.DownWeight, actual: options.UnjudgedRowPolicy);
+        Assert.Equal(0.5, actual: options.UnjudgedRowWeight);
+    }
+
+    [Fact]
+    public void EnsureValid_Throws_WhenDownWeightWeightIsNotPositive()
+    {
+        var options = new RoutingOptions
+        {
+            UnjudgedRowPolicy = UnjudgedRowPolicy.DownWeight, UnjudgedRowWeight = 0
+        };
+
+        var exception = Assert.Throws<OptionsValidationException>(options.EnsureValid);
+        Assert.Contains(expectedSubstring: "UnjudgedRowWeight", exception.Message);
+    }
+
+    [Fact]
+    public void EnsureValid_Succeeds_WhenDownWeightWeightIsPositive()
+    {
+        var options = new RoutingOptions
+        {
+            UnjudgedRowPolicy = UnjudgedRowPolicy.DownWeight, UnjudgedRowWeight = 0.5
+        };
+
+        options.EnsureValid();
+    }
+
+    [Fact]
+    public void EnsureValid_Succeeds_WhenIncludeIgnoresAZeroWeight()
+    {
+        var options = new RoutingOptions
+        {
+            UnjudgedRowPolicy = UnjudgedRowPolicy.Include, UnjudgedRowWeight = 0
+        };
+
+        options.EnsureValid();
+    }
+
+    /// <summary>
+    /// Builds <see cref="RoutingOptions"/> through <see cref="RouterServiceCollectionExtensions.AddRoutingOptions"/>,
+    /// the same chain host startup uses. <c>Get&lt;RoutingOptions&gt;()</c> would ignore an unknown key.
+    /// </summary>
+    private static RoutingOptions ResolveRoutingOptions(Dictionary<string, string?> values)
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(configuration);
+        services.AddRoutingOptions();
+        using var provider = services.BuildServiceProvider();
+        return provider.GetRequiredService<IOptions<RoutingOptions>>().Value;
     }
 }
