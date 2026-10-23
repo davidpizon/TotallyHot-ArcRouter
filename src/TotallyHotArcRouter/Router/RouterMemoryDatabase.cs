@@ -386,7 +386,7 @@ public sealed class RouterMemoryDatabase
     /// Marker in <c>schema_meta</c> recording that memory rows whose judge-score provenance could not be
     /// trusted were purged (issue #319).
     /// </summary>
-    internal const string Issue319UntrustedJudgeProvenancePurgeKey = "issue-319-untrusted-judge-provenance-purge";
+    private const string Issue319UntrustedJudgeProvenancePurgeKey = "issue-319-untrusted-judge-provenance-purge";
 
     /// <summary>
     /// How many bound parameters one transcript <c>UPDATE</c> uses. Kept under SQLite's historical

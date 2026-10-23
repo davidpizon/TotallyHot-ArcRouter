@@ -131,8 +131,8 @@ public sealed class JudgeOptions
     /// properties, and this is a plan D1 bound set through an options initializer. Callers read the value
     /// from <see cref="ToConversationWindowOptions"/>, which is why a scan sees no other C# use.
     /// </remarks>
-    // ReSharper disable once MemberCanBePrivate.Global
     [Range(0, 64)]
+    // ReSharper disable once MemberCanBePrivate.Global
     public int ConversationWindowEarlierMessages { get; init; } = 6;
 
     /// <summary>
@@ -143,8 +143,8 @@ public sealed class JudgeOptions
     /// Stays public for the same reason as <see cref="ConversationWindowEarlierMessages"/>: data-annotation
     /// validation and options initializers only see a public property.
     /// </remarks>
-    // ReSharper disable once MemberCanBePrivate.Global
     [Range(256, 10_000_000)]
+    // ReSharper disable once MemberCanBePrivate.Global
     public int ConversationWindowMaxChars { get; init; } = 16_384;
 
     /// <summary>
@@ -155,8 +155,8 @@ public sealed class JudgeOptions
     /// Stays public for the same reason as <see cref="ConversationWindowEarlierMessages"/>: data-annotation
     /// validation and options initializers only see a public property.
     /// </remarks>
-    // ReSharper disable once MemberCanBePrivate.Global
     [Range(64, 10_000_000)]
+    // ReSharper disable once MemberCanBePrivate.Global
     public int ConversationWindowMaxNewestUserChars { get; init; } = 12_288;
 
     /// <summary>

@@ -58,7 +58,7 @@ public sealed class QualityIngress : IQualityIngress
 
             if (_options.SamplingRate < 1.0 && Random.Shared.NextDouble() >= _options.SamplingRate) return;
 
-            var text = context.ResponseText ?? string.Empty;
+            var text = context.ResponseText;
 
             // Tool-only bodies stay uningested until the tool-loop phase (issue #304 phase 6).
             if (context.HasToolCalls && string.IsNullOrWhiteSpace(text)) return;
@@ -106,7 +106,7 @@ public sealed class QualityIngress : IQualityIngress
         return new QualityRequest(
             Code: string.Empty,
             Language: CodeLanguage.Unknown,
-            Prompt: context.Prompt ?? string.Empty,
+            Prompt: context.Prompt,
             Dimension: string.Empty,
             Model: context.Model,
             CorrelationId: context.CorrelationId,
