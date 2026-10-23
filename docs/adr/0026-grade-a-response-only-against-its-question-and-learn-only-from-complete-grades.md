@@ -4,6 +4,7 @@
 **Date:** 2026-10-14
 **Deciders:** David Pizon
 **Accepted:** 2026-10-14 (David, chat sign-off on #293 plan)
+**Amendments:** [Amendment 1 (2026-10-22) — the row policy applies to unjudged rows](#amendment-1-2026-10-22-the-row-policy-applies-to-unjudged-rows)
 
 ## Context and Problem Statement
 
@@ -152,3 +153,61 @@ The rules, in short (full design in the plan):
 - Out of date by the time this lands: `docs/how-it-learns.md` ("Honest gaps", the graders-cannot-see-the-question
   bullet), corrected in the plan's phase 6.
 - Related: [#288](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/288), [#291](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/291), [#292](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/292), [#294](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/294).
+
+## Amendment 1 (2026-10-22): the row policy applies to unjudged rows
+
+**Status:** accepted (David Pizon, 2026-10-22). The decision is accepted. The code is [#326](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/326) and is not in the tree until that implementation merges. This amendment does not reopen decision point 6, the 2026-10-21 correction above, or the `Complete`-only learning gate.
+
+### Why
+
+Option B of this ADR already named the inversion: "it is the policy already in place (`DownWeight`), and it is inverted: question-aware rows count less." Decision point 6 changed the default to `Include`, which hides the inversion. It left `DownWeight` and `Exclude` aimed at judge-scored rows. `JudgeRowWeighting.ResolveWeight` returns `1.0` for a row that is not judge-scored before the policy switch runs, so under those two values a `Complete` grade with no judge score counts in full while a grade the judge did score is scaled down or dropped.
+
+[#319](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/319) made that row a real stored row: `IsJudgeScored` is `JudgeScore.HasValue`, and a `Complete` grade with no judge score is still written. The **Learn the right target** driver is not met while unverified evidence can outweigh verified evidence. That is a decision because it changes what the router learns from, and because the issue's own suggested fix (cap the unjudged weight at whatever weight the policy gave the judged row) keeps the policy aimed at the judged row.
+
+### Decision
+
+Chosen option: flip the axis the policy acts on (David, 2026-10-22, Option C), because **Learn the right target** requires that a grade which did not measure the question never count more than a grade which did, and the flip makes that true for every policy value inside the one resolver.
+
+```mermaid
+flowchart TD
+  row[Memory row]
+  row --> judged{IsJudgeScored}
+  judged -->|yes| full["weight 1.0"]
+  judged -->|no| policy{UnjudgedRowPolicy}
+  policy -->|Include| same["weight 1.0"]
+  policy -->|DownWeight| positive{weight greater than 0}
+  positive -->|yes| scaled["that weight, at most 1"]
+  positive -->|no| drop[dropped]
+  policy -->|Exclude| drop
+```
+
+- A judge-scored row (`JudgeScore.HasValue`, the #319 stamp) always has weight `1.0`. The policy switch does not run for it.
+- The policy applies to unjudged rows. `Include` gives weight `1.0`. `DownWeight` gives the configured weight when that weight is greater than 0 and at most 1, and drops the row when the weight is 0 or less. `Exclude` drops the row.
+- The default stays `Include`. Under `Include` both populations have weight `1.0`, so a deployment that never changes the setting learns what it learns today.
+- The options properties are `UnjudgedRowPolicy` and `UnjudgedRowWeight`. A configuration that still contains `Routing:JudgeScoredRowPolicy` or `Routing:JudgeScoredRowWeight` fails startup with a validation error that names the new key. The old value is not copied across and not inverted. Copying `Exclude` onto the new key by hand would drop unjudged rows, which is the new meaning, not the old one.
+- `[Range(0, 1)]` stays on the weight. Startup still rejects a non-positive weight when the policy is `DownWeight`.
+
+The plan is [`docs/plans/issue-326-unjudged-row-policy.md`](../plans/issue-326-unjudged-row-policy.md).
+
+### Options
+
+**Flip the axis (chosen).** Judge-scored weight is the constant `1.0`. The configured policy is applied only to unjudged rows.
+
+- Good, because an unjudged weight is then `1.0`, a value in `(0, 1]`, or absent, and none of those is greater than the judged weight.
+- Good, because every consumer already calls the one resolver, so the invariant does not depend on each caller remembering a cap.
+- Bad, because an operator who set the old key in order to drop judge-scored rows, and who then types that same value under the new key, drops the other population. Startup stops the silent case. It cannot stop a deliberate copy.
+- Bad, because `Exclude` means a stretch of `Complete` grades with no judge score teaches the router nothing. The Consequences section already records that pause: with no judge available the router stops learning from live traffic, and David accepted that on 2026-10-14. This extends it to unjudged rows that the learning gate still admits.
+
+**Cap the unjudged weight at the judged weight (the direction [#326](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/326) suggested; not taken).** Leave the policy aimed at judge-scored rows, and limit an unjudged row so it cannot count for more.
+
+- Good, because `Include` would stay "both at `1.0`" and the property names could stay.
+- Bad, because the judged weight stays a variable. A later edit that scales judged rows below `1.0` reopens the inversion unless every caller keeps the cap.
+- Bad, because `Exclude` as written today drops the judge-scored row and keeps the unjudged row. A cap that only clamps `DownWeight` leaves that case inverted. Making `Exclude` drop both populations is already a change of which rows the policy removes, which is the flip.
+
+### Consequences
+
+- Good, because unverified evidence cannot outweigh verified evidence under any value of the policy.
+- Good, because the shipped default does not move. `Include` still gives every admitted row weight `1.0`.
+- Bad, because `Exclude` and `DownWeight` now change which rows move the router, and an operator reading the old names would predict the opposite. The startup error and the renamed keys are what make that visible.
+- Bad, because the one-time #293 purge and the #319 purge are not re-run. Rows already stored with `is_judge_scored = 0` become the population the non-default policy down-weights or drops the next time a consumer reads them. No migration deletes them.
+- The 2026-10-21 correction stands. A `Complete` grade is judge-scored only when `JudgeScore` has a value. This amendment changes the weight of the other rows. It does not change the learning gate.
