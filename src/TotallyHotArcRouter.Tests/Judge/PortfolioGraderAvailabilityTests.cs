@@ -86,7 +86,7 @@ public class PortfolioGraderAvailabilityTests
     private static JudgeModelSelector SelectorOver(IModelRouteResolver resolver)
     {
         return new JudgeModelSelector(routeResolver: resolver,
-            options: new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions()),
+            options: new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions { ModelName = "local-judge" }),
             logger: Microsoft.Extensions.Logging.Abstractions.NullLogger<JudgeModelSelector>.Instance);
     }
 

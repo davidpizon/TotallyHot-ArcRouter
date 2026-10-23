@@ -18,9 +18,14 @@ public interface IQualityIngress
 /// <param name="Model">The model that produced the response.</param>
 /// <param name="CorrelationId">Correlation id linking back to the routing telemetry event.</param>
 /// <param name="SessionId">The routed request's session id.</param>
+/// <param name="HasToolCalls">
+/// Whether the reply contained a tool call. A tool-only body (no text) stays uningested until the
+/// tool-loop phase; empty text with no tools is ingested as <c>no_text</c> / <c>empty</c>.
+/// </param>
 public sealed record QualityIngestContext(
     string ResponseText,
     string Prompt,
     string Model,
     string CorrelationId,
-    string SessionId);
+    string SessionId,
+    bool HasToolCalls = false);

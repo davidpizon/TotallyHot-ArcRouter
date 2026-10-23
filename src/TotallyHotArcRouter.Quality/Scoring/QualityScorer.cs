@@ -25,7 +25,7 @@ public sealed class QualityScorer : IQualityScorer
     {
         ArgumentNullException.ThrowIfNull(result);
 
-        var weights = _options.ResolveWeights(dimension);
+        var weights = _options.ResolveWeights(dimension: dimension, recipeId: result.RecipeId);
 
         var sSyntax = result.SyntaxValid ? 1.0 : 0.0;
         var sAnalysis = result.AnalysisScore is { } analysis ? Math.Clamp(value: analysis, 0.0, 1.0) : 0.0;

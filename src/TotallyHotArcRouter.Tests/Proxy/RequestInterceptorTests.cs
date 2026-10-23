@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using System.Text;
 using System.Text.Json;
+using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Proxy.Management;
@@ -1091,6 +1092,45 @@ public class RequestInterceptorTests
         Assert.All(collection: result.Candidates,
             action: c => Assert.NotEqual(expected: "stopped", actual: c.Route.ModelName));
         Assert.Contains(collection: result.Candidates, filter: c => c.Route.ModelName == "running");
+    }
+
+    [Fact]
+    public async Task ResolveModelRouteAsync_AutoSelect_ExcludesPinnedJudge()
+    {
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
+            ("local-judge", "lmstudio", "qwen"),
+            ("kimi-k2.5", "moonshot", "kimi-k2.5-upstream"));
+        var interceptor = new RequestInterceptor(
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
+            judgeOptions: new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions { ModelName = "local-judge" }));
+        var context = CreateContextWithBody("""{"model":"auto"}""");
+
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(expected: "kimi-k2.5", actual: result.Route!.ModelName);
+        Assert.DoesNotContain(collection: result.Candidates, filter: c => c.Route.ModelName == "local-judge");
+    }
+
+    [Fact]
+    public async Task ResolveModelRouteAsync_ExplicitPickOfPinnedJudge_StillResolves()
+    {
+        var resolver = ModelRouteResolverTestFactory.CreateWithModelList(
+            ("local-judge", "lmstudio", "qwen"),
+            ("kimi-k2.5", "moonshot", "kimi-k2.5-upstream"));
+        var interceptor = new RequestInterceptor(
+            logger: Mock.Of<ILogger<RequestInterceptor>>(),
+            modelRouteResolver: resolver,
+            judgeOptions: new StaticOptionsMonitor<JudgeOptions>(new JudgeOptions { ModelName = "local-judge" }));
+        var context = CreateContextWithBody("""{"model":"local-judge"}""");
+
+        var result = await interceptor.ResolveModelRouteAsync(context: context,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(expected: "local-judge", actual: result.Route!.ModelName);
     }
 
     private static DefaultHttpContext CreateContextWithBody(string body)

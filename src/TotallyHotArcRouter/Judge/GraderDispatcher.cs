@@ -78,7 +78,8 @@ public sealed class GraderDispatcher : IAsyncGraderDispatcher
                 Dimension: result.Dimension,
                 Model: result.Model,
                 StaticScore: result.UnifiedScore,
-                SyntaxAuthoritative: result.SyntaxAuthoritative);
+                SyntaxAuthoritative: result.SyntaxAuthoritative,
+                RecipeId: result.RecipeId);
 
             if (_queue.TryEnqueue(job))
             {

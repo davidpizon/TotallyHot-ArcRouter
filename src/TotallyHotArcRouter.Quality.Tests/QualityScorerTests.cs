@@ -45,6 +45,24 @@ public class QualityScorerTests
     }
 
     [Fact]
+    public void Score_BootstrapRecipe_EqualsClampedJudgeScore()
+    {
+        var scorer = CreateScorer();
+        var result = Authoritative(analysis: 0.2, judge: 0.8) with { RecipeId = GradingRecipes.Bootstrap };
+
+        Assert.Equal(0.8, actual: scorer.Score(result: result, dimension: "code_generation"), 10);
+    }
+
+    [Fact]
+    public void BootstrapWeights_SumToOne()
+    {
+        new QualityOptions().EnsureDimensionWeightsSumToOne();
+        Assert.Equal(1.0, actual: DimensionWeightOptions.Bootstrap.Judge);
+        Assert.Equal(0.0, actual: DimensionWeightOptions.Bootstrap.Syntax);
+        Assert.Equal(0.0, actual: DimensionWeightOptions.Bootstrap.Analysis);
+    }
+
+    [Fact]
     public void Score_AllWeightsZero_ReturnsZero()
     {
         var scorer = CreateScorer(WithWeights(dimension: "zero_weight", 0.0, 0.0, 0.0));

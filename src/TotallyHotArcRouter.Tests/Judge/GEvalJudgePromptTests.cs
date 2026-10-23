@@ -19,6 +19,17 @@ public class GEvalJudgePromptTests
         Assert.Contains("Completeness", prompt, StringComparison.Ordinal);
         Assert.Contains("fix the null ref", prompt, StringComparison.Ordinal);
         Assert.Contains("MUST score 1 or 2", prompt, StringComparison.Ordinal);
+        Assert.Contains("A longer answer is not a better one", prompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResolveDimensionHint_BootstrapRecipe_DoesNotRewardUnaskedCode()
+    {
+        var hint = GEvalJudgeClient.ResolveDimensionHint(
+            dimension: RouterDimension.CodeGeneration, recipeId: GradingRecipes.Bootstrap);
+
+        Assert.Contains("do not reward code", hint, StringComparison.Ordinal);
+        Assert.DoesNotContain("synthesized code", hint, StringComparison.Ordinal);
     }
 
     [Theory]

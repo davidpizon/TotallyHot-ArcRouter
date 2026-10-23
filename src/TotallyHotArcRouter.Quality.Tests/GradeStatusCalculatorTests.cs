@@ -80,4 +80,25 @@ public class GradeStatusCalculatorTests
             actual: GradeStatusCalculator.Calculate(
                 result: BaseResult(analysis: null), weights: Weights, false));
     }
+
+    [Fact]
+    public void Calculate_SyntaxWeightZero_IgnoresLowSyntaxConfidence()
+    {
+        var bootstrap = new DimensionWeightOptions { Syntax = 0.0, Analysis = 0.0, Judge = 1.0 };
+
+        Assert.Equal(GradeStatus.Complete,
+            actual: GradeStatusCalculator.Calculate(
+                result: BaseResult(analysis: null, syntaxConfidence: 0.1),
+                weights: bootstrap,
+                true));
+    }
+
+    [Fact]
+    public void Calculate_IncompleteReason_IsIncomplete()
+    {
+        var result = BaseResult() with { IncompleteReason = IncompleteReasons.NoJudge };
+
+        Assert.Equal(GradeStatus.Incomplete,
+            actual: GradeStatusCalculator.Calculate(result: result, weights: Weights, false));
+    }
 }

@@ -23,6 +23,14 @@ namespace TotallyHot.ArcRouter.Judge;
 /// <param name="AbstainedGraders">
 /// Comma-separated <c>grader:reason</c> pairs; empty on <see cref="GradeStatus.Complete"/>.
 /// </param>
+/// <param name="IncompleteReason">
+/// Why the grade is incomplete (queue_full, no_text, empty, no_judge, judge_is_answerer), or null on
+/// <see cref="GradeStatus.Complete"/>. Never stores question or response text.
+/// </param>
+/// <param name="GradeSource">Who produced the grade of record (<c>teacher</c>), or null when none ran.</param>
+/// <param name="ResponseHasCode">Whether the graded reply contained a fenced code block.</param>
+/// <param name="JudgeModel">The pinned judge model when a teacher score ran; null otherwise.</param>
+/// <param name="AnswerModel">The answering model; duplicates <paramref name="Model"/> for the receipt audit columns.</param>
 public sealed record GradeReceiptRecord(
     string CorrelationId,
     DateTimeOffset CreatedAtUtc,
@@ -38,4 +46,9 @@ public sealed record GradeReceiptRecord(
     string ScorerVersion,
     string? PromptVersion,
     string WeightsVersion,
-    string AbstainedGraders);
+    string AbstainedGraders,
+    string? IncompleteReason = null,
+    string? GradeSource = null,
+    bool ResponseHasCode = false,
+    string? JudgeModel = null,
+    string? AnswerModel = null);

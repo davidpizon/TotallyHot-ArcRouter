@@ -34,6 +34,27 @@ public interface ITranscriptStore
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Backfills the score and, when <paramref name="scorerVersion"/> is set, stamps that version onto
+    /// the row so the quality-rescan sweep does not overwrite a live non-code grade with null
+    /// (issue #304 / ADR-0027). Default forwards to the three-argument overload so existing fakes compile.
+    /// </summary>
+    /// <param name="correlationId">The correlation id shared with the row's <see cref="TranscriptRecord.CorrelationId"/>.</param>
+    /// <param name="score">The verifier's observed quality score in [0, 1].</param>
+    /// <param name="isJudgeScored">Whether the judge contributed a grade that fed <paramref name="score"/>.</param>
+    /// <param name="scorerVersion">
+    /// The current <c>Quality:ScorerVersion</c> to stamp, or <see langword="null"/> to leave the column
+    /// unchanged (the code-recipe live path).
+    /// </param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    Task UpdateOutcomeAsync(
+        string correlationId,
+        double? score,
+        bool isJudgeScored,
+        string? scorerVersion,
+        CancellationToken cancellationToken = default)
+        => UpdateOutcomeAsync(correlationId, score, isJudgeScored, cancellationToken);
+
+    /// <summary>
     /// Loads up to <paramref name="limit"/> transcript IDs where <c>memory_entry_id IS NULL AND score IS NOT NULL</c>,
     /// ordered by <c>id ASC</c> (oldest first), for embedding backfill by Phase T1d. Only rows with a session-file
     /// turn and a stored prompt length are returned: a row with no text to embed would otherwise head every batch

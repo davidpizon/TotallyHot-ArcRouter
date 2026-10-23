@@ -134,7 +134,7 @@ public class JudgeJoinDeadlockFixTests
 
     private static JudgeOptions JudgeOptions(int queueCapacity = 10)
     {
-        return new JudgeOptions { Enabled = true, QueueCapacity = queueCapacity };
+        return new JudgeOptions { Enabled = true, QueueCapacity = queueCapacity, ModelName = "free-judge-model" };
     }
 
     private static QualityResult Result(string correlationId = "corr-1")

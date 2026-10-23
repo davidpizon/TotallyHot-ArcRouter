@@ -1,4 +1,6 @@
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Router;
@@ -43,13 +45,19 @@ namespace TotallyHot.ArcRouter.Proxy;
 /// Amendment 1), consulted only when <see cref="Build"/> is asked to strip. <see langword="null"/> means no
 /// candidate is ever stripped - every request is forwarded as received, as before the amendment.
 /// </param>
+/// <param name="judgeOptions">
+/// Optional live judge pin. When <see cref="JudgeOptions.ModelName"/> is set, that model is removed from
+/// the auto-route candidate set (ADR-0027). An explicit client pick still reaches it via the named-model
+/// path, not this filter.
+/// </param>
 internal sealed class RoutingCandidateBuilder(
     ICircuitBreaker circuitBreaker,
     IModelRouteResolver modelRouteResolver,
     RouterMemory? routerMemory,
     IProviderInteractionStatusStore? interactionStatusStore,
     ILogger logger,
-    IModelFeatureSupportStore? featureSupportStore = null)
+    IModelFeatureSupportStore? featureSupportStore = null,
+    IOptionsMonitor<JudgeOptions>? judgeOptions = null)
 {
     /// <summary>
     /// The neutral prior assigned to a candidate with no recorded <see cref="RouterMemory"/> score yet
@@ -265,16 +273,19 @@ internal sealed class RoutingCandidateBuilder(
     /// <summary>
     /// The shared eligibility filter <see cref="RankEligibleModels"/> and
     /// <see cref="RequestInterceptor"/>'s <c>BuildRoutingCandidates</c> both build on: every
-    /// currently-configured model other than <paramref name="excludeModelNames"/>, excluding any whose
-    /// upstream target or provider is presently circuit-open, or whose provider or model has been
-    /// administratively disabled. See <see cref="RankEligibleModels"/>'s remarks for the full rationale
-    /// behind each check.
+    /// currently-configured model other than <paramref name="excludeModelNames"/> and the pinned judge
+    /// (ADR-0027), excluding any whose upstream target or provider is presently circuit-open, or whose
+    /// provider or model has been administratively disabled. See <see cref="RankEligibleModels"/>'s
+    /// remarks for the full rationale behind each check.
     /// </summary>
     /// <param name="excludeModelNames">Model names to omit from the result.</param>
     public List<(string ModelName, ResolvedModelRoute Route)> GetEligibleRoutes(
         IReadOnlyCollection<string> excludeModelNames)
     {
         var excluded = new HashSet<string>(collection: excludeModelNames, comparer: StringComparer.OrdinalIgnoreCase);
+        var pin = judgeOptions?.CurrentValue.ModelName;
+        if (!string.IsNullOrWhiteSpace(pin)) excluded.Add(pin);
+
         var eligible = new List<(string ModelName, ResolvedModelRoute Route)>();
 
         foreach (var candidate in modelRouteResolver.ListModels())

@@ -102,6 +102,39 @@ public class SqliteTranscriptStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateOutcomeAsync_WithScorerVersion_StampsTheVersionSoRescanSkipsTheRow()
+    {
+        var (database, store) = CreateEnabledStore();
+        await store.InsertAsync(record: MakeRecord("corr-prose"),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        await store.UpdateOutcomeAsync(
+            correlationId: "corr-prose",
+            score: 0.81,
+            isJudgeScored: true,
+            scorerVersion: "3.0",
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected: "3.0", actual: ReadScorerVersion(database: database, correlationId: "corr-prose"));
+        Assert.Equal(0.81, actual: ReadRow(database: database, correlationId: "corr-prose").Score!.Value, 6);
+        Assert.Empty(await store.LoadPendingQualityRescanAsync(scorerVersion: "3.0", 10,
+            cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task UpdateOutcomeAsync_WithoutScorerVersion_LeavesTheColumnNull()
+    {
+        var (database, store) = CreateEnabledStore();
+        await store.InsertAsync(record: MakeRecord("corr-code"),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        await store.UpdateOutcomeAsync(correlationId: "corr-code", 0.5, isJudgeScored: true,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Null(ReadScorerVersion(database: database, correlationId: "corr-code"));
+    }
+
+    [Fact]
     public async Task InsertAsync_ScoreLeftNullUntilBackfilled()
     {
         var database = CreateDatabase();
@@ -588,7 +621,7 @@ public class SqliteTranscriptStoreTests : IDisposable
     {
         // A row whose text carries no code block is ungradable, but must still be stamped - otherwise the
         // oldest-first sweep returns it again on every tick, forever.
-        var (_, store) = CreateEnabledStore();
+        var (database, store) = CreateEnabledStore();
         var id = await store.InsertAsync(record: MakeRecord("corr-ungradable"),
             cancellationToken: TestContext.Current.CancellationToken);
 
@@ -597,6 +630,7 @@ public class SqliteTranscriptStoreTests : IDisposable
 
         Assert.Empty(await store.LoadPendingQualityRescanAsync(scorerVersion: "v2", 10,
             cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Null(ReadRow(database: database, correlationId: "corr-ungradable").Score);
     }
 
     [Fact]

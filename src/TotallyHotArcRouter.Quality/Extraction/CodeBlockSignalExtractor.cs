@@ -84,6 +84,7 @@ public sealed class CodeBlockSignalExtractor : ISignalExtractor
             Dimension: dimension,
             Model: context.Model,
             CorrelationId: context.CorrelationId,
-            SessionId: context.SessionId);
+            SessionId: context.SessionId,
+            RecipeId: GradingRecipes.Code);
     }
 }

@@ -32,10 +32,10 @@ public sealed class JudgeOptions
 
     /// <summary>
     /// Gets the operator's chosen judge model, as a client-facing model name from the Providers screen.
-    /// Empty (the default) means <b>automatic</b>: <see cref="JudgeModelSelector"/> takes the first
-    /// eligible free model in configuration order. A name that is no longer eligible - its provider was
-    /// switched off, the model was stopped, or it disappeared upstream - also falls back to automatic
-    /// rather than failing, since a shadow-scoring path must degrade quietly. Overridden by the
+    /// Empty (the default) means no pin: <see cref="JudgeModelSelector"/> abstains and the grade is
+    /// <c>Incomplete</c> reason <c>no_judge</c> rather than falling back to some other agent (ADR-0027).
+    /// A name that is no longer eligible - its provider was switched off, the model was stopped, it is
+    /// paid, or it disappeared upstream - is the same abstention. Overridden by the
     /// <c>router_settings</c> row <see cref="Router.RouterSettingsStore.JudgeModelNameKey"/>.
     /// </summary>
     public string ModelName { get; init; } = string.Empty;
@@ -45,9 +45,9 @@ public sealed class JudgeOptions
     /// the auto-CoT cache guard. G1 scopes the auto-CoT generation-and-caching step down to a static
     /// per-dimension prompt constant (see <see cref="GEvalJudgeClient"/>'s remarks); this version still
     /// exists so a future prompt change is distinguishable in the shadow table. Defaults to
-    /// <c>g-eval-v1</c>.
+    /// <c>g-eval-v3-question-rubric-noncode</c> so code-recipe and bootstrap grades are distinguishable.
     /// </summary>
-    public string PromptVersion { get; init; } = "g-eval-v2-question-rubric";
+    public string PromptVersion { get; init; } = "g-eval-v3-question-rubric-noncode";
 
     /// <summary>
     /// Gets the time-to-live, in seconds, for an entry in <see cref="PendingResponseTextCache"/> before it

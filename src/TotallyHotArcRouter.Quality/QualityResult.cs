@@ -94,4 +94,32 @@ public sealed record QualityResult
     /// </summary>
     public IReadOnlyDictionary<string, string> GraderDegradedReasons { get; init; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Which grading recipe produced this result. Empty or <see cref="GradingRecipes.Code"/> is the #293
+    /// code mix; <see cref="GradingRecipes.Bootstrap"/> is judge-only and never trains a
+    /// <c>RouterDimension</c> tally (ADR-0027).
+    /// </summary>
+    public string RecipeId { get; init; } = GradingRecipes.Code;
+
+    /// <summary>
+    /// Why the grade is <see cref="GradeStatus.Incomplete"/>, or null when it is complete or the reason
+    /// already lives in <see cref="GraderDegradedReasons"/>. Written onto the receipt as
+    /// <c>incomplete_reason</c>.
+    /// </summary>
+    public string? IncompleteReason { get; init; }
+
+    /// <summary>
+    /// Who produced the grade of record. <see cref="GradeSources.Teacher"/> when the pinned judge filled
+    /// <see cref="JudgeScore"/> on a complete grade; null when no score was produced.
+    /// </summary>
+    public string? GradeSource { get; init; }
+
+    /// <summary>Whether the graded reply contained a fenced code block.</summary>
+    public bool ResponseHasCode { get; init; }
+
+    /// <summary>
+    /// The pinned judge model that produced <see cref="JudgeScore"/>, or null when the judge did not run.
+    /// </summary>
+    public string? JudgeModel { get; init; }
 }

@@ -134,6 +134,33 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     {
         ArgumentNullException.ThrowIfNull(result);
 
+        // Terminal Incomplete from ingress (queue_full / no_text / empty) is already decided; do not
+        // hold it for a judge that cannot change that reason.
+        if (!string.IsNullOrEmpty(result.IncompleteReason))
+        {
+            await WriteAsync(result: result, llmGraderWasAvailable: false, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        if (_judgeAvailability.IsAnswererTheJudge(result))
+        {
+            await WriteAsync(
+                result: result with { IncompleteReason = IncompleteReasons.JudgeIsAnswerer },
+                llmGraderWasAvailable: false,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (_judgeAvailability.IsJudgeEnabled() && _judgeAvailability.IsPinMissing())
+        {
+            await WriteAsync(
+                result: result with { IncompleteReason = IncompleteReasons.NoJudge },
+                llmGraderWasAvailable: false,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         // No correlation id means nothing could ever join to it, so holding it would only guarantee a
         // timeout later. Checked before DeterminePendingGraders - not just before the write - because
         // that call reaches IJudgeAvailability.WillJudge, which in the host resolves a judge backbone
@@ -475,13 +502,18 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     /// </summary>
     private async Task WriteAsync(QualityResult result, bool llmGraderWasAvailable, CancellationToken cancellationToken)
     {
-        var weights = _options.ResolveWeights(result.Dimension);
+        var weights = _options.ResolveWeights(dimension: result.Dimension, recipeId: result.RecipeId);
         var status = GradeStatusCalculator.Calculate(result: result, weights: weights,
             llmGraderWasAvailable: llmGraderWasAvailable);
+        var gradeSource = status == GradeStatus.Complete && result.JudgeScore.HasValue
+            ? GradeSources.Teacher
+            : result.GradeSource;
         var scored = result with
         {
             GradeStatus = status,
-            UnifiedScore = _scorer.Score(result: result, dimension: result.Dimension)
+            UnifiedScore = _scorer.Score(result: result, dimension: result.Dimension),
+            IncompleteReason = status == GradeStatus.Complete ? null : result.IncompleteReason,
+            GradeSource = gradeSource
         };
 
         try

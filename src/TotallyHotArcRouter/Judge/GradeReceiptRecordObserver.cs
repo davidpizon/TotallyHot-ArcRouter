@@ -73,6 +73,13 @@ public sealed class GradeReceiptRecordObserver : IQualityScoreObserver
         var newestForHmac = window?.NewestUserMessage;
         var questionHmac = _questionHmacHasher.TryCompute(newestForHmac);
         var promptVersion = result.JudgeScore.HasValue ? _judgeOptions.PromptVersion : null;
+        var weightsVersion = string.Equals(result.RecipeId, GradingRecipes.Bootstrap,
+            StringComparison.OrdinalIgnoreCase)
+            ? GradingRecipes.Bootstrap
+            : _qualityOptions.WeightsVersion;
+        var judgeModel = result.JudgeScore.HasValue
+            ? (string.IsNullOrWhiteSpace(result.JudgeModel) ? _judgeOptions.ModelName : result.JudgeModel)
+            : null;
 
         var receipt = new GradeReceiptRecord(
             CorrelationId: result.RequestCorrelationId,
@@ -88,8 +95,13 @@ public sealed class GradeReceiptRecordObserver : IQualityScoreObserver
             FingerprintRef: null,
             ScorerVersion: _qualityOptions.ScorerVersion,
             PromptVersion: promptVersion,
-            WeightsVersion: _qualityOptions.WeightsVersion,
-            AbstainedGraders: FormatAbstainedGraders(result));
+            WeightsVersion: weightsVersion,
+            AbstainedGraders: FormatAbstainedGraders(result),
+            IncompleteReason: result.GradeStatus == GradeStatus.Complete ? null : result.IncompleteReason,
+            GradeSource: result.GradeSource,
+            ResponseHasCode: result.ResponseHasCode,
+            JudgeModel: string.IsNullOrWhiteSpace(judgeModel) ? null : judgeModel,
+            AnswerModel: result.Model);
 
         await _store.UpsertAsync(record: receipt, cancellationToken: cancellationToken).ConfigureAwait(false);
 

@@ -110,6 +110,27 @@ public class RouterMemoryScoreObserverTests
     }
 
     [Fact]
+    public async Task ObserveAsync_BootstrapComplete_DoesNotWriteLiveDimensionTally()
+    {
+        var memory = new RouterMemory();
+        var observer = CreateObserver(memory);
+
+        await observer.ObserveAsync(result: new QualityResult
+        {
+            Dimension = "code_generation",
+            Model = "gpt-5.4",
+            UnifiedScore = 0.9,
+            GradeStatus = GradeStatus.Complete,
+            RecipeId = GradingRecipes.Bootstrap,
+            JudgeScore = 0.9
+        }, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Empty(memory.GetModelsForDimension("live:code_generation"));
+        Assert.Empty(memory.GetModelsForDimension("live:"));
+        Assert.Null(memory.GetAverageScore(dimension: "live:code_generation", model: "gpt-5.4"));
+    }
+
+    [Fact]
     public async Task ObserveAsync_EmptyCorrelationId_ObservesButDoesNotPublish()
     {
         var memory = new RouterMemory();

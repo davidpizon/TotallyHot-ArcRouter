@@ -296,7 +296,8 @@ internal sealed class RequestTelemetryPublisher
                 cancellationToken: cancellationToken,
                 responseText: responseText,
                 newestUserMessage: newestUserMessage,
-                subagentSignal: classification?.Subagent?.ToLabel()).ConfigureAwait(false);
+                subagentSignal: classification?.Subagent?.ToLabel(),
+                hasToolCalls: hasToolCalls).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -848,7 +849,8 @@ internal sealed class RequestTelemetryPublisher
         CancellationToken cancellationToken,
         string? responseText,
         string? newestUserMessage,
-        string? subagentSignal)
+        string? subagentSignal,
+        bool? hasToolCalls)
     {
         // What routing this request cost us, charged at the self-hosted rate (research-doc §5.1: TotTok is
         // router + model, so routing overhead is the router's to carry). Kept separate from
@@ -889,13 +891,18 @@ internal sealed class RequestTelemetryPublisher
         // Off-path, best-effort: hand the completed response to the quality verifier for static and
         // scoring. The ingress samples, extracts, and enqueues without blocking; it never throws. Reuses
         // the already-extracted (untruncated) response text so no second copy of the body is made.
-        if (_qualityIngress is not null && !string.IsNullOrEmpty(responseText))
-            _qualityIngress.TryIngest(new QualityIngestContext(
-                ResponseText: responseText,
-                Prompt: newestUserMessage ?? string.Empty,
-                Model: requestedModel,
-                CorrelationId: correlationId,
-                SessionId: sessionId));
+        if (_qualityIngress is not null)
+        {
+            var text = responseText ?? string.Empty;
+            if (text.Length > 0 || hasToolCalls != true)
+                _qualityIngress.TryIngest(new QualityIngestContext(
+                    ResponseText: text,
+                    Prompt: newestUserMessage ?? string.Empty,
+                    Model: requestedModel,
+                    CorrelationId: correlationId,
+                    SessionId: sessionId,
+                    HasToolCalls: hasToolCalls == true));
+        }
     }
 
     /// <summary>

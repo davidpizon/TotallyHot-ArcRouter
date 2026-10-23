@@ -77,11 +77,21 @@ public sealed class QualityOptions
     public Dictionary<string, DimensionWeightOptions> DimensionWeights { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Resolves the scoring weights for a dimension, falling back to a balanced default.</summary>
-    /// <param name="dimension">The dimension whose weights to resolve.</param>
+    /// <summary>
+    /// Resolves the scoring weights for a dimension and recipe. The bootstrap recipe is judge-only and
+    /// is not looked up in <see cref="DimensionWeights"/> (ADR-0027).
+    /// </summary>
+    /// <param name="dimension">The dimension whose weights to resolve (ignored for bootstrap).</param>
+    /// <param name="recipeId">
+    /// The grading recipe. <see cref="GradingRecipes.Bootstrap"/> returns
+    /// <see cref="DimensionWeightOptions.Bootstrap"/>; anything else uses the dimension table.
+    /// </param>
     /// <returns>The configured weights, or <see cref="DimensionWeightOptions.Default"/>.</returns>
-    public DimensionWeightOptions ResolveWeights(string dimension)
+    public DimensionWeightOptions ResolveWeights(string dimension, string? recipeId = null)
     {
+        if (string.Equals(recipeId, GradingRecipes.Bootstrap, StringComparison.OrdinalIgnoreCase))
+            return DimensionWeightOptions.Bootstrap;
+
         if (!string.IsNullOrEmpty(dimension) &&
             DimensionWeights.TryGetValue(key: dimension, value: out var weights)) return weights;
 
@@ -89,13 +99,15 @@ public sealed class QualityOptions
     }
 
     /// <summary>
-    /// Ensures every configured dimension's weights (and the default) sum to 1 within 1e-9. Called at
-    /// host startup so a misconfigured table fails fast rather than silently shifting effective weights.
+    /// Ensures every configured dimension's weights (and the default and bootstrap recipes) sum to 1
+    /// within 1e-9. Called at host startup so a misconfigured table fails fast rather than silently
+    /// shifting effective weights.
     /// </summary>
     /// <exception cref="InvalidOperationException">Thrown when any dimension's weights do not sum to 1.</exception>
     public void EnsureDimensionWeightsSumToOne()
     {
         DimensionWeightOptions.Default.EnsureSumsToOne(dimensionLabel: "(default)");
+        DimensionWeightOptions.Bootstrap.EnsureSumsToOne(dimensionLabel: GradingRecipes.Bootstrap);
         foreach (var (dimension, weights) in DimensionWeights)
             weights.EnsureSumsToOne(dimensionLabel: dimension);
     }
@@ -115,6 +127,12 @@ public sealed class DimensionWeightOptions
     /// (issue #293 starting weights).
     /// </summary>
     public static DimensionWeightOptions Default { get; } = new() { Syntax = 0.25, Analysis = 0.15, Judge = 0.60 };
+
+    /// <summary>
+    /// The temporary non-code recipe (issue #304 / ADR-0027): judge 1.0, syntax 0, analysis 0. Not a
+    /// <c>RouterDimension</c>. Stamped on receipts as <c>weights_version = bootstrap</c>.
+    /// </summary>
+    public static DimensionWeightOptions Bootstrap { get; } = new() { Syntax = 0.0, Analysis = 0.0, Judge = 1.0 };
 
     /// <summary>Weight applied to the structural-validity signal (s_syntax): does the snippet parse?</summary>
     public double Syntax { get; init; } = 0.25;

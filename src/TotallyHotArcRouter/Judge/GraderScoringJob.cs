@@ -16,10 +16,12 @@ namespace TotallyHot.ArcRouter.Judge;
 /// <param name="SyntaxAuthoritative">
 /// Whether a real parser rather than a heuristic produced <paramref name="StaticScore"/>'s syntax verdict.
 /// </param>
+/// <param name="RecipeId">The grading recipe snapshotted from the held <c>QualityResult</c>.</param>
 public sealed record GraderScoringJob(
     string CorrelationId,
     string GraderKey,
     string Dimension,
     string Model,
     double StaticScore,
-    bool SyntaxAuthoritative);
+    bool SyntaxAuthoritative,
+    string? RecipeId = null);

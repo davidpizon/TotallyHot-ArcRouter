@@ -112,7 +112,12 @@ public sealed class RouterMemoryDatabase
                                          scorer_version       TEXT    NOT NULL,
                                          prompt_version       TEXT    NULL,
                                          weights_version      TEXT    NOT NULL,
-                                         abstained_graders    TEXT    NOT NULL DEFAULT ''
+                                         abstained_graders    TEXT    NOT NULL DEFAULT '',
+                                         incomplete_reason    TEXT    NULL,
+                                         grade_source         TEXT    NULL,
+                                         response_has_code    INTEGER NOT NULL DEFAULT 0,
+                                         judge_model          TEXT    NULL,
+                                         answer_model         TEXT    NULL
                                      );
 
                                      CREATE INDEX IF NOT EXISTS ix_grade_receipts_created_at
@@ -367,6 +372,7 @@ public sealed class RouterMemoryDatabase
         MigrateEmbeddingModelColumn(connection);
         MigrateJudgeShadowScoreColumns(connection);
         MigrateGraderScoreQuestionColumns(connection);
+        MigrateGradeReceiptIssue304Columns(connection);
         MigrateIssue293LiveLearningPurge(connection);
         MigrateIssue319UntrustedJudgeProvenancePurge(connection);
     }
@@ -549,6 +555,37 @@ public sealed class RouterMemoryDatabase
         {
             using var alter = connection.CreateCommand();
             alter.CommandText = "ALTER TABLE grader_scores ADD COLUMN prompt_version TEXT NULL;";
+            alter.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>
+    /// Adds issue #304 receipt columns when missing: <c>incomplete_reason</c>, <c>grade_source</c>,
+    /// <c>response_has_code</c>, <c>judge_model</c>, <c>answer_model</c>. Guarded by
+    /// <c>PRAGMA table_info</c> so an existing database keeps its rows.
+    /// </summary>
+    private static void MigrateGradeReceiptIssue304Columns(SqliteConnection connection)
+    {
+        AddNullableTextColumn(connection: connection, table: "grade_receipts", column: "incomplete_reason");
+        AddNullableTextColumn(connection: connection, table: "grade_receipts", column: "grade_source");
+        if (!ColumnExists(connection: connection, table: "grade_receipts", column: "response_has_code"))
+        {
+            using var alter = connection.CreateCommand();
+            alter.CommandText = "ALTER TABLE grade_receipts ADD COLUMN response_has_code INTEGER NOT NULL DEFAULT 0;";
+            alter.ExecuteNonQuery();
+        }
+
+        AddNullableTextColumn(connection: connection, table: "grade_receipts", column: "judge_model");
+        AddNullableTextColumn(connection: connection, table: "grade_receipts", column: "answer_model");
+    }
+
+    /// <summary>Adds a nullable TEXT column when the table exists and the column does not.</summary>
+    private static void AddNullableTextColumn(SqliteConnection connection, string table, string column)
+    {
+        if (!ColumnExists(connection: connection, table: table, column: column))
+        {
+            using var alter = connection.CreateCommand();
+            alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} TEXT NULL;";
             alter.ExecuteNonQuery();
         }
     }
