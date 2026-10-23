@@ -472,3 +472,11 @@ Not in this issue's implementation. They are the follow-ups David asked to recor
    - Revisit pairwise judging. It stays out of this plan because the metrics assessment found the papers in conflict and position reversals above 40 percentage points. The follow-up has to say how order swap and abstention-on-disagreement would work before any pairwise score can train the router.
    - Use the length correlation the grader epoch already reports. This plan records length and does not change stored grades. The follow-up decides whether a measured length skew should change training, and how, without silently rewriting old receipts.
 2. **Harness thumbs.** Assess whether the router can poll or intercept a thumbs up or down from the user's harness. Do not build a rating control as part of that assessment. Agent switch and thanks are the feedback events until that assessment says a thumb is available and trustworthy. Re-asks and copy/apply stay excluded either way.
+
+## 12. Open question (2026-10-22, from #326)
+
+David deferred this from [#326](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/326) on 2026-10-22. It does not block #326. That plan's weight rule applies to whatever row is stored with `IsJudgeScored` false. This plan has to say which of its own grades those are.
+
+[#319](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/319) stamps `IsJudgeScored` from `JudgeScore.HasValue`. The bootstrap recipe in [§3.1](#31-how-a-request-is-recognized-without-a-fixed-list) is judge weight `1.0`, syntax `0`, analysis `0`, so a `Complete` bootstrap grade has a judge score. [§3.2](#32-who-grades) says that after takeover the local score fills the judge axis.
+
+Open: does that takeover write set `QualityResult.JudgeScore`, or does it fill the unified score and leave `JudgeScore` empty? A recipe whose judge weight is `0` would also leave `JudgeScore` empty. The non-code recipes in this plan do not start the judge axis at `0`.
