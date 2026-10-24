@@ -33,12 +33,14 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
                                   correlation_id, created_at_utc, dimension, model, grade_status, unified_score,
                                   question_hmac, question_chars, context_messages, question_truncated,
                                   fingerprint_ref, scorer_version, prompt_version, weights_version, abstained_graders,
-                                  incomplete_reason, grade_source, response_has_code, judge_model, answer_model)
+                                  incomplete_reason, grade_source, response_has_code, judge_model, answer_model,
+                                  question_vector_missing)
                               VALUES (
                                   $correlationId, $createdAtUtc, $dimension, $model, $gradeStatus, $unifiedScore,
                                   $questionHmac, $questionChars, $contextMessages, $questionTruncated,
                                   $fingerprintRef, $scorerVersion, $promptVersion, $weightsVersion, $abstainedGraders,
-                                  $incompleteReason, $gradeSource, $responseHasCode, $judgeModel, $answerModel)
+                                  $incompleteReason, $gradeSource, $responseHasCode, $judgeModel, $answerModel,
+                                  $questionVectorMissing)
                               ON CONFLICT(correlation_id) DO UPDATE SET
                                   created_at_utc = excluded.created_at_utc,
                                   dimension = excluded.dimension,
@@ -58,7 +60,8 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
                                   grade_source = excluded.grade_source,
                                   response_has_code = excluded.response_has_code,
                                   judge_model = excluded.judge_model,
-                                  answer_model = excluded.answer_model;
+                                  answer_model = excluded.answer_model,
+                                  question_vector_missing = excluded.question_vector_missing;
                               """;
         BindRecord(command, record);
         command.ExecuteNonQuery();
@@ -77,7 +80,8 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
                               SELECT correlation_id, created_at_utc, dimension, model, grade_status, unified_score,
                                      question_hmac, question_chars, context_messages, question_truncated,
                                      fingerprint_ref, scorer_version, prompt_version, weights_version, abstained_graders,
-                                     incomplete_reason, grade_source, response_has_code, judge_model, answer_model
+                                     incomplete_reason, grade_source, response_has_code, judge_model, answer_model,
+                                     question_vector_missing
                               FROM grade_receipts
                               WHERE correlation_id = $correlationId;
                               """;
@@ -161,6 +165,13 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
             value: (object?)record.JudgeModel ?? DBNull.Value);
         command.Parameters.AddWithValue(parameterName: "$answerModel",
             value: (object?)record.AnswerModel ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$questionVectorMissing",
+            value: record.QuestionVectorMissing switch
+            {
+                true => 1,
+                false => 0,
+                _ => DBNull.Value
+            });
     }
 
     private static GradeReceiptRecord ReadRecord(Microsoft.Data.Sqlite.SqliteDataReader reader)
@@ -185,6 +196,9 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
             GradeSource: reader.FieldCount > 16 && !reader.IsDBNull(16) ? reader.GetString(16) : null,
             ResponseHasCode: reader.FieldCount > 17 && !reader.IsDBNull(17) && reader.GetInt64(17) != 0,
             JudgeModel: reader.FieldCount > 18 && !reader.IsDBNull(18) ? reader.GetString(18) : null,
-            AnswerModel: reader.FieldCount > 19 && !reader.IsDBNull(19) ? reader.GetString(19) : null);
+            AnswerModel: reader.FieldCount > 19 && !reader.IsDBNull(19) ? reader.GetString(19) : null,
+            QuestionVectorMissing: reader.FieldCount > 20 && !reader.IsDBNull(20)
+                ? reader.GetInt64(20) != 0
+                : null);
     }
 }

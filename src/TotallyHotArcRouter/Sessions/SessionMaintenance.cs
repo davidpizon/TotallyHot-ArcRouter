@@ -42,6 +42,10 @@ public sealed record SessionClearResult(SessionDeletionResult Deletion, bool Que
 /// only removes session files.
 /// </param>
 /// <param name="memory">Deletes the learned embeddings those rows pointed at. Optional when no memory store exists.</param>
+/// <param name="responseVectors">
+/// Deletes sealed response vectors for the correlation ids the transcript delete returns. Optional when the
+/// table is not wired, so a test that only removes session files leaves it null.
+/// </param>
 public sealed class SessionMaintenance(
     Lazy<SessionStore> store,
     TranscriptDatabase database,
@@ -49,7 +53,8 @@ public sealed class SessionMaintenance(
     TimeSpan? drainTimeout = null,
     CaptureEpoch? epoch = null,
     ITranscriptStore? transcripts = null,
-    IMemoryEntryStore? memory = null)
+    IMemoryEntryStore? memory = null,
+    IResponseVectorStore? responseVectors = null)
 {
     private static readonly SessionDeletionResult NothingToDelete =
         new(0, WalTruncated: true, MasterKeyRotated: false);
@@ -128,7 +133,9 @@ public sealed class SessionMaintenance(
         ArgumentNullException.ThrowIfNull(archiveTurnIds);
         if (transcripts is null || archiveTurnIds.Count == 0 || !File.Exists(_databasePath)) return;
 
-        DeleteMemoryEntries(transcripts.DeleteByArchiveTurns(archiveTurnIds));
+        var links = transcripts.DeleteByArchiveTurns(archiveTurnIds);
+        DeleteMemoryEntries(links.MemoryEntryIds);
+        DeleteResponseVectors(links.CorrelationIds);
     }
 
     /// <summary>
@@ -147,8 +154,9 @@ public sealed class SessionMaintenance(
     /// <param name="archiveSessionIds">The sessions whose files were just removed.</param>
     private void OnSessionsDeleted(IReadOnlyCollection<Guid> archiveSessionIds)
     {
-        var memoryIds = transcripts!.DeleteByArchiveSessions(archiveSessionIds);
-        DeleteMemoryEntries(memoryIds);
+        var links = transcripts!.DeleteByArchiveSessions(archiveSessionIds);
+        DeleteMemoryEntries(links.MemoryEntryIds);
+        DeleteResponseVectors(links.CorrelationIds);
     }
 
     /// <summary>
@@ -164,6 +172,7 @@ public sealed class SessionMaintenance(
 
         var purge = transcripts.DeleteNullArchiveRows();
         DeleteMemoryEntries(purge.MemoryEntryIds);
+        DeleteResponseVectors(purge.CorrelationIds);
         return purge.DeletedRows;
     }
 
@@ -173,5 +182,13 @@ public sealed class SessionMaintenance(
     {
         if (memory is not null && memoryIds.Count > 0)
             memory.DeleteManyAsync(memoryIds).GetAwaiter().GetResult();
+    }
+
+    /// <summary>Deletes sealed response vectors for the correlation ids the transcript delete returned.</summary>
+    /// <param name="correlationIds">Correlation ids collected before the transcript rows were removed.</param>
+    private void DeleteResponseVectors(IReadOnlyList<string> correlationIds)
+    {
+        if (responseVectors is not null && correlationIds.Count > 0)
+            responseVectors.DeleteByCorrelationIds(correlationIds);
     }
 }

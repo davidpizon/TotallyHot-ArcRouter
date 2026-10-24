@@ -1,4 +1,5 @@
 using TotallyHot.ArcRouter.Proxy.Management;
+using TotallyHot.ArcRouter.Router;
 
 namespace TotallyHot.ArcRouter.Sessions;
 
@@ -73,6 +74,9 @@ public sealed class SecretStoreSessionMasterKeyStore : ISessionMasterKeyStore
         _store.Delete(NextName);
         _store.Delete(CurrentName);
         _store.Delete(RotationRequiredName);
+        // The response-vector key sits in the same store and is not a session master key. Shred destroys
+        // it here so a later start finds no key, deletes every response_vectors row, and starts a new one.
+        _store.Delete(ResponseVectorSeal.SecretName);
     }
 
     private byte[]? TryGet(string name) => _store.TryRead(name, out var value) ? Decode(value) : null;

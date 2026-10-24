@@ -101,7 +101,8 @@ public sealed class GradeReceiptRecordObserver : IQualityScoreObserver
             GradeSource: result.GradeSource,
             ResponseHasCode: result.ResponseHasCode,
             JudgeModel: string.IsNullOrWhiteSpace(judgeModel) ? null : judgeModel,
-            AnswerModel: result.Model);
+            AnswerModel: result.Model,
+            QuestionVectorMissing: result.QuestionVectorMissing);
 
         await _store.UpsertAsync(record: receipt, cancellationToken: cancellationToken).ConfigureAwait(false);
 
