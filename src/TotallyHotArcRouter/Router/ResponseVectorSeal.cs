@@ -11,7 +11,7 @@ namespace TotallyHot.ArcRouter.Router;
 internal static class ResponseVectorSeal
 {
     /// <summary>The <c>response_vectors</c> table name bound into associated data.</summary>
-    internal const string TableName = "response_vectors";
+    private const string TableName = "response_vectors";
 
     private const int NonceLength = 12;
     private const int TagLength = 16;
@@ -65,7 +65,7 @@ internal static class ResponseVectorSeal
         out float[] vector)
     {
         vector = [];
-        if (key is null || blob.Length < NonceLength + TagLength) return false;
+        if (blob.Length < NonceLength + TagLength) return false;
         if ((blob.Length - NonceLength - TagLength) % sizeof(float) != 0) return false;
 
         try

@@ -64,7 +64,13 @@ public sealed class SqliteResponseVectorStore : IResponseVectorStore, IScoreRete
         return Task.CompletedTask;
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Opens the row for <paramref name="correlationId"/>. A blob that fails authentication is logged and
+    /// deleted, and this returns false.
+    /// </summary>
+    /// <param name="correlationId">The request correlation id.</param>
+    /// <param name="vector">The opened vector when this returns <see langword="true"/>.</param>
+    /// <returns><see langword="true"/> when a row opened.</returns>
     public bool TryOpen(string correlationId, out float[] vector)
     {
         vector = [];
@@ -84,7 +90,9 @@ public sealed class SqliteResponseVectorStore : IResponseVectorStore, IScoreRete
         return false;
     }
 
-    /// <inheritdoc/>
+    /// <summary>Returns the sealed blob, for tests that must show it is not plaintext.</summary>
+    /// <param name="correlationId">The request correlation id.</param>
+    /// <returns>The sealed blob, or null when no row exists.</returns>
     public byte[]? ReadSealed(string correlationId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
@@ -115,17 +123,6 @@ public sealed class SqliteResponseVectorStore : IResponseVectorStore, IScoreRete
             command.ExecuteNonQuery();
         }
 
-        Truncate(connection);
-    }
-
-    /// <inheritdoc/>
-    public void DeleteAll()
-    {
-        _database.EnsureCreated();
-        using var connection = _database.OpenConnection();
-        using var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM response_vectors;";
-        command.ExecuteNonQuery();
         Truncate(connection);
     }
 
