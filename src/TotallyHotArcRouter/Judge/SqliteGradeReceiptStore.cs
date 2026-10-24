@@ -10,6 +10,14 @@ namespace TotallyHot.ArcRouter.Judge;
 /// </summary>
 public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
 {
+    private const string SelectColumns = """
+                                         correlation_id, created_at_utc, dimension, model, grade_status, unified_score,
+                                         question_hmac, question_chars, context_messages, question_truncated,
+                                         fingerprint_ref, scorer_version, prompt_version, weights_version, abstained_graders,
+                                         incomplete_reason, grade_source, response_has_code, judge_model, answer_model,
+                                         question_vector_missing, session_id, user_signal, spot_check, response_length_chars
+                                         """;
+
     private readonly RouterMemoryDatabase _database;
 
     /// <summary>Initializes a new instance of the <see cref="SqliteGradeReceiptStore"/> class.</summary>
@@ -34,13 +42,13 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
                                   question_hmac, question_chars, context_messages, question_truncated,
                                   fingerprint_ref, scorer_version, prompt_version, weights_version, abstained_graders,
                                   incomplete_reason, grade_source, response_has_code, judge_model, answer_model,
-                                  question_vector_missing)
+                                  question_vector_missing, session_id, user_signal, spot_check, response_length_chars)
                               VALUES (
                                   $correlationId, $createdAtUtc, $dimension, $model, $gradeStatus, $unifiedScore,
                                   $questionHmac, $questionChars, $contextMessages, $questionTruncated,
                                   $fingerprintRef, $scorerVersion, $promptVersion, $weightsVersion, $abstainedGraders,
                                   $incompleteReason, $gradeSource, $responseHasCode, $judgeModel, $answerModel,
-                                  $questionVectorMissing)
+                                  $questionVectorMissing, $sessionId, $userSignal, $spotCheck, $responseLengthChars)
                               ON CONFLICT(correlation_id) DO UPDATE SET
                                   created_at_utc = excluded.created_at_utc,
                                   dimension = excluded.dimension,
@@ -61,7 +69,11 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
                                   response_has_code = excluded.response_has_code,
                                   judge_model = excluded.judge_model,
                                   answer_model = excluded.answer_model,
-                                  question_vector_missing = excluded.question_vector_missing;
+                                  question_vector_missing = excluded.question_vector_missing,
+                                  session_id = excluded.session_id,
+                                  user_signal = excluded.user_signal,
+                                  spot_check = excluded.spot_check,
+                                  response_length_chars = excluded.response_length_chars;
                               """;
         BindRecord(command, record);
         command.ExecuteNonQuery();
@@ -76,20 +88,62 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
 
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = """
-                              SELECT correlation_id, created_at_utc, dimension, model, grade_status, unified_score,
-                                     question_hmac, question_chars, context_messages, question_truncated,
-                                     fingerprint_ref, scorer_version, prompt_version, weights_version, abstained_graders,
-                                     incomplete_reason, grade_source, response_has_code, judge_model, answer_model,
-                                     question_vector_missing
-                              FROM grade_receipts
-                              WHERE correlation_id = $correlationId;
-                              """;
+        command.CommandText = $"SELECT {SelectColumns} FROM grade_receipts WHERE correlation_id = $correlationId;";
         command.Parameters.AddWithValue(parameterName: "$correlationId", value: correlationId);
 
         using var reader = command.ExecuteReader();
         if (!reader.Read()) return Task.FromResult<GradeReceiptRecord?>(null);
 
+        return Task.FromResult<GradeReceiptRecord?>(ReadRecord(reader));
+    }
+
+    /// <inheritdoc/>
+    public Task<GradeReceiptRecord?> TryGetLatestCompleteInSessionAsync(
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"""
+                               SELECT {SelectColumns}
+                               FROM grade_receipts
+                               WHERE session_id = $sessionId AND grade_status = $status
+                               ORDER BY created_at_utc DESC
+                               LIMIT 1;
+                               """;
+        command.Parameters.AddWithValue("$sessionId", sessionId);
+        command.Parameters.AddWithValue("$status", nameof(GradeStatus.Complete));
+
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) return Task.FromResult<GradeReceiptRecord?>(null);
+        return Task.FromResult<GradeReceiptRecord?>(ReadRecord(reader));
+    }
+
+    /// <inheritdoc/>
+    public Task<GradeReceiptRecord?> TryGetLatestCompleteByQuestionHmacAsync(
+        string questionHmac,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(questionHmac);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"""
+                               SELECT {SelectColumns}
+                               FROM grade_receipts
+                               WHERE question_hmac = $hmac AND grade_status = $status
+                               ORDER BY created_at_utc DESC
+                               LIMIT 1;
+                               """;
+        command.Parameters.AddWithValue("$hmac", questionHmac);
+        command.Parameters.AddWithValue("$status", nameof(GradeStatus.Complete));
+
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) return Task.FromResult<GradeReceiptRecord?>(null);
         return Task.FromResult<GradeReceiptRecord?>(ReadRecord(reader));
     }
 
@@ -172,6 +226,13 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
                 false => 0,
                 _ => DBNull.Value
             });
+        command.Parameters.AddWithValue(parameterName: "$sessionId",
+            value: (object?)record.SessionId ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$userSignal",
+            value: (object?)record.UserSignal ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$spotCheck", value: record.SpotCheck ? 1 : 0);
+        command.Parameters.AddWithValue(parameterName: "$responseLengthChars",
+            value: (object?)record.ResponseLengthChars ?? DBNull.Value);
     }
 
     private static GradeReceiptRecord ReadRecord(Microsoft.Data.Sqlite.SqliteDataReader reader)
@@ -199,6 +260,10 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
             AnswerModel: reader.FieldCount > 19 && !reader.IsDBNull(19) ? reader.GetString(19) : null,
             QuestionVectorMissing: reader.FieldCount > 20 && !reader.IsDBNull(20)
                 ? reader.GetInt64(20) != 0
-                : null);
+                : null,
+            SessionId: reader.FieldCount > 21 && !reader.IsDBNull(21) ? reader.GetString(21) : null,
+            UserSignal: reader.FieldCount > 22 && !reader.IsDBNull(22) ? reader.GetString(22) : null,
+            SpotCheck: reader.FieldCount > 23 && !reader.IsDBNull(23) && reader.GetInt64(23) != 0,
+            ResponseLengthChars: reader.FieldCount > 24 && !reader.IsDBNull(24) ? reader.GetInt32(24) : null);
     }
 }

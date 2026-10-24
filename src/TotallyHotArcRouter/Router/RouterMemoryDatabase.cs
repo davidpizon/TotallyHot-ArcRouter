@@ -118,7 +118,11 @@ public sealed class RouterMemoryDatabase
                                          response_has_code    INTEGER NOT NULL DEFAULT 0,
                                          judge_model          TEXT    NULL,
                                          answer_model         TEXT    NULL,
-                                         question_vector_missing INTEGER NULL
+                                         question_vector_missing INTEGER NULL,
+                                         session_id           TEXT    NULL,
+                                         user_signal          TEXT    NULL,
+                                         spot_check           INTEGER NOT NULL DEFAULT 0,
+                                         response_length_chars INTEGER NULL
                                      );
 
                                      CREATE TABLE IF NOT EXISTS response_vectors (
@@ -384,6 +388,7 @@ public sealed class RouterMemoryDatabase
         MigrateJudgeShadowScoreColumns(connection);
         MigrateGraderScoreQuestionColumns(connection);
         MigrateGradeReceiptIssue304Columns(connection);
+        MigrateMemoryEntryCorrelationIdColumn(connection);
         MigrateIssue293LiveLearningPurge(connection);
         MigrateIssue319UntrustedJudgeProvenancePurge(connection);
     }
@@ -595,6 +600,46 @@ public sealed class RouterMemoryDatabase
             alter.CommandText = "ALTER TABLE grade_receipts ADD COLUMN question_vector_missing INTEGER NULL;";
             alter.ExecuteNonQuery();
         }
+
+        AddNullableTextColumn(connection: connection, table: "grade_receipts", column: "session_id");
+        AddNullableTextColumn(connection: connection, table: "grade_receipts", column: "user_signal");
+        if (!ColumnExists(connection: connection, table: "grade_receipts", column: "spot_check"))
+        {
+            using var alter = connection.CreateCommand();
+            alter.CommandText = "ALTER TABLE grade_receipts ADD COLUMN spot_check INTEGER NOT NULL DEFAULT 0;";
+            alter.ExecuteNonQuery();
+        }
+
+        if (!ColumnExists(connection: connection, table: "grade_receipts", column: "response_length_chars"))
+        {
+            using var alter = connection.CreateCommand();
+            alter.CommandText = "ALTER TABLE grade_receipts ADD COLUMN response_length_chars INTEGER NULL;";
+            alter.ExecuteNonQuery();
+        }
+
+        using var index = connection.CreateCommand();
+        index.CommandText = """
+                            CREATE INDEX IF NOT EXISTS ix_grade_receipts_session_created
+                                ON grade_receipts (session_id, created_at_utc);
+                            CREATE INDEX IF NOT EXISTS ix_grade_receipts_question_hmac_created
+                                ON grade_receipts (question_hmac, created_at_utc);
+                            """;
+        index.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Adds <c>memory_entries.correlation_id</c> so a dispute can delete one neighbor by that id
+    /// (issue #304 phase 4). Null on rows written before the column existed.
+    /// </summary>
+    private static void MigrateMemoryEntryCorrelationIdColumn(SqliteConnection connection)
+    {
+        AddNullableTextColumn(connection: connection, table: "memory_entries", column: "correlation_id");
+        using var index = connection.CreateCommand();
+        index.CommandText = """
+                            CREATE INDEX IF NOT EXISTS ix_memory_entries_correlation_id
+                                ON memory_entries (correlation_id);
+                            """;
+        index.ExecuteNonQuery();
     }
 
     /// <summary>Adds a nullable TEXT column when the table exists and the column does not.</summary>

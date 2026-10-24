@@ -37,7 +37,7 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-                              SELECT id, embedding, chosen_model, score, cost, verifier_trace, created_at_utc, is_exploratory, propensity, dimension, is_judge_scored, embedding_model
+                              SELECT id, embedding, chosen_model, score, cost, verifier_trace, created_at_utc, is_exploratory, propensity, dimension, is_judge_scored, embedding_model, correlation_id
                               FROM memory_entries
                               ORDER BY id ASC;
                               """;
@@ -58,8 +58,8 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-                              INSERT INTO memory_entries (embedding, chosen_model, score, cost, verifier_trace, created_at_utc, is_exploratory, propensity, dimension, is_judge_scored, embedding_model)
-                              VALUES ($embedding, $chosenModel, $score, $cost, $verifierTrace, $createdAtUtc, $isExploratory, $propensity, $dimension, $isJudgeScored, $embeddingModel);
+                              INSERT INTO memory_entries (embedding, chosen_model, score, cost, verifier_trace, created_at_utc, is_exploratory, propensity, dimension, is_judge_scored, embedding_model, correlation_id)
+                              VALUES ($embedding, $chosenModel, $score, $cost, $verifierTrace, $createdAtUtc, $isExploratory, $propensity, $dimension, $isJudgeScored, $embeddingModel, $correlationId);
                               SELECT last_insert_rowid();
                               """;
         command.Parameters.AddWithValue(parameterName: "$embedding", value: ToBytes(entry.TaskEmbedding));
@@ -75,6 +75,8 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         command.Parameters.AddWithValue(parameterName: "$isJudgeScored", value: entry.IsJudgeScored ? 1 : 0);
         command.Parameters.AddWithValue(parameterName: "$embeddingModel",
             value: (object?)entry.EmbeddingModel ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$correlationId",
+            value: (object?)entry.CorrelationId ?? DBNull.Value);
 
         var id = (long)command.ExecuteScalar()!;
         return Task.FromResult(entry with { Id = id });
@@ -173,10 +175,12 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         var dimension = reader.IsDBNull(9) ? null : reader.GetString(9);
         var isJudgeScored = reader.GetInt64(10) != 0;
         var embeddingModel = reader.IsDBNull(11) ? null : reader.GetString(11);
+        var correlationId = reader.FieldCount > 12 && !reader.IsDBNull(12) ? reader.GetString(12) : null;
 
         return new MemoryEntry(Id: id, TaskEmbedding: embedding, ChosenModel: chosenModel, Score: score, Cost: cost,
             VerifierTrace: verifierTrace, CreatedAtUtc: createdAtUtc, IsExploratory: isExploratory,
-            Propensity: propensity, Dimension: dimension, IsJudgeScored: isJudgeScored, EmbeddingModel: embeddingModel);
+            Propensity: propensity, Dimension: dimension, IsJudgeScored: isJudgeScored,
+            EmbeddingModel: embeddingModel, CorrelationId: correlationId);
     }
 
     /// <summary>

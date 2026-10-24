@@ -51,6 +51,10 @@ namespace TotallyHot.ArcRouter.Router;
 /// so kNN retrieval and both trainers would silently blend meaningless numbers. See
 /// <see cref="MatchesEmbeddingModel"/> for how null is interpreted.
 /// </param>
+/// <param name="CorrelationId">
+/// The request correlation id that produced this entry, so a later dispute can delete this one neighbor
+/// (issue #304 phase 4). Null on rows written before the column existed.
+/// </param>
 public sealed record MemoryEntry(
     long Id,
     float[] TaskEmbedding,
@@ -63,7 +67,8 @@ public sealed record MemoryEntry(
     double Propensity = 1.0,
     string? Dimension = null,
     bool IsJudgeScored = false,
-    string? EmbeddingModel = null)
+    string? EmbeddingModel = null,
+    string? CorrelationId = null)
 {
     /// <summary>
     /// Whether <see cref="TaskEmbedding"/> is comparable to a vector freshly produced by the embedding
