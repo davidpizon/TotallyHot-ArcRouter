@@ -67,7 +67,10 @@ public sealed class QualityGrader : IQualityGrader
                 QuestionPresent = questionPresent,
                 RecipeId = GradingRecipes.Bootstrap,
                 IncompleteReason = request.IncompleteReason,
-                ResponseHasCode = false
+                ResponseHasCode = false,
+                ResponseLengthChars = string.IsNullOrEmpty(request.ResponseText)
+                    ? null
+                    : request.ResponseText.Length
             };
         }
         else
@@ -91,7 +94,10 @@ public sealed class QualityGrader : IQualityGrader
                 DegradedReason = syntax.IsAuthoritative ? null : "heuristic-syntax-check",
                 RecipeId = string.IsNullOrEmpty(request.RecipeId) ? GradingRecipes.Code : request.RecipeId,
                 IncompleteReason = request.IncompleteReason,
-                ResponseHasCode = true
+                ResponseHasCode = true,
+                ResponseLengthChars = string.IsNullOrEmpty(request.ResponseText)
+                    ? null
+                    : request.ResponseText.Length
             };
         }
 

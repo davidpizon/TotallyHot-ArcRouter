@@ -210,6 +210,12 @@ public sealed record ProxyMiddlewareDependencies
     public PendingConversationWindowCache? PendingConversationWindowCache { get; init; }
 
     /// <summary>
+    /// Optional user-signal evaluator for agent-switch and thanks feedback (issue #304 phase 4). When
+    /// null, no prior grade is disputed from this path.
+    /// </summary>
+    public UserGradeFeedbackService? UserGradeFeedback { get; init; }
+
+    /// <summary>
     /// Optional opt-in transcript store (docs/router/self-organizing-classification-plan.md Phase
     /// T1a/T1b). When supplied and transcript capture is enabled, one row is inserted per served request
     /// with the prompt/response text, classification, cost, and provenance already in scope at this

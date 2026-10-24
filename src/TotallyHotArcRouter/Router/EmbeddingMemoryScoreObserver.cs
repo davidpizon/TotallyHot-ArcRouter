@@ -134,7 +134,9 @@ public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
             dimension: recoveredDimension,
             // Issue #319: judge-scored means JudgeScore.HasValue, the same boolean TranscriptScoreObserver
             // passes. A Complete grade with no judge score is still written; the flag is false.
-            isJudgeScored: result.JudgeScore.HasValue).ConfigureAwait(false);
+            isJudgeScored: result.JudgeScore.HasValue,
+            // Issue #304 phase 4: dispute deletes this neighbor by correlation id.
+            correlationId: result.RequestCorrelationId).ConfigureAwait(false);
 
         if (_logger.IsEnabled(LogLevel.Information))
             _logger.LogInformation(

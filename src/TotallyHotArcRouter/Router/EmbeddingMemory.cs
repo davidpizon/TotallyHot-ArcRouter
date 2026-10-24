@@ -145,15 +145,18 @@ public sealed class EmbeddingMemory : IDisposable
     /// <paramref name="propensity"/>, not before it, so every existing positional call site keeps
     /// compiling unchanged.
     /// </param>
-/// <param name="isJudgeScored">
-/// Whether the row is recorded as judge-grounded. <see cref="EmbeddingMemoryScoreObserver"/> passes
-/// <c>result.JudgeScore.HasValue</c> (issue #319), the same boolean <c>TranscriptScoreObserver</c> passes.
-/// A <see cref="TotallyHot.ArcRouter.Quality.GradeStatus.Complete"/> grade with no judge score is stored
-/// with this flag <see langword="false"/>. That stamp does not by itself close
-/// docs/router/geval-shadow-scoring-plan.md's G3. Defaults to <see langword="false"/> so every other
-/// caller (bootstrap import, tests) keeps recording rows as execution/heuristic-grounded without change.
-/// Placed last so every existing positional call site keeps compiling unchanged.
-/// </param>
+    /// <param name="isJudgeScored">
+    /// Whether the row is recorded as judge-grounded. <see cref="EmbeddingMemoryScoreObserver"/> passes
+    /// <c>result.JudgeScore.HasValue</c> (issue #319), the same boolean <c>TranscriptScoreObserver</c> passes.
+    /// A <see cref="TotallyHot.ArcRouter.Quality.GradeStatus.Complete"/> grade with no judge score is stored
+    /// with this flag <see langword="false"/>. That stamp does not by itself close
+    /// docs/router/geval-shadow-scoring-plan.md's G3. Defaults to <see langword="false"/> so every other
+    /// caller (bootstrap import, tests) keeps recording rows as execution/heuristic-grounded without change.
+    /// </param>
+    /// <param name="correlationId">
+    /// The request correlation id, stored so a later dispute can delete this neighbor (issue #304 phase 4).
+    /// Placed last so every existing positional call site keeps compiling unchanged.
+    /// </param>
     public async Task<MemoryEntry> AddEntryAsync(
         float[] taskEmbedding,
         string chosenModel,
@@ -164,7 +167,8 @@ public sealed class EmbeddingMemory : IDisposable
         bool isExploratory = false,
         double propensity = 1.0,
         string? dimension = null,
-        bool isJudgeScored = false)
+        bool isJudgeScored = false,
+        string? correlationId = null)
     {
         ArgumentNullException.ThrowIfNull(taskEmbedding);
         ArgumentException.ThrowIfNullOrWhiteSpace(chosenModel);
@@ -174,7 +178,8 @@ public sealed class EmbeddingMemory : IDisposable
                 0, TaskEmbedding: taskEmbedding, ChosenModel: chosenModel, Score: score, Cost: cost,
                 VerifierTrace: verifierTrace, CreatedAtUtc: DateTimeOffset.UtcNow,
                 IsExploratory: isExploratory, Propensity: propensity, Dimension: dimension,
-                IsJudgeScored: isJudgeScored, EmbeddingModel: _embeddingClient.ModelIdentity),
+                IsJudgeScored: isJudgeScored, EmbeddingModel: _embeddingClient.ModelIdentity,
+                CorrelationId: correlationId),
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
         lock (_syncLock)
@@ -185,6 +190,22 @@ public sealed class EmbeddingMemory : IDisposable
         await TrimToCurrentCapacityAsync(cancellationToken).ConfigureAwait(false);
 
         return persisted;
+    }
+
+    /// <summary>
+    /// Drops in-memory neighbors for <paramref name="correlationId"/> after a dispute deleted their
+    /// persisted rows (issue #304 phase 4). A no-op when none match.
+    /// </summary>
+    /// <param name="correlationId">The disputed turn's correlation id.</param>
+    public void RemoveByCorrelationId(string correlationId)
+    {
+        if (string.IsNullOrEmpty(correlationId)) return;
+
+        lock (_syncLock)
+        {
+            _entries.RemoveAll(entry =>
+                string.Equals(entry.CorrelationId, correlationId, StringComparison.Ordinal));
+        }
     }
 
     /// <summary>

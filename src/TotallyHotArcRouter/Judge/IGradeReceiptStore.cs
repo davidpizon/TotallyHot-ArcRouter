@@ -15,4 +15,26 @@ public interface IGradeReceiptStore : IScoreRetentionStore
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>The stored receipt, or <see langword="null"/> when none exists.</returns>
     Task<GradeReceiptRecord?> TryGetAsync(string correlationId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The newest <see cref="Quality.GradeStatus.Complete"/> receipt in <paramref name="sessionId"/>,
+    /// for the thanks detector (issue #304 phase 4).
+    /// </summary>
+    /// <param name="sessionId">The session to search.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>The latest complete receipt, or null when none exists.</returns>
+    Task<GradeReceiptRecord?> TryGetLatestCompleteInSessionAsync(
+        string sessionId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The newest <see cref="Quality.GradeStatus.Complete"/> receipt whose question HMAC matches
+    /// <paramref name="questionHmac"/>, for the agent-switch detector (issue #304 phase 4).
+    /// </summary>
+    /// <param name="questionHmac">The keyed hash of the newest user message.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>The latest matching complete receipt, or null when none exists.</returns>
+    Task<GradeReceiptRecord?> TryGetLatestCompleteByQuestionHmacAsync(
+        string questionHmac,
+        CancellationToken cancellationToken = default);
 }

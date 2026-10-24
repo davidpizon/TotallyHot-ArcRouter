@@ -245,6 +245,7 @@ internal static class ProxyServiceCollectionExtensions
             PendingResponseLengthCache = sp.GetService<PendingValueCache<int>>(),
             PendingPromptCache = sp.GetService<PendingPromptCache>(),
             PendingConversationWindowCache = sp.GetService<PendingConversationWindowCache>(),
+            UserGradeFeedback = sp.GetService<UserGradeFeedbackService>(),
             TranscriptStore = sp.GetService<ITranscriptStore>(),
             InFlightGauge = sp.GetService<InFlightRequestGauge>(),
             RoutingOptionsMonitor = sp.GetService<IOptionsMonitor<RoutingOptions>>(),

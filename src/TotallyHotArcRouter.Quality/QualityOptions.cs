@@ -73,6 +73,19 @@ public sealed class QualityOptions
     /// </summary>
     public string WeightsVersion { get; init; } = "3.0-judge-heavy";
 
+    /// <summary>
+    /// Midpoint of the normalized score used as the contradiction cutoff for user signals (issue #304
+    /// phase 4). An agent switch against a grade at or above this value, or thanks against a grade below
+    /// it, marks the receipt <c>disputed</c>.
+    /// </summary>
+    public double ContradictionCutoff { get; init; } = 0.5;
+
+    /// <summary>
+    /// Maximum trimmed character length for the thanks detector (issue #304 phase 4). Longer messages
+    /// are never treated as thanks.
+    /// </summary>
+    public int ThanksMaxChars { get; init; } = 80;
+
     /// <summary>Per-dimension scoring weights, keyed by dimension name.</summary>
     public Dictionary<string, DimensionWeightOptions> DimensionWeights { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);

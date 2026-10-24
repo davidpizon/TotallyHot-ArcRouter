@@ -47,6 +47,12 @@ public static class IncompleteReasons
 
     /// <summary>The answering model is the pinned judge; that response is never graded.</summary>
     public const string JudgeIsAnswerer = "judge_is_answerer";
+
+    /// <summary>
+    /// A counted user signal contradicted the grade of record (issue #304 phase 4). Scores stay for
+    /// audit; the row does not train.
+    /// </summary>
+    public const string Disputed = "disputed";
 }
 
 /// <summary>Who produced the grade of record on a receipt (issue #304). Null when no score was produced.</summary>
@@ -54,4 +60,17 @@ public static class GradeSources
 {
     /// <summary>The pinned free teacher produced <see cref="QualityResult.JudgeScore"/>.</summary>
     public const string Teacher = "teacher";
+}
+
+/// <summary>
+/// Counted user or implicit feedback events stored on <c>grade_receipts.user_signal</c> (issue #304
+/// phase 4). Not a grade axis and not a 1–5 score.
+/// </summary>
+public static class UserSignals
+{
+    /// <summary>An explicit client pick of another model for the same question HMAC.</summary>
+    public const string AgentSwitch = "agent_switch";
+
+    /// <summary>A short next-turn thanks / "that worked" message in the same session.</summary>
+    public const string Thanks = "thanks";
 }

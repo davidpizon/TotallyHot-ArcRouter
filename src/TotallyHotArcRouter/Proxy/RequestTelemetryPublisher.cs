@@ -49,6 +49,7 @@ internal sealed class RequestTelemetryPublisher
     private readonly IUsageExtractor _usageExtractor;
     private readonly IUsageLedger? _usageLedger;
     private readonly IOptionsMonitor<BodyExcerptOptions>? _bodyExcerptOptions;
+    private readonly UserGradeFeedbackService? _userGradeFeedback;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RequestTelemetryPublisher"/> class, taking exactly the
@@ -81,7 +82,8 @@ internal sealed class RequestTelemetryPublisher
         PendingConversationWindowCache? pendingConversationWindowCache = null,
         IOptionsMonitor<PortfolioGraderOptions>? portfolioGraderOptionsMonitor = null,
         PendingValueCache<int>? pendingResponseLengthCache = null,
-        IOptionsMonitor<BodyExcerptOptions>? bodyExcerptOptions = null)
+        IOptionsMonitor<BodyExcerptOptions>? bodyExcerptOptions = null,
+        UserGradeFeedbackService? userGradeFeedback = null)
     {
         _logger = logger;
         _sessionIdResolver = sessionIdResolver;
@@ -108,6 +110,7 @@ internal sealed class RequestTelemetryPublisher
         _portfolioGraderOptionsMonitor = portfolioGraderOptionsMonitor;
         _selfHostedRouterPricePerMillionTokens = selfHostedRouterPricePerMillionTokens;
         _bodyExcerptOptions = bodyExcerptOptions;
+        _userGradeFeedback = userGradeFeedback;
     }
 
     /// <summary>
@@ -205,6 +208,18 @@ internal sealed class RequestTelemetryPublisher
                 isExploratory: isExploratory,
                 propensity: propensity,
                 classification: classification);
+
+        // Issue #304 phase 4: agent-switch / thanks against a prior Complete receipt. Best-effort.
+        var feedbackMessage = !string.IsNullOrWhiteSpace(taskText) ? taskText : newestUserMessage;
+        var isExplicitPick = resolutionReason == RoutingSubstitutionReason.None &&
+                             !UserGradeFeedback.IsAutoModelName(requestedModelName);
+        var isToolContinuation = RequestBodyHasToolContinuation(requestBody);
+        _userGradeFeedback?.TryApply(
+            sessionId: sessionId,
+            newestUserMessage: feedbackMessage,
+            isExplicitClientPick: isExplicitPick,
+            requestedModel: requestedModelName,
+            isToolChainContinuation: isToolContinuation);
 
         var published = new PublishedTurn(
             SessionId: sessionId,
@@ -937,6 +952,37 @@ internal sealed class RequestTelemetryPublisher
         else
             UsageMetrics.UnpricedRequestsTotal.Add(1,
                 tag: new KeyValuePair<string, object?>(key: "provider", value: provider));
+    }
+
+    /// <summary>
+    /// Whether the request messages already carry a tool result or tool call, so an explicit model
+    /// change is a tool-chain continuation rather than an agent switch (issue #304 phase 4).
+    /// </summary>
+    private static bool RequestBodyHasToolContinuation(JsonObject? requestBody)
+    {
+        if (requestBody?["messages"] is not JsonArray messages) return false;
+
+        foreach (var node in messages)
+        {
+            if (node is not JsonObject message) continue;
+            var role = message["role"]?.GetValue<string>();
+            if (string.Equals(role, "tool", StringComparison.OrdinalIgnoreCase)) return true;
+
+            if (message["tool_calls"] is JsonArray { Count: > 0 }) return true;
+
+            if (message["content"] is JsonArray content)
+            {
+                foreach (var block in content)
+                {
+                    var type = block?["type"]?.GetValue<string>();
+                    if (string.Equals(type, "tool_result", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(type, "tool_use", StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

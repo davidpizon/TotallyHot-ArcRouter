@@ -59,6 +59,8 @@ internal static class JudgeServiceCollectionExtensions
         services.AddSingleton<PendingGraderBackboneCache>();
         services.AddSingleton<IGraderScoreStore, SqliteGraderScoreStore>();
         services.AddSingleton<IGradeReceiptStore, SqliteGradeReceiptStore>();
+        services.AddSingleton<GradeDisputeService>();
+        services.AddSingleton<UserGradeFeedbackService>();
         services.AddSingleton<GraderScoreRecordObserver>();
         services.AddSingleton<GradeReceiptRecordObserver>();
         services.AddSingleton<IGraderReliabilityAnalyzer, GraderReliabilityAnalyzer>();

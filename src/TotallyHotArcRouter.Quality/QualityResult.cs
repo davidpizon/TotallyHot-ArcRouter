@@ -137,4 +137,22 @@ public sealed record QualityResult
     /// share this instance, and the reader must stamp the flag before the kNN observer takes the vector.
     /// </summary>
     public bool? QuestionVectorMissing { get; set; }
+
+    /// <summary>
+    /// Character length of the graded response text, stored on the receipt and reported for verbosity
+    /// audits. Never added into <see cref="UnifiedScore"/> (issue #304 phase 4).
+    /// </summary>
+    public int? ResponseLengthChars { get; init; }
+
+    /// <summary>
+    /// Whether this row was drawn for the random teacher spot-check. Phase 4 only persists the column;
+    /// the 5% draw stays phase 8, so grade-time writes leave this false.
+    /// </summary>
+    public bool SpotCheck { get; init; }
+
+    /// <summary>
+    /// A counted user signal later attached to this grade (<see cref="UserSignals"/>), or null when none
+    /// has been recorded yet.
+    /// </summary>
+    public string? UserSignal { get; init; }
 }
