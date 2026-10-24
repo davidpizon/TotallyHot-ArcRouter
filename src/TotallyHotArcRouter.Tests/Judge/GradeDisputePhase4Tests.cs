@@ -143,10 +143,10 @@ public sealed class GradeDisputePhase4Tests
             Logger = logger;
         }
 
-        public RouterMemoryDatabase Database { get; }
+        private RouterMemoryDatabase Database { get; }
         public SqliteGradeReceiptStore Receipts { get; }
         public SqliteResponseVectorStore Vectors { get; }
-        public EmbeddingMemory Memory { get; }
+        private EmbeddingMemory Memory { get; }
         public GradeDisputeService Dispute { get; }
         public CapturingLogger Logger { get; }
 

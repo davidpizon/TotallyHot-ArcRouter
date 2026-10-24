@@ -617,16 +617,14 @@ public sealed class RouterMemoryDatabase
             alter.ExecuteNonQuery();
         }
 
-        using (var index = connection.CreateCommand())
-        {
-            index.CommandText = """
-                                CREATE INDEX IF NOT EXISTS ix_grade_receipts_session_created
-                                    ON grade_receipts (session_id, created_at_utc);
-                                CREATE INDEX IF NOT EXISTS ix_grade_receipts_question_hmac_created
-                                    ON grade_receipts (question_hmac, created_at_utc);
-                                """;
-            index.ExecuteNonQuery();
-        }
+        using var index = connection.CreateCommand();
+        index.CommandText = """
+                            CREATE INDEX IF NOT EXISTS ix_grade_receipts_session_created
+                                ON grade_receipts (session_id, created_at_utc);
+                            CREATE INDEX IF NOT EXISTS ix_grade_receipts_question_hmac_created
+                                ON grade_receipts (question_hmac, created_at_utc);
+                            """;
+        index.ExecuteNonQuery();
     }
 
     /// <summary>

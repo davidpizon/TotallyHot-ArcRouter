@@ -64,7 +64,7 @@ public sealed class GradeDisputeService
                                          user_signal = $signal
                                      WHERE correlation_id = $correlationId;
                                      """;
-                update.Parameters.AddWithValue("$status", GradeStatus.Incomplete.ToString());
+                update.Parameters.AddWithValue("$status", nameof(GradeStatus.Incomplete));
                 update.Parameters.AddWithValue("$reason", IncompleteReasons.Disputed);
                 update.Parameters.AddWithValue("$signal", userSignal);
                 update.Parameters.AddWithValue("$correlationId", correlationId);

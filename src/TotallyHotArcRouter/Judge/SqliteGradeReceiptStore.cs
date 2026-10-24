@@ -115,7 +115,7 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
                                LIMIT 1;
                                """;
         command.Parameters.AddWithValue("$sessionId", sessionId);
-        command.Parameters.AddWithValue("$status", GradeStatus.Complete.ToString());
+        command.Parameters.AddWithValue("$status", nameof(GradeStatus.Complete));
 
         using var reader = command.ExecuteReader();
         if (!reader.Read()) return Task.FromResult<GradeReceiptRecord?>(null);
@@ -140,7 +140,7 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
                                LIMIT 1;
                                """;
         command.Parameters.AddWithValue("$hmac", questionHmac);
-        command.Parameters.AddWithValue("$status", GradeStatus.Complete.ToString());
+        command.Parameters.AddWithValue("$status", nameof(GradeStatus.Complete));
 
         using var reader = command.ExecuteReader();
         if (!reader.Read()) return Task.FromResult<GradeReceiptRecord?>(null);
