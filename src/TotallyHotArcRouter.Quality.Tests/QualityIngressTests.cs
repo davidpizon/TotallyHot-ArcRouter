@@ -165,7 +165,8 @@ public class QualityIngressTests
 
         var observed = await submitted.Task.WaitAsync(TimeSpan.FromSeconds(2),
             TestContext.Current.CancellationToken);
-        AssertTerminal(observed: observed, reason: IncompleteReasons.DeferredToLoop);
+        Assert.Equal(expected: IncompleteReasons.DeferredToLoop, actual: observed.IncompleteReason);
+        AssertLearnsNothing(observed);
         queue.Verify(expression: q => q.TryEnqueue(It.IsAny<QualityRequest>()), times: Times.Never);
         extractor.Verify(expression: e => e.Extract(It.IsAny<SignalExtractionContext>()), times: Times.Never);
     }
@@ -185,7 +186,8 @@ public class QualityIngressTests
 
         var observed = await submitted.Task.WaitAsync(TimeSpan.FromSeconds(2),
             TestContext.Current.CancellationToken);
-        AssertTerminal(observed: observed, reason: IncompleteReasons.DeferredToLoop);
+        Assert.Equal(expected: IncompleteReasons.DeferredToLoop, actual: observed.IncompleteReason);
+        AssertLearnsNothing(observed);
         queue.Verify(expression: q => q.TryEnqueue(It.IsAny<QualityRequest>()), times: Times.Never);
     }
 
@@ -204,7 +206,8 @@ public class QualityIngressTests
 
         var observed = await submitted.Task.WaitAsync(TimeSpan.FromSeconds(2),
             TestContext.Current.CancellationToken);
-        AssertTerminal(observed: observed, reason: IncompleteReasons.LoopUnlinked);
+        Assert.Equal(expected: IncompleteReasons.LoopUnlinked, actual: observed.IncompleteReason);
+        AssertLearnsNothing(observed);
         queue.Verify(expression: q => q.TryEnqueue(It.IsAny<QualityRequest>()), times: Times.Never);
         extractor.Verify(expression: e => e.Extract(It.IsAny<SignalExtractionContext>()), times: Times.Never);
     }
@@ -225,7 +228,8 @@ public class QualityIngressTests
 
         var observed = await submitted.Task.WaitAsync(TimeSpan.FromSeconds(2),
             TestContext.Current.CancellationToken);
-        AssertTerminal(observed: observed, reason: IncompleteReasons.LoopUnlinked);
+        Assert.Equal(expected: IncompleteReasons.LoopUnlinked, actual: observed.IncompleteReason);
+        AssertLearnsNothing(observed);
         queue.Verify(expression: q => q.TryEnqueue(It.IsAny<QualityRequest>()), times: Times.Never);
     }
 
@@ -310,9 +314,8 @@ public class QualityIngressTests
         return (ingress, extractor, queue, submitted);
     }
 
-    private static void AssertTerminal(QualityResult observed, string reason)
+    private static void AssertLearnsNothing(QualityResult observed)
     {
-        Assert.Equal(expected: reason, actual: observed.IncompleteReason);
         Assert.Equal(expected: GradeStatus.Incomplete, actual: observed.GradeStatus);
         Assert.Equal(expected: GradingRecipes.Bootstrap, actual: observed.RecipeId);
         Assert.Null(observed.JudgeScore);
