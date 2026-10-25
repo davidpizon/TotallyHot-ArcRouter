@@ -59,6 +59,8 @@ public class SqliteMemoryEntryStoreTests : IDisposable
         var second = await store.AppendAsync(entry: MakeEntry(embedding: [0, 1, 0], model: "model-b"),
             cancellationToken: TestContext.Current.CancellationToken);
 
+        Assert.NotNull(first);
+        Assert.NotNull(second);
         Assert.True(second.Id > first.Id);
     }
 
@@ -78,7 +80,7 @@ public class SqliteMemoryEntryStoreTests : IDisposable
         Assert.Equal(expected: embedding, actual: entry.TaskEmbedding);
         Assert.Equal(expected: "model-c", actual: entry.ChosenModel);
         Assert.Equal(0.87, actual: entry.Score, 6);
-        Assert.Equal(0.0042, actual: entry.Cost, 6);
+        Assert.Equal(0.0042, actual: entry.Cost!.Value, 6);
         Assert.Equal(expected: "trace-details", actual: entry.VerifierTrace);
         Assert.False(entry.IsExploratory);
         Assert.Equal(1.0, actual: entry.Propensity, 6);
@@ -213,6 +215,7 @@ public class SqliteMemoryEntryStoreTests : IDisposable
         var store = new SqliteMemoryEntryStore(_database);
         var toDelete = await store.AppendAsync(entry: MakeEntry(embedding: [1, 0, 0], model: "model-delete-me"),
             cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(toDelete);
         await store.AppendAsync(entry: MakeEntry(embedding: [0, 1, 0], model: "model-keep"),
             cancellationToken: TestContext.Current.CancellationToken);
 

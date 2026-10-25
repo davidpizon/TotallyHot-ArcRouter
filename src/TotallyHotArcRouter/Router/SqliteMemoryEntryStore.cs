@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Globalization;
+using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Storage;
 
 namespace TotallyHot.ArcRouter.Router;
@@ -50,13 +51,29 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
     }
 
     /// <inheritdoc/>
-    public Task<MemoryEntry> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
+    public Task<MemoryEntry?> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entry);
         cancellationToken.ThrowIfCancellationRequested();
 
         using var connection = _database.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+
+        // Issue #304 phase 5: re-check disputed inside the same transaction as the insert so a dispute
+        // that lands between ObserveAsync and this write cannot slip a neighbor row in.
+        if (!string.IsNullOrEmpty(entry.CorrelationId) &&
+            IsDisputed(connection: connection, transaction: transaction, correlationId: entry.CorrelationId))
+        {
+            transaction.Commit();
+            _logger.LogDebug(
+                message:
+                "Skipped embedding-memory append for disputed correlation {CorrelationId}.",
+                entry.CorrelationId);
+            return Task.FromResult<MemoryEntry?>(null);
+        }
+
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
                               INSERT INTO memory_entries (embedding, chosen_model, score, cost, verifier_trace, created_at_utc, is_exploratory, propensity, dimension, is_judge_scored, embedding_model, correlation_id)
                               VALUES ($embedding, $chosenModel, $score, $cost, $verifierTrace, $createdAtUtc, $isExploratory, $propensity, $dimension, $isJudgeScored, $embeddingModel, $correlationId);
@@ -65,7 +82,7 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         command.Parameters.AddWithValue(parameterName: "$embedding", value: ToBytes(entry.TaskEmbedding));
         command.Parameters.AddWithValue(parameterName: "$chosenModel", value: entry.ChosenModel);
         command.Parameters.AddWithValue(parameterName: "$score", value: entry.Score);
-        command.Parameters.AddWithValue(parameterName: "$cost", value: entry.Cost);
+        command.Parameters.AddWithValue(parameterName: "$cost", value: (object?)entry.Cost ?? DBNull.Value);
         command.Parameters.AddWithValue(parameterName: "$verifierTrace",
             value: (object?)entry.VerifierTrace ?? DBNull.Value);
         command.Parameters.AddWithValue(parameterName: "$createdAtUtc", value: entry.CreatedAtUtc.ToString("O"));
@@ -79,7 +96,8 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
             value: (object?)entry.CorrelationId ?? DBNull.Value);
 
         var id = (long)command.ExecuteScalar()!;
-        return Task.FromResult(entry with { Id = id });
+        transaction.Commit();
+        return Task.FromResult<MemoryEntry?>(entry with { Id = id });
     }
 
     /// <inheritdoc/>
@@ -133,6 +151,26 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
     }
 
     /// <summary>
+    /// Whether <paramref name="correlationId"/> is already disputed on <c>grade_receipts</c>, checked
+    /// under <paramref name="transaction"/> so the following insert sees the same snapshot.
+    /// </summary>
+    private static bool IsDisputed(SqliteConnection connection, SqliteTransaction transaction, string correlationId)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+                              SELECT 1 FROM grade_receipts
+                              WHERE correlation_id = $correlationId
+                                AND incomplete_reason = $reason
+                              LIMIT 1;
+                              """;
+        command.Parameters.AddWithValue(parameterName: "$correlationId", value: correlationId);
+        command.Parameters.AddWithValue(parameterName: "$reason", value: IncompleteReasons.Disputed);
+        return command.ExecuteScalar() is not null;
+    }
+
+
+    /// <summary>
     /// Truncates the write-ahead log right after a delete so evicted vectors cannot survive in the
     /// <c>-wal</c> file. A busy log is not an error: the delete succeeded and the startup checkpoint
     /// finishes the job, so it is logged and not retried here.
@@ -167,7 +205,7 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         var embedding = FromBytes((byte[])reader["embedding"]);
         var chosenModel = reader.GetString(2);
         var score = reader.GetDouble(3);
-        var cost = reader.GetDouble(4);
+        var cost = reader.IsDBNull(4) ? (double?)null : reader.GetDouble(4);
         var verifierTrace = reader.IsDBNull(5) ? null : reader.GetString(5);
         var createdAtUtc = DateTimeOffset.Parse(input: reader.GetString(6), null, styles: DateTimeStyles.RoundtripKind);
         var isExploratory = reader.GetInt64(7) != 0;

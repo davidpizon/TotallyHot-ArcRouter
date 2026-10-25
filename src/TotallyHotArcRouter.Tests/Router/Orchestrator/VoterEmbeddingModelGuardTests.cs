@@ -146,9 +146,9 @@ public sealed class VoterEmbeddingModelGuardTests
         }
 
         /// <inheritdoc/>
-        public Task<MemoryEntry> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
+        public Task<MemoryEntry?> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(entry);
+            return Task.FromResult<MemoryEntry?>(entry);
         }
 
         /// <inheritdoc/>

@@ -9,7 +9,11 @@ namespace TotallyHot.ArcRouter.Router;
 /// <param name="TaskEmbedding">The task's embedding vector, unit-normalized by <see cref="Embeddings.IEmbeddingClient"/>.</param>
 /// <param name="ChosenModel">The model selected for this task.</param>
 /// <param name="Score">The Verifier's observed quality score in [0, 1].</param>
-/// <param name="Cost">The monetary cost κ of serving this task with <paramref name="ChosenModel"/>.</param>
+/// <param name="Cost">
+/// The recorded monetary cost κ of serving this task with <paramref name="ChosenModel"/>, or
+/// <see langword="null"/> when unknown (issue #304 phase 5). A reported zero stays zero; unknown is
+/// never stored as zero.
+/// </param>
 /// <param name="VerifierTrace">The Verifier's trace/explanation for <paramref name="Score"/>, if recorded.</param>
 /// <param name="CreatedAtUtc">When this entry was written, in UTC.</param>
 /// <param name="IsExploratory">
@@ -60,7 +64,7 @@ public sealed record MemoryEntry(
     float[] TaskEmbedding,
     string ChosenModel,
     double Score,
-    double Cost,
+    double? Cost,
     string? VerifierTrace,
     DateTimeOffset CreatedAtUtc,
     bool IsExploratory = false,

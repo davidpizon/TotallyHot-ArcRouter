@@ -704,9 +704,12 @@ internal sealed class RequestTelemetryPublisher
         // docs/router/self-organizing-classification-plan.md Phase T1c: mirrors the embedding cache
         // Set above exactly - same correlation id, same "this is the earliest point the value is known
         // alongside the correlation id" reasoning - so EmbeddingMemoryScoreObserver can recover the real
-        // cost and provenance once the verifier score arrives instead of writing cost 0.0 / certain
-        // non-exploratory provenance unconditionally.
-        _pendingRequestCostCache?.Set(correlationId, estimatedCostUsd ?? 0m);
+        // cost and provenance once the verifier score arrives. Unknown cost stays absent (issue #304
+        // phase 5); certain non-exploratory provenance remains the miss default for the other cache.
+        // Issue #304 phase 5: the decimal cache cannot hold null; absence means unknown. A reported
+        // zero is still Set. Do not collapse null into 0m.
+        if (estimatedCostUsd is { } knownCost)
+            _pendingRequestCostCache?.Set(correlationId, knownCost);
         _pendingRequestProvenanceCache?.Set(correlationId,
             new PendingRequestProvenance(isExploratory, propensity, classification?.Dimension));
 

@@ -16,10 +16,12 @@ public interface IMemoryEntryStore
 
     /// <summary>
     /// Persists a new entry and returns it with its store-assigned <see cref="MemoryEntry.Id"/>.
+    /// Returns <see langword="null"/> when the row was skipped because its correlation id is
+    /// already marked <c>disputed</c> on <c>grade_receipts</c> (issue #304 phase 5).
     /// </summary>
     /// <param name="entry">The entry to persist. Its <see cref="MemoryEntry.Id"/> is ignored.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
-    Task<MemoryEntry> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default);
+    Task<MemoryEntry?> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Deletes a previously persisted entry by id, used to enforce the FIFO 20,000-entry bound.
