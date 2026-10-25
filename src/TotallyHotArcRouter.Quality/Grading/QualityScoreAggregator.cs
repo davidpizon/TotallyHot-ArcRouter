@@ -134,8 +134,8 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     {
         ArgumentNullException.ThrowIfNull(result);
 
-        // Terminal Incomplete from ingress (queue_full / no_text / empty) is already decided; do not
-        // hold it for a judge that cannot change that reason.
+        // Terminal Incomplete from ingress (queue_full, no_text, empty, deferred_to_loop,
+        // loop_unlinked) is already decided; do not hold it for a judge that cannot change that reason.
         if (!string.IsNullOrEmpty(result.IncompleteReason))
         {
             await WriteAsync(result: result, llmGraderWasAvailable: false, cancellationToken: cancellationToken)

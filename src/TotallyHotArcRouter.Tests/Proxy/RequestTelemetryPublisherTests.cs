@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Quality.Ingress;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Router.Classification;
 using TotallyHot.ArcRouter.Proxy;
@@ -412,6 +413,104 @@ public class RequestTelemetryPublisherTests
         Assert.Null(transcriptStore.LastInserted?.HasToolCalls);
     }
 
+    [Fact]
+    public async Task PublishAsync_ToolOnlyReply_ReachesIngressAsAToolCallWithNoText()
+    {
+        var ingress = new CapturingQualityIngress();
+        var publisher = CreatePublisher(qualityIngress: ingress);
+        var request = """{"messages":[{"role":"user","content":"what is the weather"}]}""";
+
+        await publisher.PublishAsync(
+            context: CreateContext(sessionId: "session-phase6-tool-only"),
+            route: CreateRoute(provider: "openai", true),
+            requestedModelName: "primary",
+            isFallback: false,
+            telemetryShapeProvider: "openai",
+            rewrittenRequestBody: Encoding.UTF8.GetBytes(request),
+            capturedResponseBytes: """{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{}"}}]}}]}"""u8.ToArray(),
+            nativeResponseBytes: null,
+            isStreaming: false,
+            latencyToHeadersMs: 10,
+            totalDurationMs: 20,
+            statusCode: 200,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, ingress.Calls);
+        Assert.NotNull(ingress.Last);
+        Assert.True(ingress.Last.HasToolCalls);
+        Assert.Equal(string.Empty, ingress.Last.ResponseText);
+        Assert.False(ingress.Last.FollowsToolResults);
+    }
+
+    [Fact]
+    public async Task PublishAsync_TextAfterToolResults_MarksFollowsToolResultsWithoutReadingIds()
+    {
+        var ingress = new CapturingQualityIngress();
+        var publisher = CreatePublisher(qualityIngress: ingress);
+        var request = """
+            {"messages":[
+              {"role":"user","content":"what is the weather"},
+              {"role":"assistant","tool_calls":[{"id":"c1","type":"function","function":{"name":"get_weather","arguments":"{}"}}]},
+              {"role":"tool","tool_call_id":"not-c1","content":"72F and the tool payload"}
+            ]}
+            """;
+
+        await publisher.PublishAsync(
+            context: CreateContext(sessionId: "session-phase6-unlinked"),
+            route: CreateRoute(provider: "openai", true),
+            requestedModelName: "primary",
+            isFallback: false,
+            telemetryShapeProvider: "openai",
+            rewrittenRequestBody: Encoding.UTF8.GetBytes(request),
+            capturedResponseBytes: """{"choices":[{"message":{"role":"assistant","content":"It is 72F."}}]}"""u8.ToArray(),
+            nativeResponseBytes: null,
+            isStreaming: false,
+            latencyToHeadersMs: 10,
+            totalDurationMs: 20,
+            statusCode: 200,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(ingress.Last);
+        Assert.Equal("It is 72F.", ingress.Last.ResponseText);
+        Assert.True(ingress.Last.FollowsToolResults);
+        Assert.DoesNotContain(expectedSubstring: "72F and the tool payload", actualString: ingress.Last.Prompt);
+    }
+
+    [Fact]
+    public async Task PublishAsync_PlainTextAfterAnOlderToolResult_DoesNotFollowToolResults()
+    {
+        var ingress = new CapturingQualityIngress();
+        var publisher = CreatePublisher(qualityIngress: ingress);
+        var request = """
+            {"messages":[
+              {"role":"user","content":"what is the weather"},
+              {"role":"tool","tool_call_id":"c1","content":"72F"},
+              {"role":"assistant","content":"It is 72F."},
+              {"role":"user","content":"now write a poem about rain"}
+            ]}
+            """;
+
+        await publisher.PublishAsync(
+            context: CreateContext(sessionId: "session-phase6-plain"),
+            route: CreateRoute(provider: "openai", true),
+            requestedModelName: "primary",
+            isFallback: false,
+            telemetryShapeProvider: "openai",
+            rewrittenRequestBody: Encoding.UTF8.GetBytes(request),
+            capturedResponseBytes: """{"choices":[{"message":{"role":"assistant","content":"Rain falls."}}]}"""u8.ToArray(),
+            nativeResponseBytes: null,
+            isStreaming: false,
+            latencyToHeadersMs: 10,
+            totalDurationMs: 20,
+            statusCode: 200,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.NotNull(ingress.Last);
+        Assert.Equal("Rain falls.", ingress.Last.ResponseText);
+        Assert.Equal("now write a poem about rain", ingress.Last.Prompt);
+        Assert.False(ingress.Last.FollowsToolResults);
+    }
+
     /// <summary>
     /// #165 phase 2: the transcript row follows capture, not Adaptive Routing, and stores the archive ids the
     /// capture minted.
@@ -698,7 +797,8 @@ public class RequestTelemetryPublisherTests
         PendingResponseTextCache? pendingResponseTextCache = null,
         PendingPromptCache? pendingPromptCache = null,
         IOptionsMonitor<JudgeOptions>? judgeOptionsMonitor = null,
-        IOptionsMonitor<PortfolioGraderOptions>? portfolioGraderOptionsMonitor = null)
+        IOptionsMonitor<PortfolioGraderOptions>? portfolioGraderOptionsMonitor = null,
+        IQualityIngress? qualityIngress = null)
     {
         return new RequestTelemetryPublisher(
             logger: NullLogger.Instance,
@@ -708,7 +808,7 @@ public class RequestTelemetryPublisherTests
             usageExtractor: new UsageExtractor(),
             responseTextExtractor: new ResponseTextExtractor(),
             telemetryPublisher: telemetryPublisher ?? new FakeTelemetryPublisher(),
-            qualityIngress: null,
+            qualityIngress: qualityIngress,
             spendTracker: NullSpendTracker.Instance,
             priceLookup: null,
             budgetStore: budgetStore,
@@ -759,6 +859,20 @@ public class RequestTelemetryPublisherTests
         public Task PublishLogLineAsync(LogLineEvent logLine, CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>Records the context handed to quality ingress.</summary>
+    private sealed class CapturingQualityIngress : IQualityIngress
+    {
+        public QualityIngestContext? Last { get; private set; }
+
+        public int Calls { get; private set; }
+
+        public void TryIngest(QualityIngestContext context)
+        {
+            Calls++;
+            Last = context;
         }
     }
 

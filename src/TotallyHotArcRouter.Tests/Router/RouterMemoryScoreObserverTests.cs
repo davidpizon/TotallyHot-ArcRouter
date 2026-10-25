@@ -67,6 +67,37 @@ public class RouterMemoryScoreObserverTests
     }
 
     [Fact]
+    public async Task ObserveAsync_LoopReceipts_DoNotUpdateTheLiveTally()
+    {
+        var memory = new RouterMemory();
+        var observer = CreateObserver(memory);
+
+        await observer.ObserveAsync(result: new QualityResult
+            {
+                Dimension = "code_generation",
+                Model = "gpt-5.4",
+                UnifiedScore = 0.9,
+                GradeStatus = GradeStatus.Incomplete,
+                IncompleteReason = IncompleteReasons.DeferredToLoop,
+                RecipeId = GradingRecipes.Bootstrap
+            },
+            cancellationToken: TestContext.Current.CancellationToken);
+        await observer.ObserveAsync(result: new QualityResult
+            {
+                Dimension = string.Empty,
+                Model = "gpt-5.4",
+                UnifiedScore = 0.9,
+                GradeStatus = GradeStatus.Incomplete,
+                IncompleteReason = IncompleteReasons.LoopUnlinked,
+                RecipeId = GradingRecipes.Bootstrap
+            },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Null(memory.GetAverageScore(dimension: "live:code_generation", model: "gpt-5.4"));
+        Assert.Empty(memory.GetModelsForDimension("live:"));
+    }
+
+    [Fact]
     public async Task ObserveAsync_PublishesQualitySignalWithCorrelationId()
     {
         var memory = new RouterMemory();

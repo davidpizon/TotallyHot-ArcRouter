@@ -60,8 +60,12 @@ public sealed class QualityIngress : IQualityIngress
 
             var text = context.ResponseText;
 
-            // Tool-only bodies stay uningested until the tool-loop phase (issue #304 phase 6).
-            if (context.HasToolCalls && string.IsNullOrWhiteSpace(text)) return;
+            // A tool call with no text has nothing to grade. The receipt is stored; nothing learns.
+            if (context.HasToolCalls && string.IsNullOrWhiteSpace(text))
+            {
+                SubmitTerminal(context, IncompleteReasons.DeferredToLoop);
+                return;
+            }
 
             if (string.IsNullOrEmpty(text))
             {
@@ -72,6 +76,14 @@ public sealed class QualityIngress : IQualityIngress
             if (string.IsNullOrWhiteSpace(text))
             {
                 SubmitTerminal(context, IncompleteReasons.Empty);
+                return;
+            }
+
+            // The reply is text and the newest request turn is tool results. The starting question
+            // waits on the chain ADR, so this phase does not grade the reply and does not invent one.
+            if (context.FollowsToolResults)
+            {
+                SubmitTerminal(context, IncompleteReasons.LoopUnlinked);
                 return;
             }
 

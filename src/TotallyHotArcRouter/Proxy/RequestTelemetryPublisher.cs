@@ -214,6 +214,9 @@ internal sealed class RequestTelemetryPublisher
         var isExplicitPick = resolutionReason == RoutingSubstitutionReason.None &&
                              !UserGradeFeedback.IsAutoModelName(requestedModelName);
         var isToolContinuation = RequestBodyHasToolContinuation(requestBody);
+        // Phase 6 grades nothing on a tool-result turn. This is the newest turn only, not the
+        // any-tool-in-history check phase 4 uses to ignore an agent switch inside a loop.
+        var followsToolResults = ToolResultTurn.NewestTurnIsToolResults(requestBody);
         _userGradeFeedback?.TryApply(
             sessionId: sessionId,
             newestUserMessage: feedbackMessage,
@@ -312,7 +315,8 @@ internal sealed class RequestTelemetryPublisher
                 responseText: responseText,
                 newestUserMessage: newestUserMessage,
                 subagentSignal: classification?.Subagent?.ToLabel(),
-                hasToolCalls: hasToolCalls).ConfigureAwait(false);
+                hasToolCalls: hasToolCalls,
+                followsToolResults: followsToolResults).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -865,7 +869,8 @@ internal sealed class RequestTelemetryPublisher
         string? responseText,
         string? newestUserMessage,
         string? subagentSignal,
-        bool? hasToolCalls)
+        bool? hasToolCalls,
+        bool followsToolResults)
     {
         // What routing this request cost us, charged at the self-hosted rate (research-doc §5.1: TotTok is
         // router + model, so routing overhead is the router's to carry). Kept separate from
@@ -909,14 +914,14 @@ internal sealed class RequestTelemetryPublisher
         if (_qualityIngress is not null)
         {
             var text = responseText ?? string.Empty;
-            if (text.Length > 0 || hasToolCalls != true)
-                _qualityIngress.TryIngest(new QualityIngestContext(
-                    ResponseText: text,
-                    Prompt: newestUserMessage ?? string.Empty,
-                    Model: requestedModel,
-                    CorrelationId: correlationId,
-                    SessionId: sessionId,
-                    HasToolCalls: hasToolCalls == true));
+            _qualityIngress.TryIngest(new QualityIngestContext(
+                ResponseText: text,
+                Prompt: newestUserMessage ?? string.Empty,
+                Model: requestedModel,
+                CorrelationId: correlationId,
+                SessionId: sessionId,
+                HasToolCalls: hasToolCalls == true,
+                FollowsToolResults: followsToolResults));
         }
     }
 

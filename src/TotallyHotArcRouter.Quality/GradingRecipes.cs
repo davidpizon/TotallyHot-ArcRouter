@@ -53,6 +53,18 @@ public static class IncompleteReasons
     /// audit; the row does not train.
     /// </summary>
     public const string Disputed = "disputed";
+
+    /// <summary>
+    /// The reply was only tool calls, so there is no text to grade (issue #304 phase 6). The row is
+    /// stored for the dashboard and does not learn.
+    /// </summary>
+    public const string DeferredToLoop = "deferred_to_loop";
+
+    /// <summary>
+    /// A text reply followed tool results, and the chain that would name the starting question does
+    /// not exist yet (issue #304 phase 6). The row does not learn, and no question is invented.
+    /// </summary>
+    public const string LoopUnlinked = "loop_unlinked";
 }
 
 /// <summary>Who produced the grade of record on a receipt (issue #304). Null when no score was produced.</summary>

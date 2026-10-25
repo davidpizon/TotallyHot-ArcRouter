@@ -110,6 +110,42 @@ public class EmbeddingMemoryScoreObserverTests
     }
 
     [Fact]
+    public async Task ObserveAsync_LoopReceipts_WriteNoMemoryRow()
+    {
+        var store = new FakeMemoryEntryStore();
+        var memory = CreateMemory(store);
+        await memory.InitializeAsync(TestContext.Current.CancellationToken);
+
+        var pendingCache = CreatePendingCache();
+        pendingCache.Set(correlationId: "tool-only", value: [1f, 0f]);
+        pendingCache.Set(correlationId: "unlinked", value: [0f, 1f]);
+        var observer = new EmbeddingMemoryScoreObserver(memory: memory, pendingCache: pendingCache,
+            pendingCostCache: CreatePendingCostCache(), pendingProvenanceCache: CreatePendingProvenanceCache(),
+            logger: NullLogger<EmbeddingMemoryScoreObserver>.Instance);
+
+        await observer.ObserveAsync(result: new QualityResult
+            {
+                RequestCorrelationId = "tool-only",
+                Model = "gpt-5.4",
+                UnifiedScore = 0.9,
+                GradeStatus = GradeStatus.Incomplete,
+                IncompleteReason = IncompleteReasons.DeferredToLoop
+            },
+            cancellationToken: TestContext.Current.CancellationToken);
+        await observer.ObserveAsync(result: new QualityResult
+            {
+                RequestCorrelationId = "unlinked",
+                Model = "gpt-5.4",
+                UnifiedScore = 0.9,
+                GradeStatus = GradeStatus.Incomplete,
+                IncompleteReason = IncompleteReasons.LoopUnlinked
+            },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Empty(store.Entries);
+    }
+
+    [Fact]
     public async Task ObserveAsync_ClampsScoreIntoUnitInterval()
     {
         var store = new FakeMemoryEntryStore();
