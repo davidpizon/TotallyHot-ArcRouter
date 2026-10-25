@@ -151,13 +151,9 @@ public class QualityIngressTests
     }
 
     [Fact]
-    public void TryIngest_ToolOnlyBody_DoesNotIngest()
+    public async Task TryIngest_ToolOnlyBody_SubmitsDeferredToLoopAndLearnsNothing()
     {
-        var extractor = new Mock<ISignalExtractor>();
-        var queue = new Mock<IQualityQueue>();
-        var aggregator = new Mock<IQualityScoreAggregator>();
-        var ingress = CreateIngress(options: new QualityOptions(), extractor: extractor, queue: queue,
-            aggregator: aggregator.Object);
+        var (ingress, extractor, queue, submitted) = CreateTerminalIngress();
 
         ingress.TryIngest(new QualityIngestContext(
             ResponseText: string.Empty,
@@ -167,7 +163,98 @@ public class QualityIngressTests
             SessionId: "sess",
             HasToolCalls: true));
 
+        var observed = await submitted.Task.WaitAsync(TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(expected: IncompleteReasons.DeferredToLoop, actual: observed.IncompleteReason);
+        AssertLearnsNothing(observed);
         queue.Verify(expression: q => q.TryEnqueue(It.IsAny<QualityRequest>()), times: Times.Never);
+        extractor.Verify(expression: e => e.Extract(It.IsAny<SignalExtractionContext>()), times: Times.Never);
+    }
+
+    [Fact]
+    public async Task TryIngest_WhitespaceAndToolCalls_SubmitsDeferredToLoopNotEmpty()
+    {
+        var (ingress, _, queue, submitted) = CreateTerminalIngress();
+
+        ingress.TryIngest(new QualityIngestContext(
+            ResponseText: "   \n",
+            Prompt: "call the tool",
+            Model: "gpt-5.4",
+            CorrelationId: "corr",
+            SessionId: "sess",
+            HasToolCalls: true));
+
+        var observed = await submitted.Task.WaitAsync(TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(expected: IncompleteReasons.DeferredToLoop, actual: observed.IncompleteReason);
+        AssertLearnsNothing(observed);
+        queue.Verify(expression: q => q.TryEnqueue(It.IsAny<QualityRequest>()), times: Times.Never);
+    }
+
+    [Fact]
+    public async Task TryIngest_TextAfterToolResults_SubmitsLoopUnlinkedAndLearnsNothing()
+    {
+        var (ingress, extractor, queue, submitted) = CreateTerminalIngress();
+
+        ingress.TryIngest(new QualityIngestContext(
+            ResponseText: "It is 72F.",
+            Prompt: "what is the weather",
+            Model: "gpt-5.4",
+            CorrelationId: "corr",
+            SessionId: "sess",
+            FollowsToolResults: true));
+
+        var observed = await submitted.Task.WaitAsync(TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(expected: IncompleteReasons.LoopUnlinked, actual: observed.IncompleteReason);
+        AssertLearnsNothing(observed);
+        queue.Verify(expression: q => q.TryEnqueue(It.IsAny<QualityRequest>()), times: Times.Never);
+        extractor.Verify(expression: e => e.Extract(It.IsAny<SignalExtractionContext>()), times: Times.Never);
+    }
+
+    [Fact]
+    public async Task TryIngest_TextAndToolCallsAfterToolResults_SubmitsLoopUnlinked()
+    {
+        var (ingress, _, queue, submitted) = CreateTerminalIngress();
+
+        ingress.TryIngest(new QualityIngestContext(
+            ResponseText: "It is 72F.",
+            Prompt: "what is the weather",
+            Model: "gpt-5.4",
+            CorrelationId: "corr",
+            SessionId: "sess",
+            HasToolCalls: true,
+            FollowsToolResults: true));
+
+        var observed = await submitted.Task.WaitAsync(TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(expected: IncompleteReasons.LoopUnlinked, actual: observed.IncompleteReason);
+        AssertLearnsNothing(observed);
+        queue.Verify(expression: q => q.TryEnqueue(It.IsAny<QualityRequest>()), times: Times.Never);
+    }
+
+    [Fact]
+    public void TryIngest_PlainText_EnqueuesAndDoesNotSubmitLoopUnlinked()
+    {
+        var extractor = new Mock<ISignalExtractor>();
+        extractor.Setup(e => e.Extract(It.IsAny<SignalExtractionContext>())).Returns((QualityRequest?)null);
+        var queue = new Mock<IQualityQueue>();
+        queue.Setup(q => q.TryEnqueue(It.IsAny<QualityRequest>())).Returns(true);
+        var aggregator = new Mock<IQualityScoreAggregator>();
+        var ingress = CreateIngress(options: new QualityOptions(), extractor: extractor, queue: queue,
+            aggregator: aggregator.Object);
+
+        ingress.TryIngest(new QualityIngestContext(
+            ResponseText: "Rain falls on the harbour.",
+            Prompt: "write a poem about rain",
+            Model: "gpt-5.4",
+            CorrelationId: "corr",
+            SessionId: "sess"));
+
+        queue.Verify(
+            expression: q => q.TryEnqueue(It.Is<QualityRequest>(r =>
+                r.RecipeId == GradingRecipes.Bootstrap && r.ResponseText == "Rain falls on the harbour.")),
+            times: Times.Once);
         aggregator.Verify(
             expression: a => a.SubmitAsync(It.IsAny<QualityResult>(), It.IsAny<CancellationToken>()),
             times: Times.Never);
@@ -210,5 +297,28 @@ public class QualityIngressTests
         ingress.TryIngest(Context());
 
         queue.Verify(expression: q => q.TryEnqueue(It.IsAny<QualityRequest>()), times: Times.Never);
+    }
+
+    private static (QualityIngress Ingress, Mock<ISignalExtractor> Extractor, Mock<IQualityQueue> Queue,
+        TaskCompletionSource<QualityResult> Submitted) CreateTerminalIngress()
+    {
+        var extractor = new Mock<ISignalExtractor>();
+        var queue = new Mock<IQualityQueue>();
+        var submitted = new TaskCompletionSource<QualityResult>();
+        var aggregator = new Mock<IQualityScoreAggregator>();
+        aggregator.Setup(a => a.SubmitAsync(It.IsAny<QualityResult>(), It.IsAny<CancellationToken>()))
+            .Callback<QualityResult, CancellationToken>((result, _) => submitted.TrySetResult(result))
+            .Returns(Task.CompletedTask);
+        var ingress = CreateIngress(options: new QualityOptions(), extractor: extractor, queue: queue,
+            aggregator: aggregator.Object);
+        return (ingress, extractor, queue, submitted);
+    }
+
+    private static void AssertLearnsNothing(QualityResult observed)
+    {
+        Assert.Equal(expected: GradeStatus.Incomplete, actual: observed.GradeStatus);
+        Assert.Equal(expected: GradingRecipes.Bootstrap, actual: observed.RecipeId);
+        Assert.Null(observed.JudgeScore);
+        Assert.Null(observed.LocalScore);
     }
 }

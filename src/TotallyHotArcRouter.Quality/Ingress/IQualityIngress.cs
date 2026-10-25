@@ -19,8 +19,13 @@ public interface IQualityIngress
 /// <param name="CorrelationId">Correlation id linking back to the routing telemetry event.</param>
 /// <param name="SessionId">The routed request's session id.</param>
 /// <param name="HasToolCalls">
-/// Whether the reply contained a tool call. A tool-only body (no text) stays uningested until the
-/// tool-loop phase; empty text with no tools is ingested as <c>no_text</c> / <c>empty</c>.
+/// Whether the reply contained a tool call. A tool-only body (no text) is
+/// <c>deferred_to_loop</c>. Empty text with no tools is <c>no_text</c> or <c>empty</c>.
+/// </param>
+/// <param name="FollowsToolResults">
+/// Whether this request's newest turn is tool results (issue #304 phase 6). A non-blank reply
+/// is then <c>loop_unlinked</c>. Older tool results under a new user message do not set this.
+/// The flag carries no tool-call id.
 /// </param>
 public sealed record QualityIngestContext(
     string ResponseText,
@@ -28,4 +33,5 @@ public sealed record QualityIngestContext(
     string Model,
     string CorrelationId,
     string SessionId,
-    bool HasToolCalls = false);
+    bool HasToolCalls = false,
+    bool FollowsToolResults = false);

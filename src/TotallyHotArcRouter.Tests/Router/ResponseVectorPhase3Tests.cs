@@ -104,6 +104,37 @@ public class ResponseVectorPhase3Tests
     }
 
     [Fact]
+    public async Task LoopReceiptsWithoutScores_WriteNoRow_EvenWhenTextIsCached()
+    {
+        using var harness = Harness.Create();
+        var embedder = new FixedEmbedder([1f]);
+        harness.Text.Set(correlationId: "tool-only", text: " ");
+        harness.Text.Set(correlationId: "unlinked", text: "It is 72F.");
+        var observer = harness.Observer(embedder);
+
+        await observer.ObserveAsync(
+            result: new QualityResult
+            {
+                RequestCorrelationId = "tool-only",
+                GradeStatus = GradeStatus.Incomplete,
+                IncompleteReason = IncompleteReasons.DeferredToLoop
+            },
+            cancellationToken: CancellationToken.None);
+        await observer.ObserveAsync(
+            result: new QualityResult
+            {
+                RequestCorrelationId = "unlinked",
+                GradeStatus = GradeStatus.Incomplete,
+                IncompleteReason = IncompleteReasons.LoopUnlinked
+            },
+            cancellationToken: CancellationToken.None);
+
+        Assert.Equal(0, embedder.Calls);
+        Assert.Null(harness.Store.ReadSealed("tool-only"));
+        Assert.Null(harness.Store.ReadSealed("unlinked"));
+    }
+
+    [Fact]
     public async Task MissingResponseText_WritesNoRow_AndDoesNotEmbed()
     {
         using var harness = Harness.Create();
