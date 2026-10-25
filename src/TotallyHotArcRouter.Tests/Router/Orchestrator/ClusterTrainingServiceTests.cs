@@ -243,11 +243,11 @@ public class ClusterTrainingServiceTests
             return Task.FromResult<IReadOnlyList<MemoryEntry>>([.. _entries]);
         }
 
-        public Task<MemoryEntry> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
+        public Task<MemoryEntry?> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
         {
             var persisted = entry with { Id = _nextId++ };
             _entries.Add(persisted);
-            return Task.FromResult(persisted);
+            return Task.FromResult<MemoryEntry?>(persisted);
         }
 
         public Task DeleteAsync(long id, CancellationToken cancellationToken = default)

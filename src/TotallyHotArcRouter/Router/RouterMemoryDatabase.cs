@@ -37,7 +37,7 @@ public sealed class RouterMemoryDatabase
                                          embedding        BLOB    NOT NULL,
                                          chosen_model     TEXT    NOT NULL,
                                          score            REAL    NOT NULL,
-                                         cost             REAL    NOT NULL,
+                                         cost             REAL    NULL,
                                          verifier_trace   TEXT    NULL,
                                          created_at_utc   TEXT    NOT NULL
                                      );
@@ -389,6 +389,7 @@ public sealed class RouterMemoryDatabase
         MigrateGraderScoreQuestionColumns(connection);
         MigrateGradeReceiptIssue304Columns(connection);
         MigrateMemoryEntryCorrelationIdColumn(connection);
+        MigrateMemoryEntriesCostNullable(connection);
         MigrateIssue293LiveLearningPurge(connection);
         MigrateIssue319UntrustedJudgeProvenancePurge(connection);
     }
@@ -640,6 +641,107 @@ public sealed class RouterMemoryDatabase
                                 ON memory_entries (correlation_id);
                             """;
         index.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Rebuilds <c>memory_entries</c> so <c>cost</c> may be NULL (issue #304 phase 5). Idempotent: a
+    /// second call is a no-op when the column already allows blanks. One transaction copies every row
+    /// and its embedding blob, recreates the correlation index, and swaps the tables; a failure leaves
+    /// the old table unchanged. Existing numeric zeros are copied as zeros — they are not guessed into
+    /// nulls (#290's backfill).
+    /// </summary>
+    private static void MigrateMemoryEntriesCostNullable(SqliteConnection connection)
+    {
+        if (!ColumnIsNotNull(connection: connection, table: "memory_entries", column: "cost"))
+            return;
+
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            using (var create = connection.CreateCommand())
+            {
+                create.Transaction = transaction;
+                create.CommandText = """
+                                     CREATE TABLE memory_entries_new (
+                                         id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                                         embedding        BLOB    NOT NULL,
+                                         chosen_model     TEXT    NOT NULL,
+                                         score            REAL    NOT NULL,
+                                         cost             REAL    NULL,
+                                         verifier_trace   TEXT    NULL,
+                                         created_at_utc   TEXT    NOT NULL,
+                                         is_exploratory   INTEGER NOT NULL DEFAULT 0,
+                                         propensity       REAL    NOT NULL DEFAULT 1.0,
+                                         dimension        TEXT    NULL,
+                                         is_judge_scored  INTEGER NOT NULL DEFAULT 0,
+                                         embedding_model  TEXT    NULL,
+                                         correlation_id   TEXT    NULL
+                                     );
+                                     """;
+                create.ExecuteNonQuery();
+            }
+
+            using (var copy = connection.CreateCommand())
+            {
+                copy.Transaction = transaction;
+                copy.CommandText = """
+                                   INSERT INTO memory_entries_new (
+                                       id, embedding, chosen_model, score, cost, verifier_trace, created_at_utc,
+                                       is_exploratory, propensity, dimension, is_judge_scored, embedding_model,
+                                       correlation_id)
+                                   SELECT
+                                       id, embedding, chosen_model, score, cost, verifier_trace, created_at_utc,
+                                       COALESCE(is_exploratory, 0), COALESCE(propensity, 1.0), dimension,
+                                       COALESCE(is_judge_scored, 0), embedding_model, correlation_id
+                                   FROM memory_entries;
+                                   """;
+                copy.ExecuteNonQuery();
+            }
+
+            using (var drop = connection.CreateCommand())
+            {
+                drop.Transaction = transaction;
+                drop.CommandText = "DROP TABLE memory_entries;";
+                drop.ExecuteNonQuery();
+            }
+
+            using (var rename = connection.CreateCommand())
+            {
+                rename.Transaction = transaction;
+                rename.CommandText = "ALTER TABLE memory_entries_new RENAME TO memory_entries;";
+                rename.ExecuteNonQuery();
+            }
+
+            using (var index = connection.CreateCommand())
+            {
+                index.Transaction = transaction;
+                index.CommandText = """
+                                    CREATE INDEX IF NOT EXISTS ix_memory_entries_correlation_id
+                                        ON memory_entries (correlation_id);
+                                    """;
+                index.ExecuteNonQuery();
+            }
+
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="column"/> on <paramref name="table"/> is declared <c>NOT NULL</c>
+    /// (<c>PRAGMA table_info</c> <c>notnull</c> bit).
+    /// </summary>
+    private static bool ColumnIsNotNull(SqliteConnection connection, string table, string column)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT \"notnull\" FROM pragma_table_info('{table}') WHERE name = $column;";
+        command.Parameters.AddWithValue(parameterName: "$column", value: column);
+        var scalar = command.ExecuteScalar();
+        return scalar is not null && Convert.ToInt32(value: scalar, provider: CultureInfo.InvariantCulture) != 0;
     }
 
     /// <summary>Adds a nullable TEXT column when the table exists and the column does not.</summary>

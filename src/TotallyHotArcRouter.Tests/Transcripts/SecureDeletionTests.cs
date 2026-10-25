@@ -239,6 +239,7 @@ public class SecureDeletionTests : IDisposable
                 entry: new MemoryEntry(Id: 0, TaskEmbedding: canary, ChosenModel: "m", Score: 0.5, Cost: 0.01,
                     VerifierTrace: null, CreatedAtUtc: DateTimeOffset.UtcNow),
                 cancellationToken: TestContext.Current.CancellationToken);
+            Assert.NotNull(entry);
             ids.Add(entry.Id);
         }
 
@@ -450,6 +451,7 @@ public class SecureDeletionTests : IDisposable
                 entry: new MemoryEntry(Id: 0, TaskEmbedding: new float[4], ChosenModel: "m", Score: 0.5, Cost: 0.01,
                     VerifierTrace: null, CreatedAtUtc: DateTimeOffset.UtcNow),
                 cancellationToken: TestContext.Current.CancellationToken);
+            Assert.NotNull(entry);
             ids.Add(entry.Id);
         }
 
@@ -478,6 +480,7 @@ public class SecureDeletionTests : IDisposable
             entry: new MemoryEntry(Id: 0, TaskEmbedding: new float[4], ChosenModel: "m", Score: 0.5, Cost: 0.01,
                 VerifierTrace: null, CreatedAtUtc: DateTimeOffset.UtcNow),
             cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(entry);
 
         await using var reader = database.OpenConnection();
         await using (var begin = reader.CreateCommand())

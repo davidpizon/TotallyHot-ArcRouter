@@ -168,7 +168,7 @@ public class EmbeddingMemoryScoreObserverTests
     }
 
     [Fact]
-    public async Task ObserveAsync_NoPendingCostOrProvenance_DefaultsToZeroCostAndCertainNonExploratoryPropensity()
+    public async Task ObserveAsync_NoPendingCostOrProvenance_DefaultsToNullCostAndCertainNonExploratoryPropensity()
     {
         var store = new FakeMemoryEntryStore();
         var memory = CreateMemory(store);
@@ -192,7 +192,7 @@ public class EmbeddingMemoryScoreObserverTests
         await observer.ObserveAsync(result: result, cancellationToken: TestContext.Current.CancellationToken);
 
         var entry = Assert.Single(store.Entries);
-        Assert.Equal(0.0, actual: entry.Cost);
+        Assert.Null(entry.Cost);
         Assert.False(entry.IsExploratory);
         Assert.Equal(1.0, actual: entry.Propensity);
     }
@@ -326,11 +326,11 @@ public class EmbeddingMemoryScoreObserverTests
             return Task.FromResult<IReadOnlyList<MemoryEntry>>([.. _entries]);
         }
 
-        public Task<MemoryEntry> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
+        public Task<MemoryEntry?> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
         {
             var persisted = entry with { Id = _nextId++ };
             _entries.Add(persisted);
-            return Task.FromResult(persisted);
+            return Task.FromResult<MemoryEntry?>(persisted);
         }
 
         public Task DeleteAsync(long id, CancellationToken cancellationToken = default)

@@ -137,6 +137,7 @@ public sealed class EmbeddingMemoryModelIdentityTests
         var entry = await memory.AddEntryAsync(taskEmbedding: [1f, 0f], chosenModel: "chosen-model", 0.8, 0.0, null,
             cancellationToken: TestContext.Current.CancellationToken);
 
+        Assert.NotNull(entry);
         Assert.Equal(expected: "model-a", actual: entry.EmbeddingModel);
     }
 
@@ -167,11 +168,11 @@ public sealed class EmbeddingMemoryModelIdentityTests
         }
 
         /// <inheritdoc/>
-        public Task<MemoryEntry> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
+        public Task<MemoryEntry?> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
         {
             var persisted = entry with { Id = _nextId++ };
             _entries.Add(persisted);
-            return Task.FromResult(persisted);
+            return Task.FromResult<MemoryEntry?>(persisted);
         }
 
         /// <inheritdoc/>

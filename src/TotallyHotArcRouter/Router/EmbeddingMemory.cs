@@ -157,11 +157,15 @@ public sealed class EmbeddingMemory : IDisposable
     /// The request correlation id, stored so a later dispute can delete this neighbor (issue #304 phase 4).
     /// Placed last so every existing positional call site keeps compiling unchanged.
     /// </param>
-    public async Task<MemoryEntry> AddEntryAsync(
+    /// <returns>
+    /// The persisted entry, or <see langword="null"/> when the store skipped the write because the
+    /// correlation id is disputed (issue #304 phase 5).
+    /// </returns>
+    public async Task<MemoryEntry?> AddEntryAsync(
         float[] taskEmbedding,
         string chosenModel,
         double score,
-        double cost,
+        double? cost,
         string? verifierTrace,
         CancellationToken cancellationToken = default,
         bool isExploratory = false,
@@ -181,6 +185,10 @@ public sealed class EmbeddingMemory : IDisposable
                 IsJudgeScored: isJudgeScored, EmbeddingModel: _embeddingClient.ModelIdentity,
                 CorrelationId: correlationId),
             cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        // Disputed receipts must not enter the working set (issue #304 phase 5).
+        if (persisted is null)
+            return null;
 
         lock (_syncLock)
         {

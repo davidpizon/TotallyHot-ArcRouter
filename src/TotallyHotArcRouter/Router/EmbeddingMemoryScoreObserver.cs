@@ -94,14 +94,14 @@ public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
         // independently (they come from different points in that method) and a miss on any one of them
         // must not block recording the other two - a cost never recorded is still worth an embedding
         // memory entry.
-        var recoveredCost = 0.0;
+        double? recoveredCost = null;
         if (!string.IsNullOrEmpty(result.RequestCorrelationId) &&
             _pendingCostCache.TryTake(correlationId: result.RequestCorrelationId, value: out var cachedCost))
             recoveredCost = (double)cachedCost;
         else
             _logger.LogDebug(
                 message:
-                "No pending cost for correlation {CorrelationId}; recording embedding-memory entry with cost 0.",
+                "No pending cost for correlation {CorrelationId}; recording embedding-memory entry with null cost.",
                 result.RequestCorrelationId);
 
         var recoveredIsExploratory = false;
@@ -141,7 +141,7 @@ public sealed class EmbeddingMemoryScoreObserver : IQualityScoreObserver
         if (_logger.IsEnabled(LogLevel.Information))
             _logger.LogInformation(
                 message:
-                "Recorded embedding-memory entry for model {Model} (correlation {CorrelationId}) with score {Score:F3}, cost {Cost:F6}, exploratory {IsExploratory}.",
+                "Recorded embedding-memory entry for model {Model} (correlation {CorrelationId}) with score {Score:F3}, cost {Cost}, exploratory {IsExploratory}.",
                 result.Model,
                 result.RequestCorrelationId,
                 score,

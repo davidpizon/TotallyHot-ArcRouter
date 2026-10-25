@@ -91,7 +91,7 @@ public class LogRegRetrainHostedServiceTests
             return Task.FromResult(entries);
         }
 
-        public Task<MemoryEntry> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
+        public Task<MemoryEntry?> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException();
         }

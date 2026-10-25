@@ -666,6 +666,7 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
                     IsExploratory: sample.IsExploratory,
                     IsJudgeScored: sample.IsJudgeScored),
                 cancellationToken: token);
+            Assert.NotNull(entry);
 
             var id = await transcriptStore.InsertAsync(
                 record: new TranscriptRecord(
@@ -909,11 +910,11 @@ public sealed class TaxonomyComparisonServiceTests : IDisposable
             return Task.FromResult<IReadOnlyList<MemoryEntry>>([.. _entries]);
         }
 
-        public Task<MemoryEntry> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
+        public Task<MemoryEntry?> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
         {
             var stored = entry with { Id = _nextId++ };
             _entries.Add(stored);
-            return Task.FromResult(stored);
+            return Task.FromResult<MemoryEntry?>(stored);
         }
 
         public Task DeleteAsync(long id, CancellationToken cancellationToken = default)

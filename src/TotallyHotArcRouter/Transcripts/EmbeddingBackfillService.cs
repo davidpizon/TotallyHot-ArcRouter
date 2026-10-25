@@ -168,7 +168,7 @@ public sealed class EmbeddingBackfillService : BackgroundService
                     TaskEmbedding: embedding.Vector,
                     ChosenModel: transcript.RoutedModel,
                     Score: transcript.Score ?? 0.0,
-                    Cost: (double)(transcript.Cost ?? 0.0m),
+                    Cost: transcript.Cost is { } knownCost ? (double)knownCost : null,
                     null,
                     CreatedAtUtc: transcript.CreatedAtUtc,
                     IsExploratory: transcript.IsExploratory,
@@ -187,6 +187,17 @@ public sealed class EmbeddingBackfillService : BackgroundService
                 var persistedEntry = await _memoryEntryStore
                     .AppendAsync(entry: memoryEntry, cancellationToken: cancellationToken)
                     .ConfigureAwait(false);
+
+                // A disputed receipt skips the neighbor write (issue #304 phase 5); leave the transcript
+                // unlinked rather than inventing a memory-entry id.
+                if (persistedEntry is null)
+                {
+                    _logger.LogDebug(
+                        message:
+                        "Skipped embedding backfill for transcript {TranscriptId}; grade is disputed.",
+                        transcriptId);
+                    continue;
+                }
 
                 // Link the transcript row back to the memory entry
                 await _transcriptStore.LinkMemoryEntryAsync(transcriptId: transcriptId,

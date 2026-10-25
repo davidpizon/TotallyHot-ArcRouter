@@ -324,12 +324,12 @@ public class EmbeddingBackfillServiceTests
             throw new NotSupportedException();
         }
 
-        public Task<MemoryEntry> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
+        public Task<MemoryEntry?> AppendAsync(MemoryEntry entry, CancellationToken cancellationToken = default)
         {
             AppendCallCount++;
             var persisted = entry with { Id = AppendCallCount };
             LastPersistedEntry = persisted;
-            return Task.FromResult(persisted);
+            return Task.FromResult<MemoryEntry?>(persisted);
         }
 
         public Task DeleteAsync(long id, CancellationToken cancellationToken = default)
