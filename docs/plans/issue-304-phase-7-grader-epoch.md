@@ -1,6 +1,6 @@
 # Plan: #304 phase 7 — grader epoch in shadow
 
-**Status:** Approved answers, proposed names. David approved every 2026-10-25 answer (A–H) and every 2026-10-26 answer on 2026-10-26. A type name or file path marked proposed is not in the tree yet. This pull request does not add that code. The implementation pull request must link this file.
+**Status:** Approved by David on 2026-10-26 and implemented in [#346](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/346). This file is the plan those names were approved against. Sentences that say a type is proposed and not in the tree describe this plan's pull request, not the tree after #346. `GraderEpochArtifactStore.RollbackToTeacher` clears the accepted pointer and does not promote a previous file. In phase 7 the teacher was already the grade of record, so that clear did not move authority. The test `Rollback_FirstArtifact_NullPreviousId_ReturnsToTeacher` asserts the clear. [Phase 8](issue-304-phase-8-grader-takeover.md) is when the same method returns authority to the teacher, and that plan is still proposed. This file's pull request was docs only. The implementation pull request linked this file.
 
 **Issue:** [#304](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/304). **Parent plan:** [`issue-304-grade-non-coding-responses.md`](issue-304-grade-non-coding-responses.md) §3.3, §3.5, §3.8, §4 phase 7, and §10. **ADR:** [ADR-0027](../adr/0027-grade-non-coding-responses-on-a-bootstrap-recipe-and-keep-them-out-of-code-tallies.md) [Amendment 2](../adr/0027-grade-non-coding-responses-on-a-bootstrap-recipe-and-keep-them-out-of-code-tallies.md#amendment-2-2026-10-26-phase-7-acceptance-stays-in-shadow). Decision 3 originally said that accepting an artifact fills the judge axis. Amendment 2, decided by David on 2026-10-26, splits that sentence: phase 7 acceptance is shadow and the teacher stays the grade of record. Phase 8 fills the judge axis. It is the same plan, not a second ADR.
 
@@ -8,7 +8,7 @@
 
 ## Decisions
 
-David approved these rows on 2026-10-26. He was asked them on 2026-10-25. He also approved the 2026-10-26 rules in the body: null `local_confidence` when the floor is null, `Sdca`, the `code` and `non-code` folders, failed-candidate retention of 3, 200 eligible labels and a holdout of 50 on every fit including a refit, and at least 150 training rows after session exclusion. `GraderEpochArtifactStore.RollbackToTeacher` and `GraderEpochLabelQuery.LoadForKindAsync` are proposed names for those approved rules. They are not in the tree.
+David approved these rows on 2026-10-26. He was asked them on 2026-10-25. He also approved the 2026-10-26 rules in the body: null `local_confidence` when the floor is null, `Sdca`, the `code` and `non-code` folders, failed-candidate retention of 3, 200 eligible labels and a holdout of 50 on every fit including a refit, and at least 150 training rows after session exclusion. `GraderEpochArtifactStore.RollbackToTeacher` and `GraderEpochLabelQuery.LoadForKindAsync` were the proposed names for those approved rules. #346 added them. The status line at the top of this file is the one to trust when a later sentence still says "not in the tree."
 
 | # | Decision |
 |---|---|

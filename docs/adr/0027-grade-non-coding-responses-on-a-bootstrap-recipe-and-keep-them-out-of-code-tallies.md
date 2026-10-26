@@ -4,7 +4,7 @@
 **Date:** 2026-10-23
 **Deciders:** David Pizon
 **Accepted:** 2026-10-23 (David, chat sign-off on #304 plan)
-**Amendments:** [Amendment 1 (2026-10-23) — phase 3 stores the sealed response vector and the question-vector miss](#amendment-1-2026-10-23-phase-3-stores-the-sealed-response-vector-and-the-question-vector-miss) · [Amendment 2 (2026-10-26) — phase 7 acceptance stays in shadow](#amendment-2-2026-10-26-phase-7-acceptance-stays-in-shadow)
+**Amendments:** [Amendment 1 (2026-10-23) — phase 3 stores the sealed response vector and the question-vector miss](#amendment-1-2026-10-23-phase-3-stores-the-sealed-response-vector-and-the-question-vector-miss) · [Amendment 2 (2026-10-26) — phase 7 acceptance stays in shadow](#amendment-2-2026-10-26-phase-7-acceptance-stays-in-shadow) · [Amendment 3 (2026-10-26) — phase 8 takeover is proposed](#amendment-3-2026-10-26-phase-8-takeover-is-proposed)
 
 ## Context and Problem Statement
 
@@ -178,7 +178,7 @@ deletes every row and creates a new key. Question vectors in `memory_entries` st
 
 ## Amendment 2 (2026-10-26): phase 7 acceptance stays in shadow
 
-**Status:** accepted (David Pizon, 2026-10-26). The decision is accepted. The phase 7 code is not in the tree until that implementation merges. Amends decision 3's sentence about what acceptance does. It does not change the teacher pin, the recipe split, the tally rule, or the rule that takeover is a later phase of this plan rather than a second ADR.
+**Status:** accepted (David Pizon, 2026-10-26). The decision is accepted. The phase 7 code landed in [#346](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/346). Amends decision 3's sentence about what acceptance does. It does not change the teacher pin, the recipe split, the tally rule, or the rule that takeover is a later phase of this plan rather than a second ADR.
 
 ### Why
 
@@ -191,10 +191,53 @@ The alternative, treating the original sentence literally, would make phase 7 th
 Acceptance and takeover stay two phases of [`docs/plans/issue-304-grade-non-coding-responses.md`](../plans/issue-304-grade-non-coding-responses.md). The procedure is [`docs/plans/issue-304-phase-7-grader-epoch.md`](../plans/issue-304-phase-7-grader-epoch.md).
 
 - Phase 7: a candidate that clears the agreement gate is stored as the accepted artifact for its kind, status `accepted, shadow`. The teacher score stays the grade of record for every grade in that phase. A shadow `LocalScore` may be written beside it. It does not fill the judge axis, and it does not leave `JudgeScore` empty.
-- Phase 8: takeover. The local score becomes the grade of record and fills the judge axis. `JudgeScore` stays empty on those rows, which is the unjudged rule in the plan's §12. Spot-check rows and low-confidence rows still set `JudgeScore` from the teacher.
+- Phase 8: takeover. The local score becomes the grade of record and fills the judge axis. `JudgeScore` stays empty on those rows, which is the unjudged rule in the plan's §12. Spot-check rows and low-confidence rows still set `JudgeScore` from the teacher. The proposed procedure is [Amendment 3](#amendment-3-2026-10-26-phase-8-takeover-is-proposed).
 - This remains one plan. It does not open a second ADR.
 
 Related: [#293](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/293),
   [#294](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/294),
   [#319](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/319),
   [#326](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/326).
+
+## Amendment 3 (2026-10-26): phase 8 takeover is proposed
+
+**Status:** proposed. Not accepted. David has not signed the phase 8 plan. This amendment records the procedure that plan recommends so this ADR and the plans describe the same phase. Accepting the amendment is accepting that plan. It does not change the teacher pin, the recipe split, the tally rule, or Amendment 2. It does not open a second ADR.
+
+### Why
+
+Amendment 2 left phase 8 as the phase that fills the judge axis. It did not say when a grade may skip the teacher, how the 5% sample is chosen, what "too wrong" measures, or what a rollback does to the next artifact. The phase 7 method `GraderEpochArtifactStore.RollbackToTeacher` only clears `accepted.json`. Its name reads as if phase 7 returned authority to the teacher. Phase 7 could not do that, because the teacher never lost authority. Phase 8 is the phase in which clearing the pointer returns authority, since the pointer is what allows a skip.
+
+The alternative, treating a gate pass in phase 7 as takeover, is the reading Amendment 2 already rejected. The alternative of renaming `RollbackToTeacher` was set aside: the method is in the tree, phase 7 tests call it, and the name matches the phase 8 effect.
+
+### Decision
+
+The procedure is [`docs/plans/issue-304-phase-8-grader-takeover.md`](../plans/issue-304-phase-8-grader-takeover.md). Until David approves that file, the rules below are recommendations, not accepted defaults.
+
+- Takeover is per kind. An accepted matching artifact for `code` does not grade `non-code`, and the reverse is also true. A rollback of one kind leaves the other kind's pointer in place.
+- The recommended kill switch is `GraderEpochOptions.TakeoverEnabled`, default false. False keeps phase 7: the teacher is the grade of record. True lets a confident in-distribution row skip the teacher. Turning it off stops new skips and leaves the artifact files where they are.
+- The teacher still grades the 5% sample and every row whose question cosine is strictly below the stored floor. A null floor and a missing question vector are not low confidence. `local_confidence` stays null in those cases, never 0.
+- A spot-check window of the newest 50 rows for the accepted artifact, with mean absolute error against the judge score strictly greater than 0.10, calls `RollbackToTeacher`. The previous file stays on disk and is not promoted. Stored grades are not rewritten. The recommended follow-up is an audition: the next accepted artifact stays in shadow until its own window is at or under 0.10.
+- A `LocalScore` is not a grader-epoch training label. Rows the teacher actually scored remain the labels. kNN still stores a `Complete` takeover row with `is_judge_scored` false. Disputes still compare `UnifiedScore` and still delete the response vector and the kNN row.
+- A skipped teacher call does not write cost 0. Unknown request cost stays null.
+
+### Consequences
+
+- Good, because a confident row can skip the pinned teacher without copying `LocalScore` into `JudgeScore`, which keeps #319's stamp honest.
+- Bad, because the first takeover can grade alone before any live spot-check exists, so a holdout that looked fine can be the grade of record until 50 spot-checks have been scored. The kill switch and the rollback window are the brakes. The audition applies only after a rollback, not before the first takeover.
+- Bad, because shipping the code with `TakeoverEnabled` false means phase 8 does not change grades until an operator sets the flag. That delay is the recommendation, and David can reject it.
+
+```mermaid
+flowchart TD
+    gate[Phase 7 gate pass] --> shadow[Accepted artifact, teacher still grades]
+    shadow --> switch{TakeoverEnabled?}
+    switch -->|no| shadow
+    switch -->|yes| live[Confident rows skip the teacher]
+    live --> sample[Teacher grades the 5 percent sample and low confidence]
+    sample --> bad{Newest 50 spot-checks, MAE greater than 0.10?}
+    bad -->|no| live
+    bad -->|yes| back[Clear the accepted pointer. Teacher grades again.]
+    back --> audition[Next artifact auditions in shadow]
+    audition --> healthy{Its own newest 50 are at or under 0.10?}
+    healthy -->|yes| live
+    healthy -->|no| back
+```
