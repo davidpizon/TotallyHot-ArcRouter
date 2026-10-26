@@ -8,7 +8,7 @@
 
 ## Decisions
 
-Each row is David, 2026-10-25, and stays proposed until he approves this pull request.
+Each row is David, 2026-10-25, and stays proposed until he approves this pull request. The 2026-10-26 rules in the body are decided: null `local_confidence` when the floor is null, `Sdca`, the `code` and `non-code` folders, failed-candidate retention, `GraderEpochArtifactStore.RollbackToTeacher`, and `GraderEpochLabelQuery.LoadForKindAsync`.
 
 | # | Decision |
 |---|---|
@@ -210,7 +210,7 @@ The JSON carries:
 - `featureSchemaVersion` (`1`)
 - `teacherModel` (`JudgeOptions.ModelName`), `teacherPromptVersion` (`JudgeOptions.PromptVersion`), `bgeModelId` (`EmbeddingOptions.ResolveModelIdentity()`)
 - `previousArtifactId` (string or null)
-- coefficient payload the regression head needs to score, plus the trainer name, the imputation means, the feature order, and the dropped slots
+- coefficient payload: the `Sdca` weight vector and bias, in schema-version-1 order after dropped slots, plus the trainer name, the imputation means, the feature order, and the dropped slots. The training table has one vector column named `Features` and one float column named `Label` (the judge score). Scoring is the dot product of those weights with the same feature vector, plus the bias, then clamped to `[0, 1]`. The JSON does not store an ML.NET pipeline.
 - `cosineFloor` (number or null), `reservoirCount`, `reservoirCapacity`, `randomSeed`
 - `eligibleCount`, `holdoutCount`, `trainingCount`, `sessionExcludedCount`
 - `holdoutMae`, `spearman` (number or null)
