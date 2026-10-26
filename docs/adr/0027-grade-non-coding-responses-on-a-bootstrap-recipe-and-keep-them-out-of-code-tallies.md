@@ -71,7 +71,8 @@ The rules, in short (full design in the plan):
    `Incomplete` reason `judge_is_answerer` and is not graded. A missing, paid, or switched-off pin is
    `Incomplete` reason `no_judge`, not a fallback to some other agent. After a later grader epoch accepts
    a local C# artifact, that artifact fills the judge axis and leaves `JudgeScore` empty (unjudged, per
-   the 2026-10-23 decision recorded in the plan's §12). This implementation ships the teacher path;
+   the 2026-10-23 decision recorded in the plan's §12; narrowed by Amendment 2: phase 7 acceptance is
+   shadow only; phase 8 fills the judge axis). This implementation ships the teacher path;
    takeover is a later phase of the same plan, not a second ADR.
    [Amendment 2](#amendment-2-2026-10-26-phase-7-acceptance-stays-in-shadow) splits the acceptance sentence:
    phase 7 stores the artifact as accepted and leaves it in shadow, and the teacher stays the grade of
