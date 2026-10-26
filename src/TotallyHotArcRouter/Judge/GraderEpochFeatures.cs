@@ -89,26 +89,47 @@ internal static class GraderEpochFeatures
         if (!Contains(dropped, Analysis))
         {
             if (artifact.AnalysisMean is null) return null;
-            var present = !input.AnalysisMissing && input.AnalysisScore is not null;
-            values.Add(present ? 0f : 1f);
-            values.Add((float)(present ? input.AnalysisScore!.Value : artifact.AnalysisMean.Value));
+            if (input is { AnalysisMissing: false, AnalysisScore: { } analysis })
+            {
+                values.Add(0f);
+                values.Add((float)analysis);
+            }
+            else
+            {
+                values.Add(1f);
+                values.Add((float)artifact.AnalysisMean.Value);
+            }
         }
 
         if (!Contains(dropped, Syntax))
         {
             if (artifact.SyntaxMean is null) return null;
-            var present = !input.SyntaxMissing && input.SyntaxScore is not null;
-            values.Add(present ? 0f : 1f);
-            values.Add((float)(present ? input.SyntaxScore!.Value : artifact.SyntaxMean.Value));
+            if (input is { SyntaxMissing: false, SyntaxScore: { } syntax })
+            {
+                values.Add(0f);
+                values.Add((float)syntax);
+            }
+            else
+            {
+                values.Add(1f);
+                values.Add((float)artifact.SyntaxMean.Value);
+            }
         }
 
         values.Add(input.ResponseHasCode ? 1f : 0f);
         if (!Contains(dropped, Length))
         {
             if (artifact.LengthMean is null) return null;
-            var present = !input.LengthMissing && input.LengthChars is not null;
-            values.Add(present ? 0f : 1f);
-            values.Add((float)(present ? input.LengthChars!.Value : artifact.LengthMean.Value));
+            if (input is { LengthMissing: false, LengthChars: { } length })
+            {
+                values.Add(0f);
+                values.Add((float)length);
+            }
+            else
+            {
+                values.Add(1f);
+                values.Add((float)artifact.LengthMean.Value);
+            }
         }
 
         AddVector(values, input.ResponseVector!);
@@ -159,9 +180,7 @@ internal static class GraderEpochFeatures
     /// <returns>The mean, or null when every row is missing analysis.</returns>
     internal static double? AnalysisMean(IReadOnlyList<GraderEpochFeatureInput> rows)
     {
-        var present = rows.Where(row => !row.AnalysisMissing && row.AnalysisScore is not null)
-            .Select(row => row.AnalysisScore!.Value).ToList();
-        return present.Count == 0 ? null : present.Average();
+        return Mean(rows, static row => row is { AnalysisMissing: false, AnalysisScore: { } score } ? score : null);
     }
 
     /// <summary>The mean of training rows whose syntax score was stored.</summary>
@@ -169,9 +188,7 @@ internal static class GraderEpochFeatures
     /// <returns>The mean, or null when every row left syntax null.</returns>
     internal static double? SyntaxMean(IReadOnlyList<GraderEpochFeatureInput> rows)
     {
-        var present = rows.Where(row => !row.SyntaxMissing && row.SyntaxScore is not null)
-            .Select(row => row.SyntaxScore!.Value).ToList();
-        return present.Count == 0 ? null : present.Average();
+        return Mean(rows, static row => row is { SyntaxMissing: false, SyntaxScore: { } score } ? score : null);
     }
 
     /// <summary>The mean of training rows whose length was stored. A null length does not enter as 0.</summary>
@@ -179,9 +196,25 @@ internal static class GraderEpochFeatures
     /// <returns>The mean, or null when every length is null.</returns>
     internal static double? LengthMean(IReadOnlyList<GraderEpochFeatureInput> rows)
     {
-        var present = rows.Where(row => !row.LengthMissing && row.LengthChars is not null)
-            .Select(row => row.LengthChars!.Value).ToList();
-        return present.Count == 0 ? null : present.Average();
+        return Mean(rows, static row => row is { LengthMissing: false, LengthChars: { } length } ? length : null);
+    }
+
+    /// <summary>The mean of the values <paramref name="value"/> returns, ignoring nulls.</summary>
+    /// <param name="rows">Training inputs.</param>
+    /// <param name="value">The observed number, or null when that row does not contribute.</param>
+    /// <returns>The mean, or null when every row was missing.</returns>
+    private static double? Mean(IReadOnlyList<GraderEpochFeatureInput> rows, Func<GraderEpochFeatureInput, double?> value)
+    {
+        double sum = 0;
+        var count = 0;
+        foreach (var row in rows)
+        {
+            if (value(row) is not double observed) continue;
+            sum += observed;
+            count++;
+        }
+
+        return count == 0 ? null : sum / count;
     }
 
     private static bool Contains(IReadOnlyList<string> slots, string name)

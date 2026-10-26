@@ -59,7 +59,7 @@ internal static class GraderEpochTrainer
     }
 
     /// <summary>One ML.NET training row. The property names are the trainer's default column names.</summary>
-    public sealed class TrainerRow
+    private sealed class TrainerRow
     {
         /// <summary>Gets or sets the judge score.</summary>
         public float Label { get; set; }

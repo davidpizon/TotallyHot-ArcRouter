@@ -11,7 +11,7 @@ namespace TotallyHot.ArcRouter.Judge;
 internal static class GraderEpochReservoir
 {
     /// <summary>The file magic. A reader that sees anything else drops the reservoir.</summary>
-    internal static ReadOnlySpan<byte> Magic => "THGR"u8;
+    private static ReadOnlySpan<byte> Magic => "THGR"u8;
 
     /// <summary>
     /// Vitter's Algorithm R. When <paramref name="items"/> is within <paramref name="capacity"/>, the

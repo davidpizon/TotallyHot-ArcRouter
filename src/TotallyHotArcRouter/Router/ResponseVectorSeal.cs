@@ -125,7 +125,7 @@ internal static class ResponseVectorSeal
     private static bool TryOpenWith(byte[] key, ReadOnlySpan<byte> blob, byte[] associatedData, out float[] vector)
     {
         vector = [];
-        if (key is null || key.Length == 0) return false;
+        if (key.Length == 0) return false;
         if (blob.Length < NonceLength + TagLength) return false;
         if ((blob.Length - NonceLength - TagLength) % sizeof(float) != 0) return false;
 
@@ -156,7 +156,7 @@ internal static class ResponseVectorSeal
     /// </summary>
     private static byte[] ReservoirAssociatedData(string artifactId, string correlationId, string modelId)
     {
-        var label = Encoding.UTF8.GetBytes("grader_fingerprint_reservoir");
+        ReadOnlySpan<byte> label = "grader_fingerprint_reservoir"u8;
         var artifact = Encoding.UTF8.GetBytes(artifactId);
         var correlation = Encoding.UTF8.GetBytes(correlationId);
         var model = Encoding.UTF8.GetBytes(modelId);
@@ -182,13 +182,13 @@ internal static class ResponseVectorSeal
     }
 
     /// <summary>Writes a little-endian length and then <paramref name="segment"/>.</summary>
-    private static int WriteSegment(byte[] destination, int offset, byte[] segment)
+    private static int WriteSegment(byte[] destination, int offset, ReadOnlySpan<byte> segment)
     {
         destination[offset] = (byte)segment.Length;
         destination[offset + 1] = (byte)(segment.Length >> 8);
         destination[offset + 2] = (byte)(segment.Length >> 16);
         destination[offset + 3] = (byte)(segment.Length >> 24);
-        segment.CopyTo(destination, offset + 4);
+        segment.CopyTo(destination.AsSpan(offset + 4));
         return offset + 4 + segment.Length;
     }
 }

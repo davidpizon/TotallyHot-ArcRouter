@@ -98,8 +98,7 @@ internal static class GraderEpochFit
         var labels = new double[split.Training.Count];
         for (var i = 0; i < split.Training.Count; i++)
         {
-            var encoded = GraderEpochFeatures.Encode(artifact: layout, input: trainingInputs[i]);
-            if (encoded is null)
+            if (GraderEpochFeatures.Encode(artifact: layout, input: trainingInputs[i]) is not float[] encoded)
                 throw new InvalidOperationException("A training row could not be encoded on the layout just fit from it.");
             matrix[i] = encoded;
             labels[i] = split.Training[i].JudgeScore;
@@ -175,7 +174,7 @@ internal static class GraderEpochFit
         foreach (var label in training)
         {
             var input = label.ToInput(bgeModelId, dimension);
-            if (!input.QuestionMissing && input.QuestionVector is not null) usable.Add(label);
+            if (input is { QuestionMissing: false, QuestionVector: not null }) usable.Add(label);
         }
 
         usable.Sort(static (left, right) =>
@@ -276,7 +275,7 @@ internal static class GraderEpochFit
         for (var sample = 0; sample < means.Length; sample++)
         {
             double sum = 0;
-            for (var row = 0; row < deltas.Length; row++) sum += deltas[random.Next(deltas.Length)];
+            foreach (var _ in deltas) sum += deltas[random.Next(deltas.Length)];
             means[sample] = sum / deltas.Length;
         }
 

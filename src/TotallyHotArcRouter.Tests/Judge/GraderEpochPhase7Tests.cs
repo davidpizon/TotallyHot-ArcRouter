@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -272,7 +271,7 @@ public class GraderEpochPhase7Tests
             MinimumLabels = 6, HoldoutSize = 1, MinimumTrainingRows = 1, ReservoirCapacity = 10
         });
         var origin = new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero);
-        var usable = new float[] { 0.6f, 0.8f };
+        float[] usable = [0.6f, 0.8f];
         await world.Add(new Row { Id = "t-usable", Kind = GraderEpochKinds.Code, CreatedAt = origin, Question = usable });
         await world.Add(new Row
         {
@@ -308,7 +307,7 @@ public class GraderEpochPhase7Tests
         {
             MinimumLabels = 4, HoldoutSize = 1, MinimumTrainingRows = 1, ReservoirCapacity = 10
         });
-        var question = new float[] { 0.6f, 0.8f };
+        float[] question = [0.6f, 0.8f];
         var origin = new DateTimeOffset(2026, 3, 2, 0, 0, 0, TimeSpan.Zero);
         await world.Add(new Row { Id = "sealed-train", Kind = GraderEpochKinds.Code, CreatedAt = origin, Question = question });
         await world.Add(new Row
@@ -343,7 +342,7 @@ public class GraderEpochPhase7Tests
         {
             MinimumLabels = 6, HoldoutSize = 2, MinimumTrainingRows = 3, ReservoirCapacity = 20
         });
-        await world.SeedLinear(count: 8, holdout: 2, question: new float[] { 0.6f, 0.8f });
+        await world.SeedLinear(count: 8, holdout: 2, question: [0.6f, 0.8f]);
         await world.Tick();
         var first = world.Store.TryReadAccepted(GraderEpochKinds.Code);
         Assert.NotNull(first);
@@ -369,7 +368,7 @@ public class GraderEpochPhase7Tests
         }))
         {
             var origin = new DateTimeOffset(2026, 3, 3, 0, 0, 0, TimeSpan.Zero);
-            var vector = new float[] { 0.6f, 0.8f };
+            float[] vector = [0.6f, 0.8f];
             await populated.Add(new Row
             {
                 Id = "floor-train", Kind = GraderEpochKinds.Code, CreatedAt = origin, Question = vector
@@ -404,18 +403,18 @@ public class GraderEpochPhase7Tests
         await empty.Add(new Row
         {
             Id = "empty-train-a", Kind = GraderEpochKinds.Code, CreatedAt = start, QuestionFlag = true,
-            Question = new float[] { 0.6f, 0.8f }
+            Question = [0.6f, 0.8f]
         });
         await empty.Add(new Row
         {
             Id = "empty-train-b", Kind = GraderEpochKinds.Code, CreatedAt = start.AddMinutes(1), QuestionFlag = true,
-            Question = new float[] { 0.6f, 0.8f }
+            Question = [0.6f, 0.8f]
         });
         await empty.Add(new Row { Id = "empty-pad", Kind = GraderEpochKinds.Code, CreatedAt = start.AddMinutes(2) });
         await empty.Add(new Row
         {
             Id = "empty-hold", Kind = GraderEpochKinds.Code, CreatedAt = start.AddMinutes(3),
-            Question = new float[] { 0.6f, 0.8f }
+            Question = [0.6f, 0.8f]
         });
         await empty.Tick();
         Assert.Null(empty.ReadWritten(GraderEpochKinds.Code).CosineFloor);
@@ -442,7 +441,7 @@ public class GraderEpochPhase7Tests
     }
 
     [Fact]
-    public async Task Rollback_KeepsPreviousFile_AndDoesNotPromoteIt()
+    public void Rollback_KeepsPreviousFile_AndDoesNotPromoteIt()
     {
         using var world = World.Create(World.Small());
         var first = world.AcceptLayout(weightOnResponse0: 0f, bias: 0f);
@@ -471,7 +470,7 @@ public class GraderEpochPhase7Tests
             JudgeScoredMemory = true
         });
         var artifact = world.AcceptLayout(weightOnResponse0: 1f, bias: 0f, cosineFloor: 0.2,
-            reservoir: [("shadow-match", new float[] { 0.6f, 0.8f })]);
+            reservoir: [("shadow-match", [0.6f, 0.8f])]);
         var judgeRows = world.JudgeRowCount("shadow-match");
 
         var result = await world.Shadow("shadow-match", judgeScore: 0.7);
@@ -537,7 +536,7 @@ public class GraderEpochPhase7Tests
             Question = [0.6f, 0.8f]
         });
         world.AcceptLayout(weightOnResponse0: 1f, bias: 0f, cosineFloor: null,
-            reservoir: [("shadow-null-floor", new float[] { 0.6f, 0.8f })]);
+            reservoir: [("shadow-null-floor", [0.6f, 0.8f])]);
 
         var result = await world.Shadow("shadow-null-floor", questionMissing: false);
 
@@ -549,7 +548,7 @@ public class GraderEpochPhase7Tests
     public async Task QuestionVectorMissing_NullFlag_FollowsMemoryRow()
     {
         using var world = World.Create(World.Small());
-        var vector = new float[] { 0.6f, 0.8f };
+        float[] vector = [0.6f, 0.8f];
         await world.Add(new Row { Id = "null-hit", Kind = GraderEpochKinds.Code, Question = vector, QuestionFlag = null });
         await world.Add(new Row { Id = "null-none", Kind = GraderEpochKinds.Code, QuestionFlag = null });
         await world.Add(new Row
@@ -857,8 +856,8 @@ public class GraderEpochPhase7Tests
             MinimumLabels = 3, HoldoutSize = 1, MinimumTrainingRows = 1, ReservoirCapacity = 5
         });
         var origin = new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);
-        var good = new float[] { 0.25f, 0.25f };
-        var flagged = new float[] { 0.9f, 0.1f };
+        float[] good = [0.25f, 0.25f];
+        float[] flagged = [0.9f, 0.1f];
         await world.Add(new Row
         {
             Id = "indicator-good", Kind = GraderEpochKinds.Code, CreatedAt = origin, Question = good, QuestionFlag = false
@@ -1020,9 +1019,9 @@ public class GraderEpochPhase7Tests
             ShadowObserver = shadow;
         }
 
-        public RouterMemoryDatabase Database { get; }
+        private RouterMemoryDatabase Database { get; }
 
-        public ProtectedSecretStore Secrets { get; }
+        private ProtectedSecretStore Secrets { get; }
 
         public ResponseVectorKeyHolder Keys { get; }
 
@@ -1030,7 +1029,7 @@ public class GraderEpochPhase7Tests
 
         public SqliteGradeReceiptStore Receipts { get; }
 
-        public SqliteGraderScoreStore Scores { get; }
+        private SqliteGraderScoreStore Scores { get; }
 
         public StaticOptionsMonitor<GraderEpochOptions> Epoch { get; }
 
@@ -1038,9 +1037,9 @@ public class GraderEpochPhase7Tests
 
         public StaticOptionsMonitor<QualityOptions> Quality { get; }
 
-        public StaticOptionsMonitor<EmbeddingOptions> Embedding { get; }
+        private StaticOptionsMonitor<EmbeddingOptions> Embedding { get; }
 
-        public StaticOptionsMonitor<StorageOptions> Storage { get; }
+        private StaticOptionsMonitor<StorageOptions> Storage { get; }
 
         public GraderEpochArtifactStore Store { get; }
 
@@ -1050,7 +1049,7 @@ public class GraderEpochPhase7Tests
 
         public CaptureLog StoreLog { get; }
 
-        public GraderEpochHostedService Service { get; }
+        private GraderEpochHostedService Service { get; }
 
         public ShadowLocalScoreObserver ShadowObserver { get; }
 
@@ -1186,18 +1185,18 @@ public class GraderEpochPhase7Tests
                 QuestionTruncated: false,
                 FingerprintRef: null,
                 ScorerVersion: "3.0",
-                PromptVersion: row.Prompt ?? Prompt,
+                PromptVersion: Prompt,
                 WeightsVersion: weights,
                 AbstainedGraders: string.Empty,
                 IncompleteReason: row.Incomplete,
                 GradeSource: GradeSources.Teacher,
                 ResponseHasCode: row.HasCode,
-                JudgeModel: row.JudgeModel ?? TeacherModel,
+                JudgeModel: TeacherModel,
                 AnswerModel: "answer",
                 QuestionVectorMissing: row.QuestionFlag,
                 SessionId: row.SessionId,
                 SpotCheck: row.SpotCheck,
-                ResponseLengthChars: row.Length,
+                ResponseLengthChars: null,
                 LocalScore: row.LocalScore,
                 SyntaxScore: row.Syntax));
             if (row.RawCreated is not null)
@@ -1219,17 +1218,9 @@ public class GraderEpochPhase7Tests
                         GraderKey: GraderKeys.Judge,
                         Score: row.Judge,
                         GraderBackboneModel: TeacherModel,
-                        ResponseLengthChars: row.Length,
+                        ResponseLengthChars: null,
                         PromptVersion: Prompt));
                 }
-            }
-
-            if (row.Analysis is not null)
-            {
-                await Scores.InsertAsync(new GraderScoreRecord(
-                    Id: 0, CorrelationId: row.Id, CreatedAtUtc: created, Dimension: "chat", Model: "answer",
-                    GraderKey: GraderKeys.Analysis, Score: row.Analysis.Value, GraderBackboneModel: null,
-                    ResponseLengthChars: row.Length));
             }
 
             if (row.GarbageResponse)
@@ -1258,7 +1249,7 @@ public class GraderEpochPhase7Tests
                     ("$score", row.Judge),
                     ("$at", created.ToString("O")),
                     ("$judged", row.JudgeScoredMemory ? 1 : 0),
-                    ("$model", row.QuestionModelNull ? DBNull.Value : (object)(row.QuestionModel ?? Bge)),
+                    ("$model", ModelOrNull(row)),
                     ("$id", row.Id));
             }
         }
@@ -1480,7 +1471,7 @@ public class GraderEpochPhase7Tests
         public string ArtifactPath(string kind, string artifactId) =>
             Path.Combine(Storage.CurrentValue.ResolveGraderEpochDirectory(), kind, artifactId + ".json");
 
-        public string ReservoirPath(string kind, string artifactId) =>
+        private string ReservoirPath(string kind, string artifactId) =>
             Path.Combine(Storage.CurrentValue.ResolveGraderEpochDirectory(), kind, artifactId + ".reservoir");
 
         public byte[] ReservoirBytes(string kind, string artifactId)
@@ -1545,6 +1536,12 @@ public class GraderEpochPhase7Tests
             }
         }
 
+        private object ModelOrNull(Row row)
+        {
+            if (row.QuestionModelNull) return DBNull.Value;
+            return row.QuestionModel ?? Bge;
+        }
+
         private static byte[] Floats(float[] vector)
         {
             var bytes = new byte[vector.Length * sizeof(float)];
@@ -1599,15 +1596,7 @@ public class GraderEpochPhase7Tests
 
         public double? Syntax { get; init; }
 
-        public int? Length { get; init; }
-
-        public double? Analysis { get; init; }
-
         public bool SpotCheck { get; init; }
-
-        public string? Prompt { get; init; }
-
-        public string? JudgeModel { get; init; }
 
         public bool JudgeScoredMemory { get; init; }
     }

@@ -199,27 +199,6 @@ public sealed class GraderEpochArtifactStore
         }
     }
 
-    /// <summary>Correlation ids stored in a kind's reservoir file, without decrypting the vectors.</summary>
-    /// <param name="kind">The kind folder.</param>
-    /// <param name="artifactId">The artifact whose reservoir to read. Failed candidates are not read here.</param>
-    /// <returns>The ids in file order, or an empty list when the file is missing or the magic is wrong.</returns>
-    internal IReadOnlyList<string> ReadReservoirCorrelationIds(string kind, string artifactId)
-    {
-        lock (_gate)
-        {
-            var path = Path.Combine(KindDirectory(kind), artifactId + ".reservoir");
-            if (!File.Exists(path)) return [];
-            return GraderEpochReservoir.Read(File.ReadAllBytes(path)).Select(record => record.CorrelationId).ToList();
-        }
-    }
-
-    /// <summary>Whether a failed candidate's JSON is still on disk. Shadow scoring does not call this.</summary>
-    /// <param name="kind">The kind folder.</param>
-    /// <param name="artifactId">The candidate id.</param>
-    /// <returns><see langword="true"/> when <c>failed/{id}.json</c> exists.</returns>
-    internal bool FailedContains(string kind, string artifactId) =>
-        File.Exists(Path.Combine(KindDirectory(kind), "failed", artifactId + ".json"));
-
     private GraderEpochArtifact? ReadAcceptedLocked(string kind)
     {
         if (kind is not (GraderEpochKinds.Code or GraderEpochKinds.NonCode)) return null;
@@ -235,7 +214,7 @@ public sealed class GraderEpochArtifactStore
         try
         {
             var pointer = JsonSerializer.Deserialize<AcceptedPointer>(File.ReadAllBytes(pointerPath), Json);
-            if (pointer?.ArtifactId is not string artifactId || !IsArtifactId(artifactId))
+            if (pointer is not { ArtifactId: { } artifactId } || !IsArtifactId(artifactId))
             {
                 _logger.LogWarning(
                     message: "Grader epoch accepted pointer for kind {Kind} is unreadable; treating it as no artifact.",
@@ -396,7 +375,7 @@ public sealed class GraderEpochArtifactStore
 
     private sealed class AcceptedPointer
     {
-        public string? ArtifactId { get; set; }
+        public string? ArtifactId { get; init; }
     }
 
     private sealed class CacheEntry
