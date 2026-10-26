@@ -166,8 +166,13 @@ public class ResponseVectorPhase3Tests
         var second = harness.Store.ReadSealed("a");
 
         Assert.NotNull(first);
-        Assert.NotNull(second);
-        Assert.NotEqual(first, second);
+        Assert.Equal(first, second);
+        Assert.Equal(1, embedder.Calls);
+        var key = new byte[32];
+        key[0] = 9;
+        Assert.NotEqual(
+            ResponseVectorSeal.Seal(key: key, correlationId: "a", modelId: "bge-test", vector: embedder.Vector),
+            ResponseVectorSeal.Seal(key: key, correlationId: "a", modelId: "bge-test", vector: embedder.Vector));
 
         harness.CopySealed(fromCorrelationId: "a", toCorrelationId: "b");
         Assert.False(harness.Store.TryOpen(correlationId: "b", vector: out _));

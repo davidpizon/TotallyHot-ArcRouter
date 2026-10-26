@@ -642,7 +642,7 @@ public class GraderEpochPhase8Tests
             var observer = new ResponseVectorGradeObserver(
                 embeddings: probe.Embedder,
                 responseText: probe.Text,
-                store: probe.World.Vectors,
+                store: probe.Fixture.Vectors,
                 logger: NullLogger<ResponseVectorGradeObserver>.Instance);
             observer.ObserveAsync(probe.Result).GetAwaiter().GetResult();
             Assert.Equal(1, probe.Embedder.Calls);
@@ -655,18 +655,18 @@ public class GraderEpochPhase8Tests
         await Grade(FindId(drawn: false), cosineFloor: 0.2, question: [1f, 0f], probe: probe =>
         {
             var decision = probe.Result.LocalScore;
-            probe.World.Vectors.UpsertAsync(
+            probe.Fixture.Vectors.UpsertAsync(
                 correlationId: probe.Result.RequestCorrelationId,
-                embeddingModel: probe.World.Bge,
+                embeddingModel: probe.Fixture.Bge,
                 vector: [0.9f, 0.9f],
                 createdAtUtc: DateTimeOffset.UnixEpoch).GetAwaiter().GetResult();
             var shadow = new ShadowLocalScoreObserver(
-                store: probe.World.Store,
-                query: probe.World.Query,
-                vectors: probe.World.Vectors,
-                judge: probe.World.Judge,
-                quality: probe.World.Quality,
-                embedding: probe.World.Embedding,
+                store: probe.Fixture.Store,
+                query: probe.Fixture.Query,
+                vectors: probe.Fixture.Vectors,
+                judge: probe.Fixture.Judge,
+                quality: probe.Fixture.Quality,
+                embedding: probe.Fixture.Embedding,
                 logger: NullLogger<ShadowLocalScoreObserver>.Instance);
             shadow.Apply(probe.Result, GradingRecipes.Bootstrap);
             Assert.Equal(decision, probe.Result.LocalScore);
@@ -715,7 +715,8 @@ public class GraderEpochPhase8Tests
         Assert.Equal(0.8, spot.JudgeScore);
         var pairs = await world.Query.LoadSpotCheckPairsAsync(GraderEpochKinds.NonCode, artifact, CancellationToken.None);
         Assert.DoesNotContain(pairs, pair => pair.CorrelationId == "spot-miss");
-        Assert.Contains(pairs, pair => pair.CorrelationId == "spot" && pair.JudgeScore == 0.8);
+        var kept = Assert.Single(pairs, pair => pair.CorrelationId == "spot");
+        Assert.Equal(0.8, kept.JudgeScore, precision: 5);
     }
 
     [Fact]
@@ -858,14 +859,14 @@ public class GraderEpochPhase8Tests
             await aggregator.CompleteGraderAsync(id, GraderKeys.Judge, teacherScore.Value);
 
         var written = observer.Written.Last();
-        probe?.Invoke(new GradeProbe(world, written, embedder, text));
+        probe?.Invoke(new GradeProbe(Fixture: world, Result: written, Embedder: embedder, Text: text));
         return new Graded(written, dispatcher, log, artifact, embedder.Calls);
     }
 
     private sealed record Graded(QualityResult Result, RecordingDispatcher Dispatcher, List<string> Log, string Artifact, int Embeds);
 
     private sealed record GradeProbe(
-        GraderEpochPhase7Tests.World World, QualityResult Result, FixedEmbedder Embedder, PendingResponseTextCache Text);
+        GraderEpochPhase7Tests.World Fixture, QualityResult Result, FixedEmbedder Embedder, PendingResponseTextCache Text);
 
     private sealed class RecordingDispatcher : IAsyncGraderDispatcher
     {
@@ -877,9 +878,10 @@ public class GraderEpochPhase8Tests
             CancellationToken cancellationToken = default)
         {
             Calls.Add(pendingGraderKeys);
-            return Task.FromResult<IReadOnlySet<string>>(Accept
+            IReadOnlySet<string> accepted = Accept
                 ? pendingGraderKeys
-                : new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            return Task.FromResult(accepted);
         }
     }
 

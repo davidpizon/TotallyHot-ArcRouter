@@ -87,7 +87,7 @@ public sealed class QualityOptions
     public int ThanksMaxChars { get; init; } = 80;
 
     /// <summary>Per-dimension scoring weights, keyed by dimension name.</summary>
-    public Dictionary<string, DimensionWeightOptions> DimensionWeights { get; set; } =
+    public Dictionary<string, DimensionWeightOptions> DimensionWeights { get; init; } =
         new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>

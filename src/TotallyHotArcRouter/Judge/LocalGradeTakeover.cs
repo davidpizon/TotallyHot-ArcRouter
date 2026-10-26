@@ -164,8 +164,8 @@ public sealed class LocalGradeTakeover : ILocalGradeTakeover
         result.SpotCheck = drawn;
 
         string? reason = null;
-        var callTeacher = false;
-        var allowLocal = false;
+        bool callTeacher;
+        bool allowLocal;
         if (lowConfidence)
         {
             callTeacher = true;

@@ -1058,7 +1058,7 @@ public class GraderEpochPhase7Tests
 
         public ShadowLocalScoreObserver ShadowObserver { get; }
 
-        public SqliteGraderEpochEventStore Events { get; }
+        public IGraderEpochEventStore Events { get; }
 
         public string TeacherModel => "teacher-a";
 

@@ -253,7 +253,7 @@ public sealed class GraderEpochLabelQuery
                                 AND r.weights_version = $weights;
                               """;
         command.Parameters.AddWithValue("$judgeKey", GraderKeys.Judge);
-        command.Parameters.AddWithValue("$complete", GradeStatus.Complete.ToString());
+        command.Parameters.AddWithValue("$complete", nameof(GradeStatus.Complete));
         command.Parameters.AddWithValue("$artifact", artifactId);
         command.Parameters.AddWithValue("$weights", weights);
         var pairs = new List<GraderEpochSpotCheckPair>();

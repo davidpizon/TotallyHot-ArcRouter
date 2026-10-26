@@ -185,8 +185,12 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
 
         if (pendingGraders.Count == 0)
         {
-            var teacherWasExpected = decision.Handled && decision.CallTeacher
-                && decision.TeacherCallReason != GradeSources.SpotCheck;
+            var teacherWasExpected = decision is
+            {
+                Handled: true,
+                CallTeacher: true,
+                TeacherCallReason: not GradeSources.SpotCheck
+            };
             await WriteAsync(result: result, llmGraderWasAvailable: teacherWasExpected,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
             return;
