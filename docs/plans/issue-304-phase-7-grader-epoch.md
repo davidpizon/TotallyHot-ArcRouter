@@ -313,6 +313,12 @@ New test class `GraderEpochPhase7Tests` in `src/TotallyHotArcRouter.Tests`, besi
 - The log says the spot-check window is not active, and a bad spot-check window does not retire the artifact.
 - Shadow scores appear only after a matching accepted artifact exists, with `local_grader_version` equal to that id, and they are not training labels.
 
+## Open questions
+
+These are for David. This file does not pick an answer, and an implementer does not invent one.
+
+**`local_confidence` when the cosine floor is null.** This file stores `local_confidence` only when the floor is non-null and the row has a usable question vector. The parent plan §3.5 says phase 7 stores `local_confidence` when the cosine can be computed. Those sentences differ when the reservoir is non-empty but no holdout row has a usable question vector: the floor is null, and a later live row can still have a nearest-neighbor cosine. Until David chooses, follow this file: `local_confidence` stays null when the floor is null.
+
 ## Names checked against the tree
 
 Checked with CodeGraph (index built for this pass) and Serena. These exist and are the ones this plan means:
