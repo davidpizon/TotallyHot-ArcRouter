@@ -78,7 +78,7 @@ Phase 8 does not rename the method and does not rename that test. The implementa
 - `QualityScorer` uses `LocalScore` on the judge axis only when that row's local score is the grade of record and `JudgeScore` is empty.
 - The spot-check window on the epoch tick, and `RollbackToTeacher` when P6 fails.
 - Receipt `grade_source` values in P8. `spot_check`, `local_score`, `local_grader_version`, and `local_confidence` stay the columns phase 4 and phase 7 already added.
-- One append-only `grader_epoch_events` row per authority change, per kind.
+- One append-only `grader_epoch_events` row when a kind's grader begins grading on its own, and one when the teacher takes charge again for that kind. A switch flip or a retirement that leaves the teacher already in charge does not append. A repeat of the same artifact and the same authority does not append again.
 - Tests named below.
 
 ## Out of scope
@@ -447,7 +447,7 @@ New `GraderEpochPhase8Tests` in `src/TotallyHotArcRouter.Tests/Judge/`, beside `
 - A window of at least `SpotCheckWindowSize` rows with MAE greater than `SpotCheckRollbackMae` clears the accepted pointer, leaves the previous file on disk, does not promote it, writes `rollback.json`, and does not rewrite stored grades. A shorter window does not clear the pointer. MAE equal to the bar does not clear it.
 - While `rollback.json` exists, the teacher grades every eligible row of that kind. A healthy window for the new artifact deletes the marker and appends `local_takeover` with cause `live_check_pass`. The other kind is untouched. The #292 artifact is untouched.
 - A teacher, prompt, BGE, or feature-schema mismatch clears the accepted pointer and does not delete `rollback.json`. It does not create a marker that was not already there.
-- Each move between local and teacher, and each new artifact that takes over while the switch is on and no marker exists, appends one `grader_epoch_events` row in the same unit of work as the file change. Rows are not updated or deleted. They contain no question text and no response text. `mean_miss` is null when the transition was not a window.
+- Each move between local and teacher, and each new artifact that takes over while the switch is on and no marker exists, appends one `grader_epoch_events` row in the same unit of work as the file change. A switch flip or a retirement that leaves the teacher already in charge does not append. A repeat of the same artifact and the same authority does not append again. Rows are not updated or deleted. They contain no question text and no response text. `mean_miss` is null when the transition was not a window.
 - A `LocalScore` never becomes a `LoadForKindAsync` label. A skipped teacher never stores cost 0. Unknown cost stays null.
 - The four calculator cases log the four templates. A shadow `LocalScore` beside a teacher score stays case 1.
 - The `RunTickAsync` XML doc no longer says a disabled tick never visits the kinds, and it no longer says an enabled tick always logs that the spot-check window is not active. That doc is on `RunTickAsync` (lines 89–93). `RunKindAsync` has no separate doc. The `Enabled` property doc on `GraderEpochOptions` matches the same rule.
