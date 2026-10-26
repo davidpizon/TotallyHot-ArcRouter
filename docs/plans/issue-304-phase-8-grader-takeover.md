@@ -28,7 +28,7 @@
 
 ## Decisions already made
 
-These are inherited. This phase implements them. They are not open questions.
+These are inherited. This phase implements them. They are not open questions. Both-kinds takeover is not in this table. It is P4.
 
 | Topic | Rule | Where |
 |---|---|---|
@@ -41,7 +41,7 @@ These are inherited. This phase implements them. They are not open questions.
 | Rollback bar | A window of at least 50 spot-check rows whose MAE against the teacher is worse than 0.10 returns authority to the teacher. The number 50 and the bar 0.10 are confirmed. | Parent §4 phase 8 and §10 |
 | What rollback does to files | `GraderEpochArtifactStore.RollbackToTeacher` clears `accepted.json`. It does not promote a previous file, does not delete retired files, and does not throw. | Phase 7, in the tree |
 | Training labels | `GraderEpochLabelQuery.LoadForKindAsync` loads undisputed `Complete` teacher labels. A row whose only score is `LocalScore` is not a label. | Phase 7 |
-| Two kinds | `code` and `non-code`, from `weights_version`. One artifact does not cover both. A code recipe does not use the non-code artifact. Whether both kinds take over in this phase is P4. | Parent §3.2 and phase 7. P4. |
+| Two kinds | `code` and `non-code`, from `weights_version`. One artifact does not cover both. A code recipe does not use the non-code artifact. | Parent §3.2 and phase 7 |
 | Disputes | A contradicting signal compares `UnifiedScore` with `QualityOptions.ContradictionCutoff` (default 0.5). On a contradiction the receipt becomes `Incomplete` reason `disputed`, and phase 4 deletes `response_vectors` and the kNN row when one exists. | `UserGradeFeedbackService` calls `GradeDisputeService.ApplySignal` with `prior.UnifiedScore` |
 | Cost | A null estimate is not `Set`. `RequestTelemetryPublisher` lines 713–715 `Set` only when `estimatedCostUsd` has a value. `EmbeddingMemoryScoreObserver` lines 96–104 store null on a cache miss. `isJudgeScored` is `JudgeScore.HasValue` (line 136). | Phase 5, in the tree |
 | Judge axis cases | The four cases in parent §3.2, in that order, with one DEBUG template each. | Parent §3.2 |
@@ -332,9 +332,9 @@ New `GraderEpochPhase8Tests` in `src/TotallyHotArcRouter.Tests/Judge/`, beside `
 | `MissingQuestionVector_IsNotLowConfidence_AndIsNotAZeroVector` | Peek miss. Indicator 1. No zero `float[]`. `local_confidence` null. Teacher runs only on a draw. |
 | `SpotCheck_DrawsFromHash_NotFromRandomSeed` | A fixed correlation id draws the same way twice. `RandomSeed` does not change the draw. One id under the bucket and one over it. A low-confidence id is not drawn even if its bucket would hit. |
 | `SpotCheck_TeacherAnswers_GradeSourceSpotCheck` | `spot_check` true. `JudgeScore` set. `grade_source` is `spot_check`. The pair is kept. The row weighs 1.0 when `UnjudgedRowPolicy` is `Exclude`. |
-| `SpotCheck_TeacherMiss_KeepsLocalScore` | No judge score. `Complete`, `grade_source` `local`, `spot_check` true, unjudged. The pair is absent from `LoadSpotCheckPairsAsync`. |
-| `LowConfidence_TeacherMiss_IsIncomplete_NotALabel` | `Incomplete` reason `no_judge` when the pin is missing. Reason `queue_full` when the judge key's degraded reason is `judge-not-dispatched`. The case-3 template is logged. `IncompleteReason` is still empty when `Calculate` runs. A timeout stays in `GraderDegradedReasons` and does not copy into `IncompleteReason`. `LocalScore` stored, flag false, not a `LoadForKindAsync` label. The response vector is kept. Ingress `queue_full` never reaches `ApplyAsync`. |
-| `MissingPin_HighConfidence_StaysComplete` | `JudgeOptions` pin missing or `Enabled` false. Case 2. Reason is not `no_judge`. |
+| `SpotCheck_TeacherMiss_KeepsLocalScore` | No portfolio key pending. No judge score. `Complete`, `grade_source` `local`, `spot_check` true, unjudged. The pair is absent from `LoadSpotCheckPairsAsync`. |
+| `LowConfidence_TeacherMiss_IsIncomplete_NotALabel` | No portfolio key pending. `Incomplete` reason `no_judge` when the pin is missing. Reason `queue_full` when the judge key's degraded reason is `judge-not-dispatched`. The case-3 template is logged. `IncompleteReason` is still empty when `Calculate` runs. A timeout stays in `GraderDegradedReasons` and does not copy into `IncompleteReason`. `LocalScore` stored, flag false, not a `LoadForKindAsync` label. The response vector is kept. Ingress `queue_full` never reaches `ApplyAsync`. |
+| `MissingPin_HighConfidence_StaysComplete` | No portfolio key pending. `JudgeOptions` pin missing or `Enabled` false. Case 2. Reason is not `no_judge`. |
 | `JudgeIsAnswerer_DoesNotTakeOver` | `Incomplete` reason `judge_is_answerer`. `ApplyAsync` is not called. The judge client is not called. |
 | `LocalScore_TakeoverRow_IsNeverTheTrainingLabel` | A case-2 `Complete` row is absent from `LoadForKindAsync`. A spot-check row with a judge score is present, and its label equals the judge score. |
 | `Takeover_UnknownCost_StaysNull` | No pending cost. The memory row's cost is null. The judge client is not called. A reported zero on a second row stays zero. |
@@ -383,7 +383,7 @@ Phase 7 tests stay green, including `SpotCheckWindow_IsNotActive_DoesNotRetire` 
 
 ## Names checked against the tree
 
-Checked with CodeGraph (`npx @colbymchenry/codegraph init` in this pass; `codegraph_explore` on the router project) and Serena (`find_symbol`, `search_for_pattern`, session against `/workspace`). Both tools returned source. These exist and are the ones this plan means:
+Checked with CodeGraph (`npx @colbymchenry/codegraph init` in this pass; `codegraph_explore` on the router project) and Serena (`find_symbol`, `search_for_pattern`, session against `/workspace`). Both tools returned source. These bullets describe the tree today. The phase 8 changes are in Pipeline, Files, and Tests. A bullet that only describes today is not the future behavior.
 
 - `GraderEpochOptions` in `src/TotallyHotArcRouter/Judge/GraderEpochOptions.cs`, section `GraderEpoch`. Registered in `JudgeServiceCollectionExtensions` with `AddOptions`, `Bind`, and `ValidateDataAnnotations`. Properties in the tree: `Enabled`, `CheckIntervalMinutes`, `MinimumLabels`, `MinimumTrainingRows`, `HoldoutSize`, `MaxHoldoutMae`, `MinSpearman`, `BootstrapSamples`, `BootstrapConfidence`, `RandomSeed`, `ReservoirCapacity`, `CosineFloorPercentile`, `Trainer`, `FailedCandidateRetention`. `TakeoverEnabled`, `SpotCheckRate`, `SpotCheckWindowSize`, and `SpotCheckRollbackMae` are not on the type.
 - `GraderEpochHostedService.RunKindAsync` logs `Grader epoch spot-check window is not active in phase 7 for kind {Kind}.`
@@ -396,7 +396,7 @@ Checked with CodeGraph (`npx @colbymchenry/codegraph init` in this pass; `codegr
 - `QualityResult.LocalScore`, `LocalGraderVersion`, and `LocalConfidence` are settable. `SpotCheck` is `init` and false. `GradeSource` and `JudgeScore` are `init`. `IsJudgeScored` is not a property of `QualityResult`. Call sites use `JudgeScore.HasValue`.
 - `GradeStatusCalculator.Calculate` is the three-argument method. The judge-weight check is lines 45–46.
 - `QualityScorer.Score` line 32 uses `JudgeScore` and 0 when it is null.
-- `QualityScoreAggregator.SubmitAsync` returns early for an ingress incomplete reason, for `judge_is_answerer`, for an empty correlation id, and for a missing pin while the judge is enabled. `WriteAsync` is lines 503–531. `DeterminePendingGraders` adds `GraderKeys.Judge` when `IJudgeAvailability.WillJudge` is true, then adds every key from `IPortfolioGraderAvailability.DetermineGraderKeys`. The host implementation is `PortfolioGraderAvailability` in `src/TotallyHotArcRouter/Judge/PortfolioGraderAvailability.cs`.
+- `QualityScoreAggregator.SubmitAsync` today returns early for an ingress incomplete reason, for `judge_is_answerer`, for a missing pin while the judge is enabled (lines 155–161), and then for an empty correlation id (lines 169–173). Phase 8 moves the pin-missing return to after `ApplyAsync` and keeps it only when `Handled` is false. The empty-id return stays before `ApplyAsync`. See the Files row. `WriteAsync` is lines 503–531. `DeterminePendingGraders` adds `GraderKeys.Judge` when `IJudgeAvailability.WillJudge` is true, then adds every key from `IPortfolioGraderAvailability.DetermineGraderKeys`. The host implementation is `PortfolioGraderAvailability` in `src/TotallyHotArcRouter/Judge/PortfolioGraderAvailability.cs`.
 - `GradeStatusCalculator` lines 48–53 are the extra-weight loop. They run after the judge-weight check. Line 36 returns `Incomplete` when `IncompleteReason` is already set, before that check.
 - `DispatchPendingGradersAsync` abandons a key the dispatcher did not accept with the reason `{key}-not-dispatched`. For `GraderKeys.Judge` that string is `judge-not-dispatched`. `GraderDispatcher` takes that path when `TryEnqueue` returns false.
 - `GraderEpochHostedService.RunTickAsync` lines 98–102 log `Grader epoch is disabled; this tick will not fit.` and return when `Enabled` is false, before the kind loop.
