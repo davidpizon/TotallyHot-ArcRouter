@@ -4,7 +4,7 @@
 **Date:** 2026-10-23
 **Deciders:** David Pizon
 **Accepted:** 2026-10-23 (David, chat sign-off on #304 plan)
-**Amendments:** [Amendment 1 (2026-10-23) — phase 3 stores the sealed response vector and the question-vector miss](#amendment-1-2026-10-23-phase-3-stores-the-sealed-response-vector-and-the-question-vector-miss) · [Amendment 2 (2026-10-26) — phase 7 acceptance stays in shadow](#amendment-2-2026-10-26-phase-7-acceptance-stays-in-shadow)
+**Amendments:** [Amendment 1 (2026-10-23) — phase 3 stores the sealed response vector and the question-vector miss](#amendment-1-2026-10-23-phase-3-stores-the-sealed-response-vector-and-the-question-vector-miss) · [Amendment 2 (2026-10-26) — phase 7 acceptance stays in shadow](#amendment-2-2026-10-26-phase-7-acceptance-stays-in-shadow) · [Amendment 3 (2026-10-26) — phase 8 takeover is approved](#amendment-3-2026-10-26-phase-8-takeover-is-approved)
 
 ## Context and Problem Statement
 
@@ -178,7 +178,7 @@ deletes every row and creates a new key. Question vectors in `memory_entries` st
 
 ## Amendment 2 (2026-10-26): phase 7 acceptance stays in shadow
 
-**Status:** accepted (David Pizon, 2026-10-26). The decision is accepted. The phase 7 code is not in the tree until that implementation merges. Amends decision 3's sentence about what acceptance does. It does not change the teacher pin, the recipe split, the tally rule, or the rule that takeover is a later phase of this plan rather than a second ADR.
+**Status:** accepted (David Pizon, 2026-10-26). The decision is accepted. The phase 7 code landed in [#346](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/346). Amends decision 3's sentence about what acceptance does. It does not change the teacher pin, the recipe split, the tally rule, or the rule that takeover is a later phase of this plan rather than a second ADR.
 
 ### Why
 
@@ -191,10 +191,62 @@ The alternative, treating the original sentence literally, would make phase 7 th
 Acceptance and takeover stay two phases of [`docs/plans/issue-304-grade-non-coding-responses.md`](../plans/issue-304-grade-non-coding-responses.md). The procedure is [`docs/plans/issue-304-phase-7-grader-epoch.md`](../plans/issue-304-phase-7-grader-epoch.md).
 
 - Phase 7: a candidate that clears the agreement gate is stored as the accepted artifact for its kind, status `accepted, shadow`. The teacher score stays the grade of record for every grade in that phase. A shadow `LocalScore` may be written beside it. It does not fill the judge axis, and it does not leave `JudgeScore` empty.
-- Phase 8: takeover. The local score becomes the grade of record and fills the judge axis. `JudgeScore` stays empty on those rows, which is the unjudged rule in the plan's §12. Spot-check rows and low-confidence rows still set `JudgeScore` from the teacher.
+- Phase 8: takeover. The local score becomes the grade of record and fills the judge axis. `JudgeScore` stays empty on those rows, which is the unjudged rule in the plan's §12. Spot-check rows and low-confidence rows still set `JudgeScore` from the teacher. The approved procedure is [Amendment 3](#amendment-3-2026-10-26-phase-8-takeover-is-approved).
 - This remains one plan. It does not open a second ADR.
 
 Related: [#293](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/293),
   [#294](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/294),
   [#319](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/319),
   [#326](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/326).
+
+## Amendment 3 (2026-10-26): phase 8 takeover is approved
+
+**Status:** accepted. David approved the phase 8 plan on 2026-10-26, including takeover defaulting on and a rollback mark that a teacher, prompt, BGE, or feature-schema change does not delete. This amendment records that procedure so this ADR and the plans describe the same phase. It does not change the teacher pin, the recipe split, the tally rule, or Amendment 2. It does not open a second ADR.
+
+### Why
+
+Amendment 2 left phase 8 as the phase that fills the judge axis. It did not say when a grade may skip the teacher, how the 5% sample is chosen, what "too wrong" measures, or what a rollback does to the next artifact. The phase 7 method `GraderEpochArtifactStore.RollbackToTeacher` only clears `accepted.json`. Its name reads as if phase 7 returned authority to the teacher. Phase 7 could not do that, because the teacher never lost authority. Phase 8 is the phase in which clearing the pointer returns authority, since the pointer is what allows a skip.
+
+The alternative, treating a gate pass in phase 7 as takeover, is the reading Amendment 2 already rejected. The alternative of renaming `RollbackToTeacher` was set aside: the method is in the tree, phase 7 tests call it, and the name matches the phase 8 effect. The alternative of shipping with `TakeoverEnabled` defaulting to false was the first draft. David rejected that on 2026-10-26. The switch stays as an emergency off.
+
+### Decision
+
+The procedure is [`docs/plans/issue-304-phase-8-grader-takeover.md`](../plans/issue-304-phase-8-grader-takeover.md). David approved P1–P9 and the epoch history on 2026-10-26.
+
+- Takeover is per kind. An accepted matching artifact for `code` does not grade `non-code`, and the reverse is also true. A rollback of one kind leaves the other kind's pointer, window, and epoch rows in place. Both kinds may take over in phase 8, each from its own artifact. Skipping the teacher removes only the judge key. CodeJudge, ICE-Score, and RACE still join when they are pending.
+- `GraderEpochOptions.TakeoverEnabled` defaults to true. A matching accepted artifact takes over as soon as the gate passes, when that kind has no `rollback.json`. The match includes the teacher model, the teacher prompt version, the BGE id, and the feature-schema version. False is the emergency off: the next grade does not skip the teacher, `accepted.json` and the artifact files stay, old receipts are not rewritten, and `rollback.json` is not deleted. The 5% draw and the spot-check window still run. APPROVED by David (2026-10-26): while the switch is off, a spot-check or any other teacher call that fails never makes the local score the grade of record. `Enabled` stays the fit switch. `Enabled` false still logs that the tick will not fit, still runs retirement and the window, and returns before the trainer check. That removes the early return in `GraderEpochHostedService.RunTickAsync` (lines 98–102).
+- The first gate pass takes over immediately when the artifact matches the teacher model, the prompt version, the BGE id, and the feature-schema version, and that kind has no `rollback.json`. There is no wait for 50 live spot-checks before that first takeover. After a rollback, the next artifact stays in shadow until its own newest 50 spot-checks have a mean miss at or under 0.10. The mark stays until that live check passes.
+- The 5% draw is a hash of the correlation id. It does not use `GraderEpochOptions.RandomSeed`.
+- The teacher still grades the 5% sample and every row whose question cosine is strictly below the stored floor. A score on the line is graded locally. A null floor and a missing question vector are not low confidence. `local_confidence` stays null in those cases, never 0.
+- A spot-check window of the newest 50 rows for the grader in charge, with mean absolute error against the judge score strictly greater than 0.10, calls `RollbackToTeacher` and writes `rollback.json`. Exactly 0.10 stays. Fewer than 50 rows does nothing. The previous file stays on disk and is not promoted. Stored grades are not rewritten. The mean is against the teacher judge score, not the blended unified score.
+- APPROVED by David (2026-10-26): a teacher, prompt, BGE, or feature-schema change still clears `accepted.json` and never creates a rollback mark. It does not delete `rollback.json`. With no mark, the next artifact that passes the gate takes over immediately. An existing mark stays until the live 5% check passes. A bucket re-form does not retire the artifact and does not touch the marker. APPROVED by David (2026-10-26): a change of teacher model id or teacher prompt version appends one `teacher_changed` row per kind, a BGE model-id change appends one `bge_changed` row, and a feature-schema change appends one `feature_schema_changed` row. Each row stores the UTC time, the previous and new value, and whether a rollback mark existed. The teacher row stores both the model pair and the prompt pair. The BGE row stores `previous_bge_model` and `bge_model`. The schema row stores `previous_feature_schema_version` and `feature_schema_version` as integers. Phase 8 compares all four fields on the accepted artifact before `TryRetireMismatch` (lines 100–117, called at lines 131–133) clears it. `Mismatch` (lines 360–369) still returns only the first difference. The identity rows are committed before that clear. A restart does not write the same row again. A BGE change does not append `teacher_changed`. A feature-schema change does not append `teacher_changed`.
+- Who graded the row is the existing `grade_source` column. Phase 8 does not add a receipt column.
+- A `LocalScore` is not a grader-epoch training label. Rows the teacher actually scored remain the labels. kNN still stores a `Complete` takeover row with `is_judge_scored` false. Disputes still compare `UnifiedScore` and still delete the response vector and the kNN row.
+- A skipped teacher call does not write cost 0. Unknown request cost stays null.
+- Each time a kind's local grader begins grading on its own, and each time the teacher takes charge again for that kind, phase 8 appends one `grader_epoch_events` row in `RouterMemoryDatabase`. A gate pass while `rollback.json` exists does not append `local_takeover`. A switch flip that leaves the teacher already in charge does not append an authority row. A BGE or feature-schema retirement that leaves the teacher already in charge does not append an authority row. It appends `bge_changed` or `feature_schema_changed`. A repeat of the same artifact and the same authority does not append again. A teacher-model or prompt-version change appends `teacher_changed`, a BGE change appends `bge_changed`, and a feature-schema change appends `feature_schema_changed`, even when the teacher was already in charge, once per change per kind. Phase 9 graphs `local_takeover`, `teacher_resumed`, `teacher_changed`, `bge_changed`, and `feature_schema_changed` on the token-efficiency timeline. The row has a UTC timestamp, the kind, the epoch type, a cause, the artifact id and the previous artifact id, and, only for a window, the window size and the mean miss. A `teacher_changed` row also has the previous and new teacher model id, the previous and new prompt version, and `rollback_mark_present`. A `bge_changed` row has the previous and new BGE model id and `rollback_mark_present`. A `feature_schema_changed` row has the previous and new feature-schema version and `rollback_mark_present`. No row stores question text or response text. Rows are not updated and not deleted. They survive a restart. Authority rows (`local_takeover`, `teacher_resumed`) insert, then rename the authority file, then commit. Identity rows (`teacher_changed`, `bge_changed`, `feature_schema_changed`) are a different order: they commit before the pointer clear so a retry cannot write a second row and cannot lose the previous identity. Phase 9 reads `SELECT id, at_utc, kind, epoch_type, cause, artifact_id, previous_artifact_id, window_size, mean_miss, previous_teacher_model, teacher_model, previous_prompt_version, prompt_version, rollback_mark_present, previous_bge_model, bge_model, previous_feature_schema_version, feature_schema_version FROM grader_epoch_events ORDER BY at_utc, id` and overlays that list on `request_transcripts` (`created_at_utc`, `input_tokens`, `output_tokens`, `cost`). Those are two database files. The chart does not join them in SQL, and it does not claim the epoch caused a token-efficiency change. A null cost stays null, never 0. A null token count stays null, never 0. Phase 9 owns the chart. The named tests are `EpochEvent_OnTakeover_AppendsLocalTakeover`, `EpochEvent_OnRollback_AppendsTeacherResumed`, `EpochEvent_OnSwitchOff_AppendsTeacherResumed`, `EpochEvent_AppendOnly`, `EpochEvent_NoQuestionOrResponseText`, `Kinds_RollBackIndependently`, `EpochEvent_OnTeacherModelChange_AppendsTeacherChanged`, `EpochEvent_OnPromptVersionChange_AppendsTeacherChanged`, `EpochEvent_TeacherChange_OnceAcrossRestart`, `EpochEvent_TeacherChange_NoQuestionOrResponseText`, `EpochEvent_OnBgeModelChange_AppendsBgeChanged`, `EpochEvent_OnFeatureSchemaChange_AppendsFeatureSchemaChanged`, `EpochEvent_BgeAndSchemaTogether_AppendsBoth`, `EpochEvent_BgeChange_OnceAcrossRestart`, `EpochEvent_FeatureSchemaChange_OnceAcrossRestart`, `EpochEvent_BgeChange_NoQuestionOrResponseText`, and `EpochEvent_FeatureSchemaChange_NoQuestionOrResponseText`.
+
+### Consequences
+
+- Good, because a confident row can skip the pinned teacher without copying `LocalScore` into `JudgeScore`, which keeps #319's stamp honest.
+- Good, because phase 9 can place each takeover, each return to the teacher, and each teacher, BGE, or feature-schema change on a time axis next to token efficiency, and the rows are still there after a restart.
+- Bad, because the first takeover can grade alone before any live spot-check exists, so a holdout that looked fine can be the grade of record until 50 spot-checks have been scored. The emergency switch and the rollback window are the brakes. The live 5% check applies after a rollback, not before the first takeover. David accepted that order on 2026-10-26.
+- Bad, because the epoch insert and the authority-file rename cannot share one SQLite transaction. A crash between them is repaired by the next tick, so authority and the history can disagree until that tick runs.
+
+```mermaid
+flowchart TD
+    gate[Gate pass, switch on, no rollback mark] --> live[Confident rows skip the teacher]
+    live --> sample[Teacher grades the 5 percent sample and low confidence]
+    sample --> bad{Newest 50 spot-checks, MAE greater than 0.10?}
+    bad -->|no| live
+    bad -->|yes| back[Clear the pointer. Write rollback.json. Teacher grades again.]
+    back --> audition[Next artifact stays in shadow]
+    audition --> healthy{Its own newest 50 are at or under 0.10?}
+    healthy -->|yes| clear[Delete the mark. Local grader takes over.]
+    healthy -->|no| back
+    clear --> live
+    live --> off[Emergency switch off]
+    off --> teacher[Teacher grades every row. Artifact and mark stay. Window still runs.]
+    teacher --> on{Switch on, artifact matches, no mark?}
+    on -->|yes| live
+    on -->|no| teacher
+```
