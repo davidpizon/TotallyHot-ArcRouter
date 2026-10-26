@@ -32,7 +32,7 @@ One reading this plan applies so the decisions can be coded against today's tree
 Phase 7 builds the grader epoch and runs it in shadow.
 
 - Two artifacts, one for code recipes and one for non-code recipes. The head predicts the teacher's judge score, not the blended unified score.
-- A `Microsoft.ML` 5.0.0 regression head in C#, inside the router assembly (`TotallyHotArcRouter`), the same assembly as `LogRegRetrainHostedService` and `RankCorrelation`. `RankCorrelation.Spearman` is `internal`, so the job has to live there to call it. The fit is coefficients on a versioned artifact. It is not an ONNX graph and it does not replace `EmbeddingLogRegModelArtifact`.
+- A `Microsoft.ML` 5.0.0 regression head in C#, inside the router assembly (`TotallyHotArcRouter`), the same assembly as `LogRegRetrainHostedService` and `RankCorrelation`. `RankCorrelation.Spearman` is `internal`, so the job has to live there to call it. The default trainer is `Microsoft.ML.Trainers.SdcaRegressionTrainer`, created with `MLContext.Regression.Trainers.Sdca`. That type is not in this repo. It ships in the `Microsoft.ML` 5.0.0 package this phase adds, and its linear weights are the coefficient payload the artifact stores. `FastTree` is not the default: `FastTreeRegressionTrainer` is a separate `Microsoft.ML.FastTree` package and does not persist that coefficient vector. `GraderEpochOptions.Trainer` (proposed) defaults to `Sdca`. Phase 7 implements that one name. The call is `Trainers.Sdca()` with no extra options, so the L2 weight and iteration count are that method's defaults. Any other trainer name logs a skip and does not fit. The artifact records the trainer name. A different trainer, or a change to those defaults, is a new feature-schema version. The fit is not an ONNX graph and it does not replace `EmbeddingLogRegModelArtifact`.
 - The package pin is new. `src/TotallyHotArcRouter/TotallyHotArcRouter.csproj` references `Microsoft.ML.OnnxRuntime` 1.31.0 and does not reference `Microsoft.ML`. Phase 7 adds `Microsoft.ML` 5.0.0 to that project only. BGE stays the frozen ONNX session (`OnnxEmbeddingClient`). This phase does not fine-tune it, does not load a second embedder, and does not call Python.
 - A hosted service on the same pattern as `LogRegRetrainHostedService`: registered with `AddHostedService` in `src/TotallyHotArcRouter/Hosting/ServiceCollectionExtensions.cs`, woken by a `PeriodicTimer`, and unwilling to fit just because the timer fired. Each tick visits code and non-code independently. The loop waits for the tick to finish before the next wait, so a fit is not overlapped by the next tick.
 - Training on undisputed `Complete` teacher labels of the current teacher model, current `prompt_version`, and current BGE model id. The label is the `grader_scores.score` row whose `grader_key` is `GraderKeys.Judge` (`judge`). It is not `grade_receipts.unified_score` and it is not `LocalScore`.
@@ -51,7 +51,7 @@ Phase 7 builds the grader epoch and runs it in shadow.
 - Rewriting any stored grade, unified score, or `grader_scores` row. Changing voter weights, `Epsilon1`, `Epsilon2`, or the #292 artifact. Resetting an artifact because buckets were re-formed.
 - Tool-count features (decision H). Encrypting the question vectors already in `memory_entries` (#306). Opening a session file. Re-embedding question text. A historical rescan. Bumping `ScorerVersion`.
 - The learning-dashboard panel for this epoch. Phase 7 writes the log record. Showing it next to the #292 epoch record is phase 9.
-- Naming a `Microsoft.ML` trainer class in this plan. The package is not in the tree, so this plan does not cite one. The implementation chooses a regression trainer in `Microsoft.ML` 5.0.0 that can persist coefficients, and it records the trainer name on the artifact. Switching trainers later is a new feature-schema version.
+- Adding `Microsoft.ML.FastTree` or any trainer other than `SdcaRegressionTrainer`. The options property can name another trainer later. Phase 7 does not load it.
 
 ## Data flow
 
@@ -84,13 +84,15 @@ flowchart TD
     teacher[Teacher writes JudgeScore] --> match{Accepted artifact for this kind matches teacher model, prompt_version, and BGE id?}
     match -->|no| bare[Leave LocalScore null. Receipt stores the teacher score only.]
     match -->|yes| score[Score with that artifact. Missing question vector uses the indicator, not a zero vector.]
-    score --> beside[Write LocalScore, local_grader_version = artifact id, and local_confidence when the floor can be computed.]
+    score --> beside[Write LocalScore and local_grader_version. local_confidence only when cosineFloor is non-null.]
     beside --> learn[Router learning still reads the teacher score. JudgeScore is not replaced.]
 ```
 
 ### Eligible label
 
 All of the following. A miss is "not a label". It is never stored or trained as 0.
+
+No store in the tree returns this join. `IGradeReceiptStore` reads one receipt. `IGraderScoreStore.GetAllAsync` reads every grader score with no receipt filter. `IMemoryEntryStore.LoadAllAsync` loads every memory row. `IResponseVectorStore` has no read method. `SqliteResponseVectorStore.TryOpen` opens one response row and deletes it when authentication fails. Phase 7 adds a proposed `GraderEpochLabelQuery` in `src/TotallyHotArcRouter/Judge/GraderEpochLabelQuery.cs`. It is not in the tree. `LoadForKindAsync(string kind, CancellationToken cancellationToken)` reads `RouterMemoryDatabase` (that type exists) and joins `grade_receipts` to the judge `grader_scores` row, the `response_vectors` row, and a left join to `memory_entries` on `correlation_id`. It opens each response blob with `ResponseVectorSeal.TryOpen`. A failed open excludes the label and does not delete the row. Shadow scoring of the one live row calls `SqliteResponseVectorStore.TryOpen`, so a live blob that fails authentication is still deleted by that existing method, and `LocalScore` stays null.
 
 - `grade_receipts.grade_status` is `Complete`. `incomplete_reason` is null. That already drops `disputed`, `judge_is_answerer`, `no_judge`, `queue_full`, and the other incomplete reasons. An `Incomplete` row whose `response_vectors` row was kept (the parent plan's low-confidence teacher failure) is not a label.
 - `prompt_version` equals `JudgeOptions.PromptVersion`, and `judge_model` equals `JudgeOptions.ModelName`. Both comparisons are ordinal. A null on the receipt is not a match. `GradeReceiptRecordObserver` writes those two only when `JudgeScore` has a value.
@@ -116,7 +118,7 @@ The in-memory matrix may mark a missing slot with a non-numeric missing mark. St
 
 | Order | Feature | Where it is read | When it is missing |
 |---|---|---|---|
-| 1 | Question-vector missing indicator, then the question vector | `grade_receipts.question_vector_missing` and `memory_entries` joined by `correlation_id` | Indicator 1 when the flag is 1, when no memory row exists, when `embedding_model` is null, or when `embedding_model` differs from the current identity. Do not use `MemoryEntry.MatchesEmbeddingModel`: that method treats a null model id as a match, and this job must not. The value slots are the mean of the training rows that have a vector. The flag on the receipt is not rewritten. |
+| 1 | Question-vector missing indicator, then the question vector | `grade_receipts.question_vector_missing` and `memory_entries` joined by `correlation_id` | Indicator 1 when the flag is 1, when no memory row exists, when `embedding_model` is null, or when `embedding_model` differs from the current identity. A NULL flag is a row stored before the column. It is not a stored hit and does not by itself set the indicator. NULL with no memory row is indicator 1. NULL with a memory row whose `embedding_model` is null or different is indicator 1. NULL with a memory row whose `embedding_model` equals the current BGE id is indicator 0. Do not use `MemoryEntry.MatchesEmbeddingModel`: that method treats a null model id as a match, and this job must not. The value slots are the mean of the training rows that have a vector. The flag on the receipt is not rewritten. |
 | 2 | Analysis missing indicator, then the analysis score | `grader_scores` where `grader_key` is `GraderKeys.Analysis` | No row, or more than one row: indicator 1, value is the training mean of rows that have exactly one analysis score. |
 | 3 | Syntax missing indicator, then the syntax score | New `grade_receipts.syntax_score` (nullable REAL, no default) | Null on every row stored before the column, and null when the parser did not run. The grade path writes `1.0` or `0.0` from `QualityResult.SyntaxValid` only when `GradingRecipes.IsCodeRecipe(result.RecipeId)` is true, because that is when the parser runs. Bootstrap leaves it null. `SyntaxValid` defaults to false and `SyntaxConfidence` defaults to `1.0`; neither default is a feature, and neither is read back from a receipt that has no column. |
 | 4 | `response_has_code` | `grade_receipts.response_has_code` | Not missing. The column is `INTEGER NOT NULL`. `0` means no fence, which is a stored fact. |
@@ -143,7 +145,7 @@ The reservoir file is rewritten from the rows that still exist at each successfu
 
 The cosine floor is the 20th percentile of cosine-to-nearest-reservoir-neighbor over holdout rows that have a usable question vector, measured against this reservoir. Sort those cosines ascending. With `n` of them, take the element at 0-based index `floor(0.20 * (n - 1))`. The `0.20` comes from `CosineFloorPercentile` (default 20), not from a literal in the method. Holdout rows with a missing question vector are not in the percentile. They are not low confidence. If `n` is 0, or the reservoir is empty, the floor is null. Do not store 0.
 
-`local_confidence` on a shadow row is that row's cosine to its nearest reservoir neighbor when the floor is non-null and the row has a usable question vector. Otherwise it stays null. Phase 7 does not compare it to the floor to decide a teacher call.
+`local_confidence` on a shadow row is that row's cosine to its nearest reservoir neighbor when `cosineFloor` is non-null and the row has a usable question vector. Otherwise it stays null. David decided this on 2026-10-26: when `cosineFloor` is null, including a non-empty reservoir whose holdout contributed no usable cosine, `local_confidence` is NULL. It is never 0, even when that row's cosine could be computed. Phase 7 does not compare it to the floor to decide a teacher call.
 
 ### Agreement gate
 
@@ -169,13 +171,13 @@ The receipt columns this observer's successor has not written yet are taken from
 
 `GradeReceiptRecordObserver` keeps writing `JudgeScore`'s prompt and model as it does now. It additionally persists `LocalScore`, `local_grader_version`, and `local_confidence`. It also persists `syntax_score`: `1.0` or `0.0` from `QualityResult.SyntaxValid` when `GradingRecipes.IsCodeRecipe(result.RecipeId)` is true, and null otherwise, including every bootstrap row. It does not copy `LocalScore` into `JudgeScore`. `GraderScoreRecordObserver` does not write a `grader_scores` row under `GraderKeys.Judge` for the local score. `EmbeddingMemoryScoreObserver` and `RouterMemoryScoreObserver` are not changed to read `LocalScore`.
 
-`local_confidence` is the cosine described above, or null. It is not a teacher call.
+`local_confidence` is the cosine described above, or null. A null floor stores NULL, never 0. It is not a teacher call.
 
 ### Retirement and rollback
 
 At the start of each tick, for each kind, if the accepted artifact's stored teacher model, teacher `prompt_version`, BGE model id, or feature-schema version differs from the current values, clear the accepted pointer. Leave the files. Log which field differed. Do not restore a previous artifact across that change.
 
-Rollback, the operation phase 8 will also call:
+Rollback is `GraderEpochArtifactStore.RollbackToTeacher(kind)`. That type and method are proposed. They are not in the tree. Phase 8 calls the same method. The store lives next to the hosted service, in `src/TotallyHotArcRouter/Judge/GraderEpochArtifactStore.cs`. Retirement uses the same store to clear `accepted.json`. The method:
 
 - No accepted artifact: success. Authority is already the teacher.
 - Accepted artifact with a null previous-artifact id: clear the accepted pointer. Do not throw. Authority is the teacher, which in phase 7 means shadow scoring stops.
@@ -193,11 +195,12 @@ Nothing in the retirement check reads a bucket id. Changing weights other than t
 
 ## Artifact contents
 
-One directory per kind, under a new `StorageOptions` path. The new property follows `LogRegModelPath` / `ResolveLogRegModelPath`: default `%PROGRAMDATA%\grader-epoch`, resolved by a new `ResolveGraderEpochDirectory()` with the same token rules. Files, per accepted or retired artifact:
+One directory per kind, under a new `StorageOptions` path. The new property follows `LogRegModelPath` / `ResolveLogRegModelPath`: default `%PROGRAMDATA%\grader-epoch`, resolved by a new `ResolveGraderEpochDirectory()` with the same token rules. The kind folders are exactly the `kind` strings: `code` and `non-code`.
 
-- `{id}.json` — no vectors and no question or response text.
-- `{id}.reservoir` — sealed question vectors only, in reservoir-sample order. Layout, little-endian: 4 bytes magic `THGR`, a `uint32` count, then that many records. Each record is a `uint32` byte length, the UTF-8 `correlation_id`, a `uint32` byte length, and the sealed blob. No plaintext floats. A reader that sees a bad magic, a truncated record, or a failed open drops that entry and does not substitute a zero vector.
-- `accepted.json` in the kind directory — the accepted artifact id, or absent when none is accepted. Replaced last, by writing a temp file and renaming, so a reader never sees a half-written pair. Old artifact files are not deleted when a new one is accepted.
+- `%PROGRAMDATA%\grader-epoch\code\accepted.json` and `%PROGRAMDATA%\grader-epoch\non-code\accepted.json` — the accepted artifact id, or absent when none is accepted. Replaced last, by writing a temp file in that kind directory and renaming it, so a reader never sees a half-written pointer.
+- `%PROGRAMDATA%\grader-epoch\code\{id}.json` and the same under `non-code` — no vectors and no question or response text. Retired artifacts stay here. They are not deleted when a newer one is accepted.
+- `%PROGRAMDATA%\grader-epoch\code\{id}.reservoir` and the same under `non-code` — sealed question vectors only, in reservoir-sample order. Layout, little-endian: 4 bytes magic `THGR`, a `uint32` count, then that many records. Each record is a `uint32` byte length, the UTF-8 `correlation_id`, a `uint32` byte length, and the sealed blob. No plaintext floats. A reader that sees a bad magic, a truncated record, or a failed open drops that entry and does not substitute a zero vector.
+- `%PROGRAMDATA%\grader-epoch\code\failed\{id}.json` and `%PROGRAMDATA%\grader-epoch\code\failed\{id}.reservoir`, and the same pair under `non-code\failed`. A candidate that was fit and failed the gate is moved here after the gate result is known. `accepted.json` is not created or replaced. Shadow scoring does not load this directory. The files are diagnostics. `GraderEpochOptions.FailedCandidateRetention` (proposed) defaults to 3 per kind. When a new failure is filed, delete the oldest failed ids in that kind beyond 3, ordered by `createdAtUtc` on the JSON, then by id ordinal. Accepted and retired files outside `failed` are not in this cap. A fit that throws deletes any `*.tmp` it created in that kind directory and does not leave a temp file as `accepted.json`. A failed candidate never becomes the live artifact. Only a later fit that clears the gate writes `accepted.json`.
 
 `id` is `Guid.NewGuid().ToString("N")`.
 
@@ -236,6 +239,8 @@ The 2026-10-23 defaults already in the parent plan §10 stay. The rows below are
 | `RandomSeed` | `20261025` | `System.Random` seed for the reservoir and, separately, for the bootstrap. One `int`. Each procedure constructs its own `Random` so the draws do not move each other. |
 | `ReservoirCapacity` | `5000` | Question vectors sealed per artifact. |
 | `CosineFloorPercentile` | `20` | Already the parent plan's floor. Phase 8 is what acts on it. |
+| `Trainer` | `Sdca` | Selects `Microsoft.ML.Trainers.SdcaRegressionTrainer`. The only name phase 7 fits. Recorded on the artifact. |
+| `FailedCandidateRetention` | `3` | Failed candidates kept per kind under `failed`. Decided 2026-10-26. |
 
 `SpotCheckRollbackMae` is not read in phase 7. The parent plan's 0.10 rollback bar stays in §10 for phase 8.
 
@@ -277,11 +282,14 @@ New test class `GraderEpochPhase7Tests` in `src/TotallyHotArcRouter.Tests`, besi
 | `Reservoir_SealedWithVectorKey_NotPlaintext` | The reservoir bytes are not the plaintext float layout. They open with `ResponseVectorKeyHolder`'s key. A `response_vectors` blob does not open as a reservoir entry. |
 | `Reservoir_RebuildDropsDeletedSession` | After the session's rows are gone, the next accepted reservoir does not contain that correlation id. |
 | `CosineFloor_UsesTheReservoirLiveRowsSee` | The floor's neighbor set is the reservoir just sealed, not a second sample. A missing question vector contributes no cosine. An empty reservoir stores a null floor, not 0. |
-| `Rollback_FirstArtifact_NullPreviousId_ReturnsToTeacher` | Rollback of a first artifact does not throw. The accepted pointer is gone. A later grade leaves `LocalScore` null. |
+| `Rollback_FirstArtifact_NullPreviousId_ReturnsToTeacher` | `GraderEpochArtifactStore.RollbackToTeacher` on a first artifact does not throw. The accepted pointer is gone. A later grade leaves `LocalScore` null. |
 | `Rollback_KeepsPreviousFile_AndDoesNotPromoteIt` | Rollback of a second artifact leaves the previous file on disk and does not mark it accepted. |
 | `ShadowScore_WritesLocalScoreBesideJudgeScore_WhenArtifactMatches` | `LocalScore` is set, `local_grader_version` is the artifact id, `grade_source` stays `teacher`, `JudgeScore` is unchanged, `IsJudgeScored` stays true, and no new `grader_scores` row uses `GraderKeys.Judge` for the local score. The embedding client is not called by the shadow observer. |
 | `ShadowScore_LocalScoreNull_WhenNoArtifactOrArtifactMismatch` | Nothing accepted, or the accepted artifact's teacher model, prompt, or BGE id differs: `LocalScore` stays null. |
 | `ShadowScore_MissingQuestionVector_UsesIndicator_NotZeroVector` | A missing question vector still scores. No zero-length or zero-filled vector is passed in. `local_confidence` stays null. The shadow observer does not call `PendingValueCache.TryPeek` and does not re-embed the question. |
+| `ShadowScore_NullFloor_StoresLocalConfidenceNull` | The accepted artifact's `cosineFloor` is null and the live row has a usable question vector. `LocalScore` is set. `local_confidence` is NULL. It is not 0. |
+| `QuestionVectorMissing_NullFlag_FollowsMemoryRow` | A NULL `question_vector_missing` with a memory row on the current BGE id trains with indicator 0. NULL with no memory row, or with a null or different `embedding_model`, trains with indicator 1. The flag column is not rewritten. No zero vector is built. |
+| `GateFail_KeepsCandidateUnderFailed_DoesNotTouchAccepted` | A failed gate writes `code\failed\{id}.json` or `non-code\failed\{id}.json` and the matching reservoir. `accepted.json` is unchanged. Shadow scoring does not load that id. A fourth failure deletes the oldest failed id in that kind. The kept files are not promoted. |
 | `ShadowScore_UnusableResponseVector_LeavesLocalScoreNull` | No stored response vector, a different BGE id, or a failed `TryOpen` leaves `LocalScore` null. The empty array `TryOpen` returns is not scored and is not treated as a zero vector. |
 | `ShadowScore_SyntaxComesFromTheResult_NotTheUnwrittenColumn` | A code row with `SyntaxValid` true scores syntax as `1.0` before `GradeReceiptRecordObserver` writes `syntax_score`. A bootstrap row scores syntax as missing. Neither path reads a zero from the default `SyntaxValid` of false. |
 | `LocalScore_IsNeverTheTrainingLabel` | A `Complete` row whose only score is `LocalScore` is not a label. A row with both uses the judge `grader_scores` score as `y`. |
@@ -313,12 +321,6 @@ New test class `GraderEpochPhase7Tests` in `src/TotallyHotArcRouter.Tests`, besi
 - The log says the spot-check window is not active, and a bad spot-check window does not retire the artifact.
 - Shadow scores appear only after a matching accepted artifact exists, with `local_grader_version` equal to that id, and they are not training labels.
 
-## Open questions
-
-These are for David. This file does not pick an answer, and an implementer does not invent one.
-
-**`local_confidence` when the cosine floor is null.** This file stores `local_confidence` only when the floor is non-null and the row has a usable question vector. The parent plan §3.5 says phase 7 stores `local_confidence` when the cosine can be computed. Those sentences differ when the reservoir is non-empty but no holdout row has a usable question vector: the floor is null, and a later live row can still have a nearest-neighbor cosine. Until David chooses, follow this file: `local_confidence` stays null when the floor is null.
-
 ## Names checked against the tree
 
 Checked with CodeGraph (index built for this pass) and Serena. These exist and are the ones this plan means:
@@ -331,4 +333,4 @@ Checked with CodeGraph (index built for this pass) and Serena. These exist and a
 - `QualityResult.LocalScore` exists and is `init`-only. `GraderScoreRecordObserver` writes `GraderKeys.Judge` and `GraderKeys.Analysis`. `GraderKeys.Syntax` has no writer.
 - `ResponseVectorSeal` (associated data is hard-coded to `response_vectors`), `ResponseVectorKeyHolder.GetOrCreate`, and `SqliteResponseVectorStore`. `EmbeddingOptions.ResolveModelIdentity` is the BGE id stored on artifacts and on `response_vectors.embedding_model`. `OnnxEmbeddingClient.ModelIdentity` returns that value through `IEmbeddingClient.ModelIdentity`. `EmbeddingOptions.EmbeddingDimension` defaults to 1024. `EmbeddingMemory.CosineSimilarity` returns 0 when either magnitude is 0; this plan does not use that 0 as a cosine. `CorrelationIdParser.SessionIdOf`, `GradingRecipes`, `StorageOptions.ResolveLogRegModelPath`. `IQualityScoreObserver` is the fan-out seam. `GradeReceiptRecordObserver` is the last observer in the list built in `ServiceCollectionExtensions`. `InternalsVisibleTo` includes `TotallyHotArcRouter.Tests`.
 
-Proposed names that are not in the tree yet: `GraderEpochOptions`, `GraderEpochHostedService`, `StorageOptions.ResolveGraderEpochDirectory`, and the four new receipt columns. No `Microsoft.ML` trainer type is cited, because that package is not referenced.
+Proposed names that are not in the tree yet: `GraderEpochOptions`, `GraderEpochHostedService`, `GraderEpochArtifactStore.RollbackToTeacher`, `GraderEpochLabelQuery`, `StorageOptions.ResolveGraderEpochDirectory`, and the four new receipt columns. `Microsoft.ML.Trainers.SdcaRegressionTrainer` is the package type phase 7 will construct. That package is not referenced, so the type is not in this repo. `SqliteResponseVectorStore.TryOpen`, `ResponseVectorSeal.TryOpen`, `RouterMemoryDatabase`, `IGradeReceiptStore`, `IGraderScoreStore`, and `IMemoryEntryStore` are in the tree. None of those stores returns the eligibility join.
