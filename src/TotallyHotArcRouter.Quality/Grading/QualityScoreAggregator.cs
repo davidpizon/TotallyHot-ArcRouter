@@ -21,13 +21,10 @@ namespace TotallyHot.ArcRouter.Quality.Grading;
 /// </para>
 /// <para>
 /// <b>The join holds a set of pending grader keys per entry (<see cref="Entry.PendingGraderKeys"/>), not an
-/// implicit single slot.</b> A held result is written once that set is empty. The only producer of a
-/// pending key today is <see cref="IJudgeAvailability"/>, which contributes at most
-/// <see cref="GraderKeys.Judge"/> - so the set today only ever holds zero or one key - but the mechanism
-/// itself is not judge-specific: a future asynchronous grader (Phase Q3) joins through the same
-/// <see cref="CompleteGraderAsync"/>/<see cref="AbandonGraderAsync"/> path by adding its key to
-/// <see cref="DeterminePendingGraders"/>, without any change to <see cref="SubmitAsync"/>,
-/// <see cref="SweepExpiredAsync"/>, or the eviction path.
+/// implicit single slot.</b> A held result is written once that set is empty. Pending keys come from
+/// <see cref="IJudgeAvailability"/> and from <see cref="IPortfolioGraderAvailability"/>. Phase 8 may
+/// remove <see cref="GraderKeys.Judge"/> after <see cref="ILocalGradeTakeover"/> scores the row, and
+/// it does not remove a portfolio key because the teacher was skipped.
 /// </para>
 /// <para>
 /// <b>Every pending grader is started at hold-time, not at write-time.</b> Once <see cref="SubmitAsync"/>
@@ -60,6 +57,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     /// </summary>
     private readonly Lock _lock = new();
 
+    private readonly ILocalGradeTakeover _localGradeTakeover;
     private readonly ILogger<QualityScoreAggregator> _logger;
 
     private readonly IQualityScoreObserver _observer;
@@ -88,6 +86,10 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     /// Clock used for expiry; defaults to <see cref="TimeProvider.System"/>. Overridable for
     /// deterministic tests.
     /// </param>
+    /// <param name="localGradeTakeover">
+    /// Phase 8 takeover. Null uses <see cref="NoLocalGradeTakeover"/>, which leaves today's teacher path
+    /// unchanged. It stays last so a positional <see cref="TimeProvider"/> argument still binds.
+    /// </param>
     public QualityScoreAggregator(
         IQualityScoreObserver observer,
         IQualityScorer scorer,
@@ -96,7 +98,8 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         IOptions<QualityOptions> options,
         ILogger<QualityScoreAggregator> logger,
         IPortfolioGraderAvailability? portfolioGraderAvailability = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        ILocalGradeTakeover? localGradeTakeover = null)
     {
         ArgumentNullException.ThrowIfNull(observer);
         ArgumentNullException.ThrowIfNull(scorer);
@@ -112,6 +115,7 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
         _logger = logger;
         _portfolioGraderAvailability = portfolioGraderAvailability ?? new NoPortfolioGraderAvailability();
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _localGradeTakeover = localGradeTakeover ?? new NoLocalGradeTakeover();
         _options = options.Value;
         _joinTimeout = TimeSpan.FromMilliseconds(_options.JudgeJoinTimeoutMs);
         _capacity = _options.JudgeJoinCapacity;
@@ -152,20 +156,9 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
             return;
         }
 
-        if (_judgeAvailability.IsJudgeEnabled() && _judgeAvailability.IsPinMissing())
-        {
-            await WriteAsync(
-                result: result with { IncompleteReason = IncompleteReasons.NoJudge },
-                llmGraderWasAvailable: false,
-                cancellationToken: cancellationToken).ConfigureAwait(false);
-            return;
-        }
-
         // No correlation id means nothing could ever join to it, so holding it would only guarantee a
-        // timeout later. Checked before DeterminePendingGraders - not just before the write - because
-        // that call reaches IJudgeAvailability.WillJudge, which in the host resolves a judge backbone
-        // (JudgeModelSelector.Resolve). A result that can never be held has no use for that answer, so
-        // skip it entirely rather than pay for a resolution whose result is about to be discarded.
+        // timeout later. Checked before ApplyAsync and before DeterminePendingGraders, because both can
+        // reach a judge backbone. A result that can never be held has no use for that answer.
         if (string.IsNullOrEmpty(result.RequestCorrelationId))
         {
             await WriteAsync(result: result, llmGraderWasAvailable: false, cancellationToken: cancellationToken)
@@ -173,12 +166,33 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
             return;
         }
 
+        var decision = await _localGradeTakeover.ApplyAsync(result, cancellationToken).ConfigureAwait(false);
+        if (!decision.Handled)
+        {
+            if (_judgeAvailability.IsJudgeEnabled() && _judgeAvailability.IsPinMissing())
+            {
+                await WriteAsync(
+                    result: result with { IncompleteReason = IncompleteReasons.NoJudge },
+                    llmGraderWasAvailable: false,
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+                return;
+            }
+        }
+
         var pendingGraders = DeterminePendingGraders(result);
+        if (decision.Handled && (!decision.CallTeacher || !_judgeAvailability.WillJudge(result)))
+            pendingGraders.Remove(GraderKeys.Judge);
 
         if (pendingGraders.Count == 0)
         {
-            await WriteAsync(result: result, llmGraderWasAvailable: false, cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
+            var teacherWasExpected = decision is
+            {
+                Handled: true,
+                CallTeacher: true,
+                TeacherCallReason: not GradeSources.SpotCheck
+            };
+            await WriteAsync(result: result, llmGraderWasAvailable: teacherWasExpected,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -502,17 +516,29 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
     /// </summary>
     private async Task WriteAsync(QualityResult result, bool llmGraderWasAvailable, CancellationToken cancellationToken)
     {
+        var bootstrap = string.Equals(result.RecipeId, GradingRecipes.Bootstrap, StringComparison.OrdinalIgnoreCase);
+        var weightsVersion = bootstrap ? GradingRecipes.Bootstrap : _options.WeightsVersion;
+        var kind = bootstrap ? "non-code" : "code";
+        var collapsed = CollapseLocalGrade(result);
+        result.AllowLocalGradeOfRecord = collapsed;
         var weights = _options.ResolveWeights(dimension: result.Dimension, recipeId: result.RecipeId);
-        var status = GradeStatusCalculator.Calculate(result: result, weights: weights,
-            llmGraderWasAvailable: llmGraderWasAvailable);
-        var gradeSource = status == GradeStatus.Complete && result.JudgeScore.HasValue
-            ? GradeSources.Teacher
-            : result.GradeSource;
+        var status = GradeStatusCalculator.Calculate(
+            result: result,
+            weights: weights,
+            llmGraderWasAvailable: llmGraderWasAvailable,
+            logger: _logger,
+            localScoreIsGradeOfRecord: collapsed,
+            weightsVersion: weightsVersion,
+            graderKind: kind);
+        var gradeSource = ChooseGradeSource(result, status, collapsed);
+        var incomplete = status == GradeStatus.Complete
+            ? null
+            : IncompleteAfterCalculate(result, status);
         var scored = result with
         {
             GradeStatus = status,
             UnifiedScore = _scorer.Score(result: result, dimension: result.Dimension),
-            IncompleteReason = status == GradeStatus.Complete ? null : result.IncompleteReason,
+            IncompleteReason = incomplete,
             GradeSource = gradeSource
         };
 
@@ -528,6 +554,53 @@ public sealed class QualityScoreAggregator : IQualityScoreAggregator
                 "Observing the quality score for correlation {CorrelationId} failed; the routed response was unaffected.",
                 scored.RequestCorrelationId);
         }
+    }
+
+    /// <summary>
+    /// The flag the scorer and case 2 read. A teacher score forces it off. A local
+    /// score keeps it only when takeover already allowed this row to stand.
+    /// </summary>
+    private static bool CollapseLocalGrade(QualityResult result)
+    {
+        if (result.JudgeScore is not null) return false;
+        if (result.LocalScore is null) return false;
+        return result.AllowLocalGradeOfRecord;
+    }
+
+    private static string? ChooseGradeSource(QualityResult result, GradeStatus status, bool collapsed)
+    {
+        if (status == GradeStatus.Complete && result.JudgeScore is not null && result.SpotCheck)
+            return GradeSources.SpotCheck;
+        if (status == GradeStatus.Complete && result.JudgeScore is not null &&
+            result.TeacherCallReason == GradeSources.LowConfidence)
+            return GradeSources.LowConfidence;
+        if (status == GradeStatus.Complete && result.JudgeScore is not null)
+            return GradeSources.Teacher;
+        if (status == GradeStatus.Complete && collapsed)
+            return GradeSources.Local;
+        return null;
+    }
+
+    /// <summary>
+    /// A low-confidence teacher miss names <see cref="IncompleteReasons.NoJudge"/> or
+    /// <see cref="IncompleteReasons.QueueFull"/> after <see cref="GradeStatusCalculator.Calculate"/> has
+    /// already logged case 3. A timeout, abstention, or eviction stays in
+    /// <see cref="QualityResult.GraderDegradedReasons"/> and is not copied here. A spot-check miss does
+    /// not ask for a reason.
+    /// </summary>
+    private static string? IncompleteAfterCalculate(QualityResult result, GradeStatus status)
+    {
+        if (status != GradeStatus.Incomplete) return result.IncompleteReason;
+        if (result.TeacherCallReason != GradeSources.LowConfidence || result.JudgeScore is not null)
+            return result.IncompleteReason;
+        if (result.GraderDegradedReasons.TryGetValue(GraderKeys.Judge, out var reason))
+        {
+            return string.Equals(reason, "judge-not-dispatched", StringComparison.Ordinal)
+                ? IncompleteReasons.QueueFull
+                : result.IncompleteReason;
+        }
+
+        return IncompleteReasons.NoJudge;
     }
 
     /// <summary>One held static result and the grader keys it is still waiting on.</summary>

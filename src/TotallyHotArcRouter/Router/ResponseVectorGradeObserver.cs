@@ -50,6 +50,9 @@ public sealed class ResponseVectorGradeObserver : IQualityScoreObserver
         ArgumentNullException.ThrowIfNull(result);
         if (result.JudgeScore is null && result.LocalScore is null) return;
         if (string.IsNullOrWhiteSpace(result.RequestCorrelationId)) return;
+        if (_store.TryReadEmbeddingModel(result.RequestCorrelationId, out var storedModel) &&
+            string.Equals(storedModel, _embeddings.ModelIdentity, StringComparison.Ordinal))
+            return;
         if (!_responseText.TryPeek(correlationId: result.RequestCorrelationId, text: out var text) ||
             string.IsNullOrWhiteSpace(text))
         {

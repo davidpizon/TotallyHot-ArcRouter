@@ -217,6 +217,66 @@ public sealed class GraderEpochLabelQuery
         };
     }
 
+    /// <summary>
+    /// Spot-check pairs for one accepted artifact. A row qualifies when <c>spot_check</c> is set, the
+    /// receipt is complete, <c>local_grader_version</c> is this artifact, <c>local_score</c> is set, the
+    /// kind's weights version matches, and exactly one judge <c>grader_scores</c> row exists. A missing
+    /// score is not loaded as 0.
+    /// </summary>
+    /// <param name="kind"><see cref="GraderEpochKinds.Code"/> or <see cref="GraderEpochKinds.NonCode"/>.</param>
+    /// <param name="artifactId">The accepted artifact the window is judging.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>The qualifying pairs. The caller sorts and windows them.</returns>
+    internal Task<IReadOnlyList<GraderEpochSpotCheckPair>> LoadSpotCheckPairsAsync(
+        string kind, string artifactId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (kind is not (GraderEpochKinds.Code or GraderEpochKinds.NonCode))
+            return Task.FromResult<IReadOnlyList<GraderEpochSpotCheckPair>>([]);
+
+        var weights = GraderEpochKinds.WeightsForKind(kind: kind, codeWeightsVersion: _quality.CurrentValue.WeightsVersion);
+        _database.EnsureCreated();
+        using var connection = _database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+                              SELECT r.correlation_id, r.created_at_utc, r.local_score,
+                                     (SELECT COUNT(*) FROM grader_scores g
+                                         WHERE g.correlation_id = r.correlation_id AND g.grader_key = $judgeKey),
+                                     (SELECT g.score FROM grader_scores g
+                                         WHERE g.correlation_id = r.correlation_id AND g.grader_key = $judgeKey
+                                         LIMIT 1)
+                              FROM grade_receipts r
+                              WHERE r.spot_check = 1
+                                AND r.grade_status = $complete
+                                AND r.local_grader_version = $artifact
+                                AND r.local_score IS NOT NULL
+                                AND r.weights_version = $weights;
+                              """;
+        command.Parameters.AddWithValue("$judgeKey", GraderKeys.Judge);
+        command.Parameters.AddWithValue("$complete", nameof(GradeStatus.Complete));
+        command.Parameters.AddWithValue("$artifact", artifactId);
+        command.Parameters.AddWithValue("$weights", weights);
+        var pairs = new List<GraderEpochSpotCheckPair>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var judgeRows = reader.GetInt64(3);
+            if (judgeRows != 1 || reader.IsDBNull(2) || reader.IsDBNull(4)) continue;
+            var createdRaw = reader.GetString(1);
+            var created = DateTimeOffset.TryParse(createdRaw, CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind, out var parsed)
+                ? parsed
+                : DateTimeOffset.MinValue;
+            pairs.Add(new GraderEpochSpotCheckPair(
+                CorrelationId: reader.GetString(0),
+                CreatedAtUtc: created,
+                LocalScore: reader.GetDouble(2),
+                JudgeScore: reader.GetDouble(4)));
+        }
+
+        return Task.FromResult<IReadOnlyList<GraderEpochSpotCheckPair>>(pairs);
+    }
+
     private static byte[]? ReadBlob(SqliteDataReader reader, int ordinal) =>
         reader.IsDBNull(ordinal) ? null : (byte[])reader.GetValue(ordinal);
 

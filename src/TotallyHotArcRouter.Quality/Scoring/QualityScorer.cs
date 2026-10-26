@@ -29,7 +29,15 @@ public sealed class QualityScorer : IQualityScorer
 
         var sSyntax = result.SyntaxValid ? 1.0 : 0.0;
         var sAnalysis = result.AnalysisScore is { } analysis ? Math.Clamp(value: analysis, 0.0, 1.0) : 0.0;
-        var sJudge = result.JudgeScore is { } judge ? Math.Clamp(value: judge, 0.0, 1.0) : 0.0;
+        double sJudge = 0.0;
+        if (result.AllowLocalGradeOfRecord)
+        {
+            if (result.LocalScore is { } local) sJudge = Math.Clamp(value: local, 0.0, 1.0);
+        }
+        else if (result.JudgeScore is { } judge)
+        {
+            sJudge = Math.Clamp(value: judge, 0.0, 1.0);
+        }
 
         var weightedSum = weights.Syntax * sSyntax + weights.Analysis * sAnalysis + weights.Judge * sJudge;
 

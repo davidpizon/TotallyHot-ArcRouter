@@ -142,6 +142,28 @@ public sealed class RouterMemoryDatabase
                                      CREATE INDEX IF NOT EXISTS ix_grade_receipts_created_at
                                          ON grade_receipts (created_at_utc);
 
+                                     CREATE TABLE IF NOT EXISTS grader_epoch_events (
+                                         id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                         at_utc TEXT NOT NULL,
+                                         kind TEXT NOT NULL,
+                                         epoch_type TEXT NOT NULL,
+                                         cause TEXT NOT NULL,
+                                         artifact_id TEXT NULL,
+                                         previous_artifact_id TEXT NULL,
+                                         window_size INTEGER NULL,
+                                         mean_miss REAL NULL,
+                                         previous_teacher_model TEXT NULL,
+                                         teacher_model TEXT NULL,
+                                         previous_prompt_version TEXT NULL,
+                                         prompt_version TEXT NULL,
+                                         rollback_mark_present INTEGER NULL,
+                                         previous_bge_model TEXT NULL,
+                                         bge_model TEXT NULL,
+                                         previous_feature_schema_version INTEGER NULL,
+                                         feature_schema_version INTEGER NULL
+                                     );
+                                     CREATE INDEX IF NOT EXISTS ix_grader_epoch_events_at ON grader_epoch_events (at_utc, id);
+
                                      CREATE TABLE IF NOT EXISTS schema_meta (
                                          key                  TEXT    PRIMARY KEY,
                                          value                TEXT    NOT NULL

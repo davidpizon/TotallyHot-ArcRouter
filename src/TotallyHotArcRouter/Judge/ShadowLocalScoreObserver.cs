@@ -88,6 +88,10 @@ public sealed class ShadowLocalScoreObserver : IQualityScoreObserver
                 promptVersion: judge.PromptVersion, bgeModelId: bge))
             return;
 
+        if (result.LocalScore is not null &&
+            string.Equals(result.LocalGraderVersion, artifact.ArtifactId, StringComparison.Ordinal))
+            return;
+
         if (!_vectors.TryReadEmbeddingModel(result.RequestCorrelationId, out var responseModel)) return;
         if (!string.Equals(responseModel, bge, StringComparison.Ordinal)) return;
         if (!_vectors.TryOpen(result.RequestCorrelationId, out var response)) return;
@@ -132,15 +136,6 @@ public sealed class ShadowLocalScoreObserver : IQualityScoreObserver
     private double? Confidence(GraderEpochArtifact artifact, GraderEpochFeatureInput input)
     {
         if (artifact.CosineFloor is null || input.QuestionMissing || input.QuestionVector is null) return null;
-
-        double? best = null;
-        foreach (var neighbor in _store.OpenReservoir(artifact))
-        {
-            var cosine = GraderEpochVectors.Cosine(input.QuestionVector, neighbor);
-            if (cosine is null) continue;
-            if (best is null || cosine > best) best = cosine;
-        }
-
-        return best;
+        return GraderEpochConfidence.Nearest(input.QuestionVector, _store.OpenReservoir(artifact));
     }
 }

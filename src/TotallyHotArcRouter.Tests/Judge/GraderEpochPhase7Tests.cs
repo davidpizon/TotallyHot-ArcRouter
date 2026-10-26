@@ -687,6 +687,7 @@ public class GraderEpochPhase7Tests
     {
         using var world = World.Create(new GraderEpochOptions());
         var origin = new DateTimeOffset(2026, 5, 1, 0, 0, 0, TimeSpan.Zero);
+        var accepted = world.AcceptLayout(weightOnResponse0: 1f, bias: 0f);
         for (var i = 0; i < 50; i++)
         {
             await world.Add(new Row
@@ -696,18 +697,20 @@ public class GraderEpochPhase7Tests
                 CreatedAt = origin.AddMinutes(i),
                 Judge = 1,
                 LocalScore = 0,
+                LocalGraderVersion = accepted,
                 SpotCheck = true,
                 Response = [0.2f, 0.05f]
             });
         }
 
-        var accepted = world.AcceptLayout(weightOnResponse0: 1f, bias: 0f);
         await world.Tick();
 
-        Assert.Equal(accepted, world.Store.TryReadAccepted(GraderEpochKinds.Code)?.ArtifactId);
-        Assert.Contains(world.ServiceLog.Lines, line =>
+        Assert.Null(world.Store.TryReadAccepted(GraderEpochKinds.Code));
+        Assert.Equal(accepted, world.Store.TryReadRollbackMarker(GraderEpochKinds.Code)?.RolledBackArtifactId);
+        Assert.DoesNotContain(world.ServiceLog.Lines, line =>
             line.Contains("spot-check window is not active", StringComparison.Ordinal));
-        Assert.DoesNotContain(world.ServiceLog.Lines, line => line.Contains("retired artifact", StringComparison.Ordinal));
+        Assert.Contains(world.ServiceLog.Lines, line =>
+            line.Contains("spot-check window", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -958,8 +961,9 @@ public class GraderEpochPhase7Tests
         using var world = World.Create(World.Small(enabled: false));
         await world.Tick();
         Assert.Contains(world.ServiceLog.Lines, line => line.Contains("disabled", StringComparison.Ordinal));
+        Assert.Contains(world.ServiceLog.Lines, line => line.Contains("spot-check window", StringComparison.Ordinal));
         Assert.DoesNotContain(world.ServiceLog.Lines, line =>
-            line.Contains("spot-check", StringComparison.Ordinal));
+            line.Contains("spot-check window is not active", StringComparison.Ordinal));
     }
 
     private static async Task AssertRetire(string field, Action<World> mutate, int schemaVersion = 1)
@@ -987,7 +991,7 @@ public class GraderEpochPhase7Tests
         return records.Single(record => record.CorrelationId == correlationId).Blob;
     }
 
-    private sealed class World : IDisposable
+    internal sealed class World : IDisposable
     {
         private readonly string _directory;
 
@@ -997,7 +1001,7 @@ public class GraderEpochPhase7Tests
             StaticOptionsMonitor<JudgeOptions> judge, StaticOptionsMonitor<QualityOptions> quality,
             StaticOptionsMonitor<EmbeddingOptions> embedding, StaticOptionsMonitor<StorageOptions> storage,
             GraderEpochArtifactStore store, GraderEpochLabelQuery query, CaptureLog serviceLog, CaptureLog storeLog,
-            GraderEpochHostedService service, ShadowLocalScoreObserver shadow)
+            GraderEpochHostedService service, ShadowLocalScoreObserver shadow, SqliteGraderEpochEventStore events)
         {
             _directory = directory;
             Database = database;
@@ -1017,6 +1021,7 @@ public class GraderEpochPhase7Tests
             StoreLog = storeLog;
             Service = service;
             ShadowObserver = shadow;
+            Events = events;
         }
 
         private RouterMemoryDatabase Database { get; }
@@ -1037,7 +1042,7 @@ public class GraderEpochPhase7Tests
 
         public StaticOptionsMonitor<QualityOptions> Quality { get; }
 
-        private StaticOptionsMonitor<EmbeddingOptions> Embedding { get; }
+        public StaticOptionsMonitor<EmbeddingOptions> Embedding { get; }
 
         private StaticOptionsMonitor<StorageOptions> Storage { get; }
 
@@ -1052,6 +1057,8 @@ public class GraderEpochPhase7Tests
         private GraderEpochHostedService Service { get; }
 
         public ShadowLocalScoreObserver ShadowObserver { get; }
+
+        public IGraderEpochEventStore Events { get; }
 
         public string TeacherModel => "teacher-a";
 
@@ -1107,7 +1114,8 @@ public class GraderEpochPhase7Tests
             File.WriteAllBytes(storage.CurrentValue.ResolveLogRegModelPath(), [1, 2, 3, 4, 5]);
             var storeLog = new CaptureLog();
             var serviceLog = new CaptureLog();
-            var store = new GraderEpochArtifactStore(storage, keys, storeLog.For<GraderEpochArtifactStore>());
+            var events = new SqliteGraderEpochEventStore(database);
+            var store = new GraderEpochArtifactStore(storage, keys, storeLog.For<GraderEpochArtifactStore>(), events);
             var query = new GraderEpochLabelQuery(database, keys, judge, quality, embedding);
             var service = new GraderEpochHostedService(
                 logger: serviceLog.For<GraderEpochHostedService>(),
@@ -1116,6 +1124,7 @@ public class GraderEpochPhase7Tests
                 embedding: embedding,
                 query: query,
                 store: store,
+                events: events,
                 keys: keys,
                 timeProvider: new StepClock());
             var shadow = new ShadowLocalScoreObserver(
@@ -1127,7 +1136,7 @@ public class GraderEpochPhase7Tests
                 embedding: embedding,
                 logger: NullLogger<ShadowLocalScoreObserver>.Instance);
             return new World(directory, database, secrets, keys, vectors, receipts, scores, epochMonitor, judge,
-                quality, embedding, storage, store, query, serviceLog, storeLog, service, shadow);
+                quality, embedding, storage, store, query, serviceLog, storeLog, service, shadow, events);
         }
 
         public JudgeOptions JudgeOptions(string? model = null, string? prompt = null) => new()
@@ -1198,6 +1207,7 @@ public class GraderEpochPhase7Tests
                 SpotCheck: row.SpotCheck,
                 ResponseLengthChars: null,
                 LocalScore: row.LocalScore,
+                LocalGraderVersion: row.LocalGraderVersion,
                 SyntaxScore: row.Syntax));
             if (row.RawCreated is not null)
             {
@@ -1550,7 +1560,7 @@ public class GraderEpochPhase7Tests
         }
     }
 
-    private sealed class Row
+    internal sealed class Row
     {
         public required string Id { get; init; }
 
@@ -1594,6 +1604,8 @@ public class GraderEpochPhase7Tests
 
         public double? LocalScore { get; init; }
 
+        public string? LocalGraderVersion { get; init; }
+
         public double? Syntax { get; init; }
 
         public bool SpotCheck { get; init; }
@@ -1601,7 +1613,7 @@ public class GraderEpochPhase7Tests
         public bool JudgeScoredMemory { get; init; }
     }
 
-    private sealed class CaptureLog
+    internal sealed class CaptureLog
     {
         public List<string> Lines { get; } = [];
 

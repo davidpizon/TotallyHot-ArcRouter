@@ -72,7 +72,9 @@ internal static class JudgeServiceCollectionExtensions
             .ValidateDataAnnotations();
         services.AddSingleton<GraderEpochArtifactStore>();
         services.AddSingleton<GraderEpochLabelQuery>();
+        services.AddSingleton<IGraderEpochEventStore, SqliteGraderEpochEventStore>();
         services.AddSingleton<ShadowLocalScoreObserver>();
+        services.AddSingleton<ILocalGradeTakeover, LocalGradeTakeover>();
         services.AddSingleton<IGraderReliabilityAnalyzer, GraderReliabilityAnalyzer>();
 
         // docs/router/geval-shadow-scoring-plan.md Phase G2: judge-vs-static calibration over the shadow

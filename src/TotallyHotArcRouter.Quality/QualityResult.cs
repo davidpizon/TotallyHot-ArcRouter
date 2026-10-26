@@ -161,10 +161,26 @@ public sealed record QualityResult
     public int? ResponseLengthChars { get; init; }
 
     /// <summary>
-    /// Whether this row was drawn for the random teacher spot-check. Phase 4 only persists the column;
-    /// the 5% draw stays phase 8, so grade-time writes leave this false.
+    /// Whether this row was drawn for the random teacher spot-check. Phase 8 sets it from the correlation-id
+    /// hash. It is settable because takeover writes it on the instance the aggregator already holds.
+    /// A low-confidence row stays false, so it is not counted in the 5%.
     /// </summary>
-    public bool SpotCheck { get; init; }
+    public bool SpotCheck { get; set; }
+
+    /// <summary>
+    /// Why the teacher was called for this row: <see cref="GradeSources.LowConfidence"/>,
+    /// <see cref="GradeSources.SpotCheck"/>, or null when the teacher was not asked for that reason.
+    /// Not a receipt column. The aggregator reads it when it chooses <see cref="GradeSource"/>.
+    /// </summary>
+    public string? TeacherCallReason { get; set; }
+
+    /// <summary>
+    /// Whether <see cref="LocalScore"/> may be the grade of record when <see cref="JudgeScore"/> is empty.
+    /// True for a confident skip and for a spot-check while takeover is on. False for a low-confidence
+    /// row, an undrawn audition row, and every row while the emergency switch is off. Not a receipt column.
+    /// The scorer reads the collapsed value of this flag.
+    /// </summary>
+    public bool AllowLocalGradeOfRecord { get; set; }
 
     /// <summary>
     /// A counted user signal later attached to this grade (<see cref="UserSignals"/>), or null when none
