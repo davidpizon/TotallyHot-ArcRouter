@@ -63,6 +63,16 @@ internal static class JudgeServiceCollectionExtensions
         services.AddSingleton<UserGradeFeedbackService>();
         services.AddSingleton<GraderScoreRecordObserver>();
         services.AddSingleton<GradeReceiptRecordObserver>();
+
+        // Issue #304 phase 7. A missing GraderEpoch section keeps the property defaults. The shadow
+        // observer is inserted in the fan-out after the response vector is stored and before the receipt.
+        services.AddOptions<GraderEpochOptions>()
+            .Configure<IConfiguration>((options, configuration) =>
+                configuration.GetSection(GraderEpochOptions.SectionName).Bind(options))
+            .ValidateDataAnnotations();
+        services.AddSingleton<GraderEpochArtifactStore>();
+        services.AddSingleton<GraderEpochLabelQuery>();
+        services.AddSingleton<ShadowLocalScoreObserver>();
         services.AddSingleton<IGraderReliabilityAnalyzer, GraderReliabilityAnalyzer>();
 
         // docs/router/geval-shadow-scoring-plan.md Phase G2: judge-vs-static calibration over the shadow

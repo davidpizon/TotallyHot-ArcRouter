@@ -47,6 +47,19 @@ namespace TotallyHot.ArcRouter.Judge;
 /// <param name="ResponseLengthChars">
 /// Character length of the response text. Stored and reported; never added to the unified score.
 /// </param>
+/// <param name="LocalScore">
+/// Shadow score from the accepted grader-epoch artifact, or null when that artifact did not score the
+/// row. Never the grade of record and never the training label.
+/// </param>
+/// <param name="LocalGraderVersion">Id of the artifact that wrote <paramref name="LocalScore"/>, or null.</param>
+/// <param name="LocalConfidence">
+/// Cosine to the nearest sealed fingerprint neighbor, or null. Null when the artifact's cosine floor is
+/// null; that null is not stored as 0.
+/// </param>
+/// <param name="SyntaxScore">
+/// <c>1.0</c> or <c>0.0</c> when the code recipe's parser ran, otherwise null. Bootstrap rows stay null.
+/// A null is not a syntax failure and is not a feature value of 0.
+/// </param>
 public sealed record GradeReceiptRecord(
     string CorrelationId,
     DateTimeOffset CreatedAtUtc,
@@ -72,4 +85,8 @@ public sealed record GradeReceiptRecord(
     string? SessionId = null,
     string? UserSignal = null,
     bool SpotCheck = false,
-    int? ResponseLengthChars = null);
+    int? ResponseLengthChars = null,
+    double? LocalScore = null,
+    string? LocalGraderVersion = null,
+    double? LocalConfidence = null,
+    double? SyntaxScore = null);

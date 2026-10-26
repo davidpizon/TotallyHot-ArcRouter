@@ -172,6 +172,24 @@ public sealed class SqliteResponseVectorStore : IResponseVectorStore, IScoreRete
         return Task.FromResult(deleted);
     }
 
+    /// <summary>
+    /// Reads the stored embedding model id without opening the blob. A different model id is not an
+    /// authentication failure, so this does not delete the row the way <see cref="TryOpen"/> does.
+    /// </summary>
+    /// <param name="correlationId">The response vector's correlation id.</param>
+    /// <param name="modelId">The stored model id when this returns <see langword="true"/>.</param>
+    /// <returns><see langword="true"/> when a row exists.</returns>
+    internal bool TryReadEmbeddingModel(string correlationId, out string modelId)
+    {
+        modelId = string.Empty;
+        ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
+        var row = ReadRow(correlationId);
+        if (row is null) return false;
+
+        modelId = row.Value.ModelId;
+        return true;
+    }
+
     /// <summary>Reads one sealed row, or null when it is absent.</summary>
     private (string ModelId, byte[] Blob)? ReadRow(string correlationId)
     {

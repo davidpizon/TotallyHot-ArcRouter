@@ -230,7 +230,7 @@ public class ServiceCollectionExtensionsTests
             expected: [typeof(PendingQuestionVectorGradeReader), typeof(RouterMemoryScoreObserver),
                 typeof(EmbeddingMemoryScoreObserver), typeof(TranscriptScoreObserver),
                 typeof(GraderScoreRecordObserver), typeof(ResponseVectorGradeObserver),
-                typeof(GradeReceiptRecordObserver)],
+                typeof(ShadowLocalScoreObserver), typeof(GradeReceiptRecordObserver)],
             actual: composite.Observers.Select(o => o.GetType()));
     }
 

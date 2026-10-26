@@ -128,6 +128,15 @@ public sealed class StorageOptions
     public string ClusterModelPath { get; init; } = @"%PROGRAMDATA%\cluster_model.json";
 
     /// <summary>
+    /// Gets the directory that holds the phase 7 grader-epoch artifacts, one <c>code</c> folder and one
+    /// <c>non-code</c> folder (issue #304 phase 7). May contain the same tokens and separators as
+    /// <see cref="DatabasePath"/>, resolved by <see cref="ResolveGraderEpochDirectory"/>. Per-installation
+    /// and never checked in, mirroring <see cref="LogRegModelPath"/>'s lifecycle. The logreg file is a
+    /// different artifact and is not written here.
+    /// </summary>
+    public string GraderEpochDirectory { get; init; } = @"%PROGRAMDATA%\grader-epoch";
+
+    /// <summary>
     /// Gets the number of days a <c>usage_ledger</c> row is retained before the startup health check's
     /// retention sweep deletes it, keyed on the row's <c>occurred_at_utc</c>. Defaults to 370 - a year plus
     /// slack, matching the token-monitor plan's bounded-archive discipline (long enough for annual
@@ -201,6 +210,15 @@ public sealed class StorageOptions
     public string ResolveClusterModelPath()
     {
         return ResolvePath(ClusterModelPath);
+    }
+
+    /// <summary>
+    /// Expands environment-variable tokens in <see cref="GraderEpochDirectory"/>, normalizes separators,
+    /// and returns an absolute path, via the same rules as <see cref="ResolveDatabasePath"/>.
+    /// </summary>
+    public string ResolveGraderEpochDirectory()
+    {
+        return ResolvePath(GraderEpochDirectory);
     }
 
     /// <summary>
