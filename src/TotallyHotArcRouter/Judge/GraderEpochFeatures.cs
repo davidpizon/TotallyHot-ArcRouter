@@ -209,7 +209,7 @@ internal static class GraderEpochFeatures
         var count = 0;
         foreach (var row in rows)
         {
-            if (value(row) is not double observed) continue;
+            if (value(row) is not { } observed) continue;
             sum += observed;
             count++;
         }

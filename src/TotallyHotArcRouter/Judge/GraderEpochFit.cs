@@ -98,7 +98,7 @@ internal static class GraderEpochFit
         var labels = new double[split.Training.Count];
         for (var i = 0; i < split.Training.Count; i++)
         {
-            if (GraderEpochFeatures.Encode(artifact: layout, input: trainingInputs[i]) is not float[] encoded)
+            if (GraderEpochFeatures.Encode(artifact: layout, input: trainingInputs[i]) is not { } encoded)
                 throw new InvalidOperationException("A training row could not be encoded on the layout just fit from it.");
             matrix[i] = encoded;
             labels[i] = split.Training[i].JudgeScore;

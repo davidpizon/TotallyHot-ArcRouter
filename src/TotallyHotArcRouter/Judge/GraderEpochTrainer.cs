@@ -61,7 +61,11 @@ internal static class GraderEpochTrainer
     /// <summary>One ML.NET training row. The property names are the trainer's default column names.</summary>
     private sealed class TrainerRow
     {
-        /// <summary>Gets or sets the judge score.</summary>
+        /// <summary>
+        /// Gets or sets the judge score. Microsoft.ML reads the getter by reflection while it fits,
+        /// which is why this assembly never reads it itself.
+        /// </summary>
+        // ReSharper disable once UnusedAutoPropertyAccessor.Local
         public float Label { get; set; }
 
         /// <summary>Gets or sets the schema version 1 feature vector.</summary>
