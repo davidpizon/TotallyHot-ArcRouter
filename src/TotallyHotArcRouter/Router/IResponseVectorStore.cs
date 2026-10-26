@@ -20,4 +20,13 @@ public interface IResponseVectorStore
     /// <summary>Deletes the rows whose correlation ids are in <paramref name="correlationIds"/>.</summary>
     /// <param name="correlationIds">The ids to remove. Empty is a no-op.</param>
     void DeleteByCorrelationIds(IReadOnlyList<string> correlationIds);
+
+    /// <summary>
+    /// Reads the stored embedding model id without opening the blob. A different model id is not an
+    /// authentication failure, so this does not delete the row.
+    /// </summary>
+    /// <param name="correlationId">The response vector's correlation id.</param>
+    /// <param name="modelId">The stored model id when this returns <see langword="true"/>.</param>
+    /// <returns><see langword="true"/> when a row exists.</returns>
+    bool TryReadEmbeddingModel(string correlationId, out string modelId);
 }

@@ -24,6 +24,7 @@ public sealed class GraderEpochArtifactStore
     };
 
     private readonly Dictionary<string, CacheEntry> _cache = new(StringComparer.Ordinal);
+    private readonly IGraderEpochEventStore? _events;
     private readonly Lock _gate = new();
     private readonly ResponseVectorKeyHolder _keys;
     private readonly ILogger<GraderEpochArtifactStore> _logger;
@@ -33,10 +34,15 @@ public sealed class GraderEpochArtifactStore
     /// <param name="storage">Supplies the epoch directory. The logreg file is a different path.</param>
     /// <param name="keys">The vector key the reservoir opens with. Response blobs use a different associated-data label.</param>
     /// <param name="logger">Logs rollback, retirement's caller does its own line, and reservoir authentication failures.</param>
+    /// <param name="events">
+    /// Epoch history. Null skips the insert and still performs the file change, so a caller that only
+    /// clears a pointer does not need a database.
+    /// </param>
     public GraderEpochArtifactStore(
         IOptionsMonitor<StorageOptions> storage,
         ResponseVectorKeyHolder keys,
-        ILogger<GraderEpochArtifactStore> logger)
+        ILogger<GraderEpochArtifactStore> logger,
+        IGraderEpochEventStore? events = null)
     {
         ArgumentNullException.ThrowIfNull(storage);
         ArgumentNullException.ThrowIfNull(keys);
@@ -44,12 +50,14 @@ public sealed class GraderEpochArtifactStore
         _storage = storage;
         _keys = keys;
         _logger = logger;
+        _events = events;
     }
 
     /// <summary>
     /// Clears the accepted pointer for <paramref name="kind"/>. Does not throw when nothing is accepted,
-    /// does not promote a previous file, and does not delete retired files. Shadow scores stay off until
-    /// a later fit clears the gate. Phase 8 calls this same method.
+    /// does not promote a previous file, and does not delete retired files. Phase 7 callers clear a
+    /// pointer while the teacher already has authority. Phase 8 callers clear it so later grades call
+    /// the teacher again. This method does not write <c>rollback.json</c>.
     /// </summary>
     /// <param name="kind"><see cref="GraderEpochKinds.Code"/> or <see cref="GraderEpochKinds.NonCode"/>.</param>
     public void RollbackToTeacher(string kind)
@@ -174,6 +182,175 @@ public sealed class GraderEpochArtifactStore
     internal void DeleteTemps(string kind)
     {
         lock (_gate) DeleteTempsLocked(kind);
+    }
+
+    /// <summary>The rollback marker, or null when the file is absent or cannot be read.</summary>
+    /// <param name="kind">The kind folder.</param>
+    /// <returns>The marker.</returns>
+    internal GraderEpochRollbackMarker? TryReadRollbackMarker(string kind)
+    {
+        lock (_gate) return ReadRollbackLocked(kind);
+    }
+
+    /// <summary>
+    /// Writes <c>rollback.json</c> by a temp file and a rename. Does not clear <c>accepted.json</c>.
+    /// </summary>
+    /// <param name="kind">The kind folder.</param>
+    /// <param name="marker">The window that missed the bar.</param>
+    internal void WriteRollbackMarker(string kind, GraderEpochRollbackMarker marker)
+    {
+        ArgumentNullException.ThrowIfNull(marker);
+        lock (_gate) WriteRollbackLocked(kind, marker);
+    }
+
+    /// <summary>Deletes <c>rollback.json</c> when it exists. Absent is a no-op.</summary>
+    /// <param name="kind">The kind folder.</param>
+    internal void ClearRollbackMarker(string kind)
+    {
+        lock (_gate) ClearRollbackLocked(kind);
+    }
+
+    /// <summary>
+    /// Inserts <paramref name="row"/> and then replaces the accepted pointer, in that order, under one
+    /// database transaction and <see cref="_gate"/>. A throw rolls the insert back and deletes temp files.
+    /// </summary>
+    /// <param name="artifact">The candidate that cleared the gate.</param>
+    /// <param name="reservoir">The sealed reservoir file.</param>
+    /// <param name="row">The <c>local_takeover</c> row for this artifact.</param>
+    internal void CommitAcceptedWithEvent(GraderEpochArtifact artifact, byte[] reservoir, GraderEpochEventRow row)
+    {
+        lock (_gate) RunTransactional(kind: artifact.Kind, row: row, fileChange: () => CommitAcceptedBody(artifact, reservoir));
+    }
+
+    /// <summary>
+    /// Inserts <paramref name="row"/> when it is not null, clears the accepted pointer, and writes
+    /// <paramref name="marker"/>. The clear logs the same template as <see cref="RollbackToTeacher"/>.
+    /// </summary>
+    /// <param name="kind">The kind folder.</param>
+    /// <param name="marker">The window that missed the bar.</param>
+    /// <param name="row">The <c>teacher_resumed</c> row, or null when authority was already the teacher.</param>
+    internal void RollbackForSpotCheck(string kind, GraderEpochRollbackMarker marker, GraderEpochEventRow? row)
+    {
+        ArgumentNullException.ThrowIfNull(marker);
+        lock (_gate)
+        {
+            RunTransactional(kind: kind, row: row, fileChange: () =>
+            {
+                LogRollback(kind);
+                WriteRollbackLocked(kind, marker);
+            });
+        }
+    }
+
+    /// <summary>
+    /// Inserts every identity row in <paramref name="rows"/> and commits that transaction before the
+    /// caller clears the pointer. An empty list does nothing.
+    /// </summary>
+    /// <param name="rows">The identity rows for one kind. They share one transaction.</param>
+    internal void CommitIdentity(IReadOnlyList<GraderEpochEventRow> rows)
+    {
+        if (rows.Count == 0 || _events is null) return;
+        _events.Execute(() =>
+        {
+            foreach (var row in rows) _events.Insert(row);
+        });
+    }
+
+    /// <summary>Inserts one authority row. The caller has already renamed the files.</summary>
+    /// <param name="row">The authority event.</param>
+    internal void AppendAuthority(GraderEpochEventRow row)
+    {
+        if (_events is null) return;
+        _events.Execute(() => _events.Insert(row));
+    }
+
+    private void RunTransactional(string kind, GraderEpochEventRow? row, Action fileChange)
+    {
+        if (_events is null || row is null)
+        {
+            try
+            {
+                fileChange();
+            }
+            catch
+            {
+                DeleteTempsLocked(kind);
+                throw;
+            }
+
+            return;
+        }
+
+        try
+        {
+            _events.Execute(() =>
+            {
+                _events.Insert(row);
+                fileChange();
+            });
+        }
+        catch
+        {
+            DeleteTempsLocked(kind);
+            throw;
+        }
+    }
+
+    private void LogRollback(string kind)
+    {
+        var artifact = ReadAcceptedLocked(kind);
+        ClearAcceptedLocked(kind);
+        if (artifact is null)
+        {
+            _logger.LogInformation(
+                message:
+                "Grader epoch rollback for kind {Kind} found no accepted artifact. The teacher is already the grade of record.",
+                kind);
+            return;
+        }
+
+        _logger.LogInformation(
+            message:
+            "Grader epoch cleared the accepted pointer for kind {Kind}. Artifact {ArtifactId}, previous artifact {PreviousArtifactId}. Shadow scores stay off until a new artifact is accepted.",
+            kind,
+            artifact.ArtifactId,
+            Marker(artifact.PreviousArtifactId));
+    }
+
+    private GraderEpochRollbackMarker? ReadRollbackLocked(string kind)
+    {
+        var path = Path.Combine(KindDirectory(kind), "rollback.json");
+        if (!File.Exists(path)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<GraderEpochRollbackMarker>(File.ReadAllBytes(path), Json);
+        }
+        catch (Exception ex) when (ex is IOException or JsonException)
+        {
+            return null;
+        }
+    }
+
+    private void WriteRollbackLocked(string kind, GraderEpochRollbackMarker marker)
+    {
+        var directory = PrepareKind(kind);
+        ReplaceAtomically(directory: directory, fileName: "rollback.json",
+            bytes: JsonSerializer.SerializeToUtf8Bytes(marker, Json));
+    }
+
+    private void ClearRollbackLocked(string kind)
+    {
+        var path = Path.Combine(KindDirectory(kind), "rollback.json");
+        if (File.Exists(path)) File.Delete(path);
+    }
+
+    private void CommitAcceptedBody(GraderEpochArtifact artifact, byte[] reservoir)
+    {
+        var directory = PrepareKind(artifact.Kind);
+        WritePair(directory: directory, artifact: artifact, reservoir: reservoir, failed: false);
+        ReplaceAtomically(directory: directory, fileName: "accepted.json",
+            bytes: JsonSerializer.SerializeToUtf8Bytes(new AcceptedPointer { ArtifactId = artifact.ArtifactId }, Json));
+        _cache.Remove(artifact.Kind);
     }
 
     /// <summary>

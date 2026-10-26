@@ -13,10 +13,39 @@ public sealed class GraderEpochOptions
     public const string SectionName = "GraderEpoch";
 
     /// <summary>
-    /// Gets whether the epoch runs. When false, each tick logs that the job is off and does not fit.
-    /// A fresh install still no-ops until enough teacher labels exist.
+    /// Gets whether the epoch fits. When false, each tick logs that the job is off and does not fit.
+    /// The tick still visits each kind for retirement and the spot-check window. A fresh install still
+    /// skips the fit until enough teacher labels exist.
     /// </summary>
     public bool Enabled { get; init; } = true;
+
+    /// <summary>
+    /// Gets whether a matching accepted artifact may skip the teacher. The default is on. False is the
+    /// emergency off: the next grade calls the teacher, the artifact file stays, and <c>rollback.json</c>
+    /// is not deleted. The 5% draw and the spot-check window still run.
+    /// </summary>
+    public bool TakeoverEnabled { get; init; } = true;
+
+    /// <summary>
+    /// Gets the fraction of eligible rows the teacher still grades after takeover. The draw is a hash
+    /// of the correlation id. This is not <c>QualityOptions.SamplingRate</c>.
+    /// </summary>
+    [Range(0d, 1d)]
+    public double SpotCheckRate { get; init; } = 0.05;
+
+    /// <summary>
+    /// Gets how many of the newest spot-check rows form the rollback window. A different counter from
+    /// <see cref="HoldoutSize"/>. Fewer than this does not roll back.
+    /// </summary>
+    [Range(1, int.MaxValue)]
+    public int SpotCheckWindowSize { get; init; } = 50;
+
+    /// <summary>
+    /// Gets the exclusive mean-absolute-error bar for the spot-check window. A mean miss greater than
+    /// this returns that kind to the teacher. A mean miss equal to this stays.
+    /// </summary>
+    [Range(0d, 1d)]
+    public double SpotCheckRollbackMae { get; init; } = 0.10;
 
     /// <summary>Gets how often the timer wakes, in minutes. The wake does not force a fit.</summary>
     [Range(1, 1440)]

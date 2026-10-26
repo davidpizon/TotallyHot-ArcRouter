@@ -245,4 +245,18 @@ public class QualityScorerTests
         var weights = new DimensionWeightOptions { Syntax = 0.5, Analysis = 0.5, Judge = 0.5 };
         Assert.Throws<InvalidOperationException>(() => weights.EnsureSumsToOne(dimensionLabel: "bad"));
     }
+
+    [Fact]
+    public void Score_LocalGradeOfRecord_ReplacesJudgeAxis()
+    {
+        var scorer = CreateScorer();
+        var result = Authoritative(syntaxValid: true, analysis: 0.4, judge: null) with
+        {
+            LocalScore = 0.5,
+            AllowLocalGradeOfRecord = true
+        };
+
+        Assert.Equal(0.60 * 0.5 + 0.25 * 1.0 + 0.15 * 0.4,
+            actual: scorer.Score(result: result, dimension: "code_generation"), precision: 10);
+    }
 }

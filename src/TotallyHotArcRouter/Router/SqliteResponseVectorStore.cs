@@ -179,7 +179,7 @@ public sealed class SqliteResponseVectorStore : IResponseVectorStore, IScoreRete
     /// <param name="correlationId">The response vector's correlation id.</param>
     /// <param name="modelId">The stored model id when this returns <see langword="true"/>.</param>
     /// <returns><see langword="true"/> when a row exists.</returns>
-    internal bool TryReadEmbeddingModel(string correlationId, out string modelId)
+    public bool TryReadEmbeddingModel(string correlationId, out string modelId)
     {
         modelId = string.Empty;
         ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);

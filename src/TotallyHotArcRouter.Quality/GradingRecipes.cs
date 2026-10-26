@@ -72,6 +72,18 @@ public static class GradeSources
 {
     /// <summary>The pinned free teacher produced <see cref="QualityResult.JudgeScore"/>.</summary>
     public const string Teacher = "teacher";
+
+    /// <summary>
+    /// The local grader is the grade of record. <see cref="QualityResult.JudgeScore"/> is empty.
+    /// A spot-check whose teacher call failed uses this value too, and keeps <see cref="QualityResult.SpotCheck"/> true.
+    /// </summary>
+    public const string Local = "local";
+
+    /// <summary>The 5% draw selected this row and the teacher produced <see cref="QualityResult.JudgeScore"/>.</summary>
+    public const string SpotCheck = "spot_check";
+
+    /// <summary>The cosine floor called the teacher and the teacher produced <see cref="QualityResult.JudgeScore"/>.</summary>
+    public const string LowConfidence = "low_confidence";
 }
 
 /// <summary>

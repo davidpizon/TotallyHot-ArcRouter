@@ -84,6 +84,7 @@ public static class QualityServiceCollectionExtensions
         services.TryAddSingleton<IJudgeAvailability, NoJudgeAvailability>();
         services.TryAddSingleton<IPortfolioGraderAvailability, NoPortfolioGraderAvailability>();
         services.TryAddSingleton<IAsyncGraderDispatcher, NoAsyncGraderDispatcher>();
+        services.TryAddSingleton<ILocalGradeTakeover, NoLocalGradeTakeover>();
         services.TryAddSingleton<IQualityScoreObserver, NullQualityScoreObserver>();
 
         services.AddHostedService<QualityGradingService>();
