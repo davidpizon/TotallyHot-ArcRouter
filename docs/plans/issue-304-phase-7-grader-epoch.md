@@ -2,13 +2,13 @@
 
 **Status:** Proposed. David asked these questions on 2026-10-25. The decisions below record the recommendations he is reviewing. They are not approved until he says so on this pull request. Do not start the phase 7 code until that approval. The implementation pull request must link this file.
 
-**Issue:** [#304](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/304). **Parent plan:** [`issue-304-grade-non-coding-responses.md`](issue-304-grade-non-coding-responses.md) §3.3, §3.5, §3.8, §4 phase 7, and §10. **ADR:** [ADR-0027](../adr/0027-grade-non-coding-responses-on-a-bootstrap-recipe-and-keep-them-out-of-code-tallies.md). This phase does not change that ADR. Decision 3 there says that after the grader epoch accepts an artifact, the artifact fills the judge axis and leaves `JudgeScore` empty, and it also says takeover is a later phase of the same plan. This file uses the parent plan's split of that sentence: phase 7 acceptance is shadow, and the fill-the-axis step is phase 8 takeover. No ADR amendment is required for that split, because the ADR already parks takeover in a later phase.
+**Issue:** [#304](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/304). **Parent plan:** [`issue-304-grade-non-coding-responses.md`](issue-304-grade-non-coding-responses.md) §3.3, §3.5, §3.8, §4 phase 7, and §10. **ADR:** [ADR-0027](../adr/0027-grade-non-coding-responses-on-a-bootstrap-recipe-and-keep-them-out-of-code-tallies.md) [Amendment 2](../adr/0027-grade-non-coding-responses-on-a-bootstrap-recipe-and-keep-them-out-of-code-tallies.md#amendment-2-2026-10-26-phase-7-acceptance-stays-in-shadow). Decision 3 originally said that accepting an artifact fills the judge axis. Amendment 2, decided by David on 2026-10-26, splits that sentence: phase 7 acceptance is shadow and the teacher stays the grade of record. Phase 8 fills the judge axis. It is the same plan, not a second ADR.
 
 **This pull request is docs only.** It does not change source, tests, project files, or workflows.
 
 ## Decisions
 
-Each row is David, 2026-10-25, and stays proposed until he approves this pull request. The 2026-10-26 rules in the body are decided: null `local_confidence` when the floor is null, `Sdca`, the `code` and `non-code` folders, failed-candidate retention, `GraderEpochArtifactStore.RollbackToTeacher`, and `GraderEpochLabelQuery.LoadForKindAsync`.
+Each row is David, 2026-10-25, and stays proposed until he approves this pull request. The 2026-10-26 rules in the body are decided: null `local_confidence` when the floor is null, `Sdca`, the `code` and `non-code` folders, failed-candidate retention, `GraderEpochArtifactStore.RollbackToTeacher`, `GraderEpochLabelQuery.LoadForKindAsync`, 200 eligible labels and a holdout of 50 on every fit including a refit, and at least 150 training rows after session exclusion.
 
 | # | Decision |
 |---|---|
@@ -66,10 +66,10 @@ flowchart TD
     retire -->|yes| keep[It stays the comparable live artifact.]
     drop --> eligible
     keep --> eligible
-    eligible[Eligible Complete teacher labels for this kind] --> enough{At least 200 labels and at least 50 to hold out?}
+    eligible[Eligible Complete teacher labels for this kind] --> enough{Every fit, including a refit: at least 200 labels and 50 to hold out?}
     enough -->|no| skip[Log the skip. Do not fit.]
     enough -->|yes| split[Holdout = 50 newest. Drop other labels from those sessions out of training.]
-    split --> rows{At least one training row?}
+    split --> rows{At least 150 training rows left?}
     rows -->|no| skip
     rows -->|yes| features[Features from grade_receipts, grader_scores, response_vectors, memory_entries]
     features --> reservoir[Reservoir from training rows that have a question vector]
@@ -108,7 +108,7 @@ Sort eligible labels by parsed `created_at_utc` descending (`SqliteGradeReceiptS
 
 Session id for the sibling rule is `grade_receipts.session_id` when it is non-empty, otherwise `CorrelationIdParser.SessionIdOf(correlation_id)`. `GradeReceiptRecordObserver` stores a null session id when `QualityResult.SessionId` is empty, and the parser recovers `{sessionId}:{turnNumber}` when the correlation id has that shape. An id with no colon is its own session and does not pull other rows.
 
-Any other eligible label with that session id is in neither set. The rest train. If that leaves no training row, log a skip and do not fit. Do not shrink the holdout to manufacture a training row. The 200-label trigger is checked before this split. After the split, one training row is enough to fit. There is no second minimum.
+Any other eligible label with that session id is in neither set. The rest train. The 200-label check and the holdout of 50 run before this exclusion, on the first fit and on every refit, including when an accepted artifact still matches. A matching artifact does not waive either number. The paired bootstrap scores that same holdout. If session exclusion leaves fewer than `MinimumTrainingRows` (default 150) training rows, log a skip and do not fit. Do not shrink the holdout to manufacture training rows. 150 training rows is enough. 149 is not.
 
 If the holdout's teacher scores have zero variance, `RankCorrelation.Spearman` returns null (it ranks both samples and returns `Pearson`, and `Pearson` returns null when either sample has zero variance). The gate fails. Do not accept.
 
@@ -230,7 +230,8 @@ The 2026-10-23 defaults already in the parent plan §10 stay. The rows below are
 |---|---|---|
 | `Enabled` | `true` | When false, each tick logs that the job is off and does not fit. A fresh install still no-ops until 200 labels exist. |
 | `CheckIntervalMinutes` | `5` | How often the timer wakes. The same period `LogRegRetrainHostedService` uses, but as a setting. The wake does not force a fit. |
-| `MinimumLabels` | `200` | Eligible labels of that kind before the first fit. Already confirmed 2026-10-23. |
+| `MinimumLabels` | `200` | Eligible labels of that kind before every fit, including a refit while an accepted artifact still matches. The number was confirmed 2026-10-23. On 2026-10-26 David said it applies to every fit, not only the first. |
+| `MinimumTrainingRows` | `150` | Training rows required after the holdout is taken and session siblings of holdout rows are excluded. Fewer than this skips the tick. Proposed property. The number was decided 2026-10-26. |
 | `HoldoutSize` | `50` | Newest-label holdout. Already confirmed. The phase 8 spot-check window reuses the number 50 and is a different counter. |
 | `MaxHoldoutMae` | `0.10` | Holdout MAE bar, inclusive. |
 | `MinSpearman` | `0.60` | Spearman bar, inclusive. Null fails. |
@@ -250,7 +251,7 @@ Serilog, through the hosted service's `ILogger`. Every template is a static stri
 
 | When | Level | What the template includes |
 |---|---|---|
-| Job disabled, or a tick skipped | Information | The skip reason: disabled, below the label count, holdout shorter than `HoldoutSize`, or no training row after session exclusion. Include the kind and the counts that were known. |
+| Job disabled, or a tick skipped | Information | The skip reason: disabled, below `MinimumLabels`, holdout shorter than `HoldoutSize`, or fewer than `MinimumTrainingRows` after session exclusion. Include the kind and the counts that were known. |
 | Spot-check window | Information | Every tick, for each kind: the spot-check window is not active in phase 7. This line is not conditional on a fit. |
 | Retirement | Information | Kind, artifact id, and which field mismatched: teacher model, prompt version, BGE model id, or feature schema. |
 | Gate failed | Information | Kind, holdout MAE, Spearman (or a null marker), eligible / holdout / training / session-excluded counts, bootstrap ends or null, and that the accepted artifact was left unchanged. |
@@ -275,6 +276,8 @@ New test class `GraderEpochPhase7Tests` in `src/TotallyHotArcRouter.Tests`, besi
 | `GatePass_FirstArtifact_PreviousIdIsNull` | The first acceptance stores a null previous-artifact id. |
 | `Holdout_TakesFiftyNewestPerKind_TieBreakCorrelationId` | Per kind, the holdout is the 50 newest. Equal timestamps break by `correlation_id` ordinal ascending. The other kind's rows are not in this holdout. |
 | `Holdout_ExcludesSessionSiblingsFromTraining` | A sibling session row is in neither the holdout nor the training set. |
+| `Refit_MatchingArtifact_StillRequiresTwoHundredAndFifty` | An accepted artifact still matches. 199 eligible labels, or 200 labels with fewer than 50 that can be held out, does not fit. `accepted.json` is unchanged. The skip log names the label count. |
+| `SessionExclusion_BelowMinimumTrainingRows_SkipsFit` | 200 eligible labels and a holdout of 50. Session exclusion leaves 149 training rows. The tick skips, the holdout is not shrunk, and nothing is accepted. The log names the training count. 150 training rows is enough to attempt the fit. |
 | `Holdout_ZeroVariance_SpearmanNull_GateFails` | Every holdout teacher score equal. Spearman is null. Nothing is accepted. |
 | `Bootstrap_NotRun_WhenNoComparableLiveArtifact` | A live artifact with a different teacher model, prompt version, or BGE id is retired first. The gate uses only MAE and Spearman. The log's interval ends are null. |
 | `Bootstrap_ReplacesOnlyWhenLowerBoundGreaterThanZero` | Lower end `> 0` replaces. Lower end `<= 0` leaves the live artifact in place. Both ends are in the log. |
@@ -312,7 +315,7 @@ New test class `GraderEpochPhase7Tests` in `src/TotallyHotArcRouter.Tests`, besi
 - For each kind, a candidate under the MAE or Spearman bar does not become accepted.
 - A candidate that clears the gate, including the bootstrap when a comparable artifact exists, is stored with status `accepted, shadow`, a previous-artifact id when there was a comparable predecessor, and a null previous-artifact id when there was not.
 - No stored grade is rewritten. The logreg artifact and voter weights are unchanged. `JudgeScore` remains the grade of record. Router learning does not read `LocalScore`.
-- The holdout is the 50 newest eligible labels of that kind, ties broken by `correlation_id`, with session siblings excluded from training.
+- Every fit, including a refit while an accepted artifact still matches, has at least 200 eligible labels and a holdout of 50. After session exclusion, fewer than 150 training rows skips the tick and does not shrink the holdout.
 - Zero variance in the holdout yields a null Spearman and a failed gate.
 - The reservoir holds at most the configured cap, comes only from training rows that have a current-model question vector, is sealed, and is the reservoir the cosine floor and live shadow rows use.
 - A missing question vector is the indicator, never a zero vector. Tool counts are absent from schema version 1.

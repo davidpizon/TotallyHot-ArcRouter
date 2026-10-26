@@ -4,6 +4,7 @@
 **Date:** 2026-10-23
 **Deciders:** David Pizon
 **Accepted:** 2026-10-23 (David, chat sign-off on #304 plan)
+**Amendments:** [Amendment 1 (2026-10-23) — phase 3 stores the sealed response vector and the question-vector miss](#amendment-1-2026-10-23-phase-3-stores-the-sealed-response-vector-and-the-question-vector-miss) · [Amendment 2 (2026-10-26) — phase 7 acceptance stays in shadow](#amendment-2-2026-10-26-phase-7-acceptance-stays-in-shadow)
 
 ## Context and Problem Statement
 
@@ -72,6 +73,9 @@ The rules, in short (full design in the plan):
    a local C# artifact, that artifact fills the judge axis and leaves `JudgeScore` empty (unjudged, per
    the 2026-10-23 decision recorded in the plan's §12). This implementation ships the teacher path;
    takeover is a later phase of the same plan, not a second ADR.
+   [Amendment 2](#amendment-2-2026-10-26-phase-7-acceptance-stays-in-shadow) splits the acceptance sentence:
+   phase 7 stores the artifact as accepted and leaves it in shadow, and the teacher stays the grade of
+   record. Phase 8 is when the artifact fills the judge axis.
 4. **Syntax weight 0.** The parser does not run. `MinimumSyntaxConfidenceForComplete` does not withhold
    `Complete`. When syntax weight is greater than 0 and the response has no fence, syntax score is 0
    ("no code in the response") and the grade can still be `Complete`.
@@ -170,7 +174,26 @@ stored. A row is written only when the reply has non-blank text still on the gra
 or `LocalScore` is set. Deleting the session deletes the row. Shred destroys the key; the next start
 deletes every row and creates a new key. Question vectors in `memory_entries` stay unencrypted
 ([#306](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/306)).
-- Related: [#293](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/293),
+
+## Amendment 2 (2026-10-26): phase 7 acceptance stays in shadow
+
+**Status:** accepted (David Pizon, 2026-10-26). The decision is accepted. The phase 7 code is not in the tree until that implementation merges. Amends decision 3's sentence about what acceptance does. It does not change the teacher pin, the recipe split, the tally rule, or the rule that takeover is a later phase of this plan rather than a second ADR.
+
+### Why
+
+Decision 3 said two things at once. After the grader epoch accepts a local C# artifact, that artifact fills the judge axis and leaves `JudgeScore` empty. Takeover is a later phase of the same plan. Read as one step, a gate pass would replace the teacher. The plan's phases do not. Phase 7 saves the artifact and keeps scoring in shadow. Phase 8 is when the local score becomes the grade of record. The decisive point is the one decision 3 already recorded: takeover is a later phase, so the pinned teacher stays the grade of record until that phase. Accepting an artifact in phase 7 must not empty `JudgeScore`.
+
+The alternative, treating the original sentence literally, would make phase 7 the takeover. David rejected that on 2026-10-25 (decision A in the phase 7 plan) and confirmed the split on 2026-10-26.
+
+### Decision
+
+Acceptance and takeover stay two phases of [`docs/plans/issue-304-grade-non-coding-responses.md`](../plans/issue-304-grade-non-coding-responses.md). The procedure is [`docs/plans/issue-304-phase-7-grader-epoch.md`](../plans/issue-304-phase-7-grader-epoch.md).
+
+- Phase 7: a candidate that clears the agreement gate is stored as the accepted artifact for its kind, status `accepted, shadow`. The teacher score stays the grade of record for every grade in that phase. A shadow `LocalScore` may be written beside it. It does not fill the judge axis, and it does not leave `JudgeScore` empty.
+- Phase 8: takeover. The local score becomes the grade of record and fills the judge axis. `JudgeScore` stays empty on those rows, which is the unjudged rule in the plan's §12. Spot-check rows and low-confidence rows still set `JudgeScore` from the teacher.
+- This remains one plan. It does not open a second ADR.
+
+Related: [#293](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/293),
   [#294](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/294),
   [#319](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/319),
   [#326](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/326).
