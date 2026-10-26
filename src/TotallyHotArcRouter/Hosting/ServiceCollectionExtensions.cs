@@ -128,6 +128,9 @@ public static class ServiceCollectionExtensions
                 // is live.
                 sp.GetRequiredService<GraderScoreRecordObserver>(),
                 sp.GetRequiredService<ResponseVectorGradeObserver>(),
+                // Issue #304 phase 7: shadow LocalScore is stamped after the response vector exists and
+                // before the receipt is written. It does not replace JudgeScore.
+                sp.GetRequiredService<ShadowLocalScoreObserver>(),
                 sp.GetRequiredService<GradeReceiptRecordObserver>()
             };
 
@@ -256,6 +259,7 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<CostReconciliationHostedService>();
         services.AddHostedService<LogRegRetrainHostedService>();
         services.AddHostedService<ClusterRetrainHostedService>();
+        services.AddHostedService<GraderEpochHostedService>();
 
         return services;
     }

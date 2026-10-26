@@ -89,6 +89,9 @@
          memory - no network hop inline with routing, no dependency on an operator having configured
          an embeddings-capable provider. -->
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.31.0" />
+    <!-- Phase 7 grader epoch (issue #304). The regression head is Sdca inside this assembly so the
+         fit can call internal RankCorrelation. BGE stays on OnnxRuntime; this package is not an embedder. -->
+    <PackageReference Include="Microsoft.ML" Version="5.0.0" />
     <!-- WordPiece tokenizer matching BGE's BERT-family vocabulary; used by OnnxEmbeddingClient to
          turn task text into the token ids OnnxRuntime's InferenceSession expects. -->
     <PackageReference Include="FastBertTokenizer" Version="1.2.6" />

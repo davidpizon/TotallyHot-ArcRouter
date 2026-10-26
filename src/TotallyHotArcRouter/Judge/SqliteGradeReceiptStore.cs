@@ -15,7 +15,8 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
                                          question_hmac, question_chars, context_messages, question_truncated,
                                          fingerprint_ref, scorer_version, prompt_version, weights_version, abstained_graders,
                                          incomplete_reason, grade_source, response_has_code, judge_model, answer_model,
-                                         question_vector_missing, session_id, user_signal, spot_check, response_length_chars
+                                         question_vector_missing, session_id, user_signal, spot_check, response_length_chars,
+                                         local_score, local_grader_version, local_confidence, syntax_score
                                          """;
 
     private readonly RouterMemoryDatabase _database;
@@ -42,13 +43,15 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
                                   question_hmac, question_chars, context_messages, question_truncated,
                                   fingerprint_ref, scorer_version, prompt_version, weights_version, abstained_graders,
                                   incomplete_reason, grade_source, response_has_code, judge_model, answer_model,
-                                  question_vector_missing, session_id, user_signal, spot_check, response_length_chars)
+                                  question_vector_missing, session_id, user_signal, spot_check, response_length_chars,
+                                  local_score, local_grader_version, local_confidence, syntax_score)
                               VALUES (
                                   $correlationId, $createdAtUtc, $dimension, $model, $gradeStatus, $unifiedScore,
                                   $questionHmac, $questionChars, $contextMessages, $questionTruncated,
                                   $fingerprintRef, $scorerVersion, $promptVersion, $weightsVersion, $abstainedGraders,
                                   $incompleteReason, $gradeSource, $responseHasCode, $judgeModel, $answerModel,
-                                  $questionVectorMissing, $sessionId, $userSignal, $spotCheck, $responseLengthChars)
+                                  $questionVectorMissing, $sessionId, $userSignal, $spotCheck, $responseLengthChars,
+                                  $localScore, $localGraderVersion, $localConfidence, $syntaxScore)
                               ON CONFLICT(correlation_id) DO UPDATE SET
                                   created_at_utc = excluded.created_at_utc,
                                   dimension = excluded.dimension,
@@ -73,7 +76,11 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
                                   session_id = excluded.session_id,
                                   user_signal = excluded.user_signal,
                                   spot_check = excluded.spot_check,
-                                  response_length_chars = excluded.response_length_chars;
+                                  response_length_chars = excluded.response_length_chars,
+                                  local_score = excluded.local_score,
+                                  local_grader_version = excluded.local_grader_version,
+                                  local_confidence = excluded.local_confidence,
+                                  syntax_score = excluded.syntax_score;
                               """;
         BindRecord(command, record);
         command.ExecuteNonQuery();
@@ -233,6 +240,14 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
         command.Parameters.AddWithValue(parameterName: "$spotCheck", value: record.SpotCheck ? 1 : 0);
         command.Parameters.AddWithValue(parameterName: "$responseLengthChars",
             value: (object?)record.ResponseLengthChars ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$localScore",
+            value: (object?)record.LocalScore ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$localGraderVersion",
+            value: (object?)record.LocalGraderVersion ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$localConfidence",
+            value: (object?)record.LocalConfidence ?? DBNull.Value);
+        command.Parameters.AddWithValue(parameterName: "$syntaxScore",
+            value: (object?)record.SyntaxScore ?? DBNull.Value);
     }
 
     private static GradeReceiptRecord ReadRecord(Microsoft.Data.Sqlite.SqliteDataReader reader)
@@ -264,6 +279,10 @@ public sealed class SqliteGradeReceiptStore : IGradeReceiptStore
             SessionId: reader.FieldCount > 21 && !reader.IsDBNull(21) ? reader.GetString(21) : null,
             UserSignal: reader.FieldCount > 22 && !reader.IsDBNull(22) ? reader.GetString(22) : null,
             SpotCheck: reader.FieldCount > 23 && !reader.IsDBNull(23) && reader.GetInt64(23) != 0,
-            ResponseLengthChars: reader.FieldCount > 24 && !reader.IsDBNull(24) ? reader.GetInt32(24) : null);
+            ResponseLengthChars: reader.FieldCount > 24 && !reader.IsDBNull(24) ? reader.GetInt32(24) : null,
+            LocalScore: reader.FieldCount > 25 && !reader.IsDBNull(25) ? reader.GetDouble(25) : null,
+            LocalGraderVersion: reader.FieldCount > 26 && !reader.IsDBNull(26) ? reader.GetString(26) : null,
+            LocalConfidence: reader.FieldCount > 27 && !reader.IsDBNull(27) ? reader.GetDouble(27) : null,
+            SyntaxScore: reader.FieldCount > 28 && !reader.IsDBNull(28) ? reader.GetDouble(28) : null);
     }
 }

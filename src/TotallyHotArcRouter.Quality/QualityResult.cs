@@ -125,10 +125,26 @@ public sealed record QualityResult
 
     /// <summary>
     /// The local grader's normalized score, or null when that grader did not run. A value here is not
-    /// <see cref="JudgeScore"/>. Phase 3's response-vector write treats a set value as "a grader scored
-    /// this reply," including a shadow score whose <see cref="JudgeScore"/> is empty.
+    /// <see cref="JudgeScore"/> and is not the grade of record. Phase 7's shadow observer stamps it
+    /// after the response vector is written, which is why it is settable: the grade pipeline shares
+    /// this instance with the receipt observer. Phase 3's response-vector write still treats a set
+    /// value as "a grader scored this reply," including a shadow score whose <see cref="JudgeScore"/>
+    /// is empty, so the shadow stamp stays behind that write.
     /// </summary>
-    public double? LocalScore { get; init; }
+    public double? LocalScore { get; set; }
+
+    /// <summary>
+    /// Id of the accepted grader-epoch artifact that produced <see cref="LocalScore"/>, or null when
+    /// the shadow grader did not score this result. Not a training label and not the grade of record.
+    /// </summary>
+    public string? LocalGraderVersion { get; set; }
+
+    /// <summary>
+    /// Cosine from this row's question vector to its nearest sealed fingerprint neighbor, or null.
+    /// Phase 7 stores null whenever the artifact's cosine floor is null, and never writes 0 in that
+    /// case. It does not call the teacher.
+    /// </summary>
+    public double? LocalConfidence { get; set; }
 
     /// <summary>
     /// Whether the pending question vector was missing at grade time. <see langword="true"/> is a

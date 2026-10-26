@@ -122,7 +122,11 @@ public sealed class RouterMemoryDatabase
                                          session_id           TEXT    NULL,
                                          user_signal          TEXT    NULL,
                                          spot_check           INTEGER NOT NULL DEFAULT 0,
-                                         response_length_chars INTEGER NULL
+                                         response_length_chars INTEGER NULL,
+                                         local_score          REAL    NULL,
+                                         local_grader_version TEXT    NULL,
+                                         local_confidence     REAL    NULL,
+                                         syntax_score         REAL    NULL
                                      );
 
                                      CREATE TABLE IF NOT EXISTS response_vectors (
@@ -618,6 +622,13 @@ public sealed class RouterMemoryDatabase
             alter.ExecuteNonQuery();
         }
 
+        // Issue #304 phase 7. No DEFAULT: a 0 would mark receipts written before the shadow grader
+        // existed as scored, and a 0 syntax score would look like a parser failure.
+        AddNullableRealColumn(connection: connection, table: "grade_receipts", column: "local_score");
+        AddNullableTextColumn(connection: connection, table: "grade_receipts", column: "local_grader_version");
+        AddNullableRealColumn(connection: connection, table: "grade_receipts", column: "local_confidence");
+        AddNullableRealColumn(connection: connection, table: "grade_receipts", column: "syntax_score");
+
         using var index = connection.CreateCommand();
         index.CommandText = """
                             CREATE INDEX IF NOT EXISTS ix_grade_receipts_session_created
@@ -751,6 +762,20 @@ public sealed class RouterMemoryDatabase
         {
             using var alter = connection.CreateCommand();
             alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} TEXT NULL;";
+            alter.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>
+    /// Adds a nullable REAL column when it is missing. No default, so rows written before the column
+    /// existed stay NULL instead of becoming a stored zero.
+    /// </summary>
+    private static void AddNullableRealColumn(SqliteConnection connection, string table, string column)
+    {
+        if (!ColumnExists(connection: connection, table: table, column: column))
+        {
+            using var alter = connection.CreateCommand();
+            alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} REAL NULL;";
             alter.ExecuteNonQuery();
         }
     }

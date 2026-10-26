@@ -73,10 +73,11 @@ public sealed class GradeReceiptRecordObserver : IQualityScoreObserver
         var newestForHmac = window?.NewestUserMessage;
         var questionHmac = _questionHmacHasher.TryCompute(newestForHmac);
         var promptVersion = result.JudgeScore.HasValue ? _judgeOptions.PromptVersion : null;
-        var weightsVersion = string.Equals(result.RecipeId, GradingRecipes.Bootstrap,
-            StringComparison.OrdinalIgnoreCase)
-            ? GradingRecipes.Bootstrap
-            : _qualityOptions.WeightsVersion;
+        var weightsVersion = GraderEpochKinds.WeightsVersionThatWillBeStored(
+            recipeId: result.RecipeId, codeWeightsVersion: _qualityOptions.WeightsVersion);
+        double? syntaxScore = GradingRecipes.IsCodeRecipe(result.RecipeId)
+            ? (result.SyntaxValid ? 1.0 : 0.0)
+            : null;
         var judgeModel = result.JudgeScore.HasValue
             ? (string.IsNullOrWhiteSpace(result.JudgeModel) ? _judgeOptions.ModelName : result.JudgeModel)
             : null;
@@ -106,7 +107,11 @@ public sealed class GradeReceiptRecordObserver : IQualityScoreObserver
             SessionId: string.IsNullOrEmpty(result.SessionId) ? null : result.SessionId,
             UserSignal: result.UserSignal,
             SpotCheck: result.SpotCheck,
-            ResponseLengthChars: result.ResponseLengthChars);
+            ResponseLengthChars: result.ResponseLengthChars,
+            LocalScore: result.LocalScore,
+            LocalGraderVersion: result.LocalGraderVersion,
+            LocalConfidence: result.LocalConfidence,
+            SyntaxScore: syntaxScore);
 
         await _store.UpsertAsync(record: receipt, cancellationToken: cancellationToken).ConfigureAwait(false);
 
