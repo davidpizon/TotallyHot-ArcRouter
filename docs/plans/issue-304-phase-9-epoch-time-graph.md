@@ -100,10 +100,10 @@ Empty and failure copy, for this panel only:
 | `src/TotallyHotArcRouter/Judge/IncompleteGradeCountQuery.cs` | New. Counts `Incomplete` receipts in a window. |
 | `src/TotallyHotArcRouter/Proxy/Management/GraderEpochEfficiency.cs` | New. The bucket math. This is the only place that divides. |
 | `src/TotallyHotArcRouter/Proxy/Management/GraderEpochChartQuery.cs` | New. Calls the three readers and returns one snapshot. |
-| `src/TotallyHotArcRouter/Proxy/Management/UsageAdminGrpcService.cs` | Optional constructor parameter `GraderEpochChartQuery? epochChart = null`. New RPC method. Existing `new UsageAdminGrpcService(reporting)` call sites keep compiling. A null query returns the same unavailable status `GetLearningReportCard` returns when both of its stores are null. |
+| `src/TotallyHotArcRouter/Proxy/Management/UsageAdminGrpcService.cs` | Second constructor parameter `GraderEpochChartQuery? epochChart = null`, plus the new RPC method. The default exists so today's `new UsageAdminGrpcService(reporting)` lines in `UsageAdminGrpcServiceTests` still compile. A null query returns unavailable with the message `The grader epoch chart is not available.` That is the same `ManagementErrorType.Unavailable` shape `GetLearningReportCard` uses when both of its stores are null (`The learning report card is not available.`). |
 | `src/TotallyHotArcRouter/Proxy/ProxyServerDependencies.cs` | Optional init properties on `ManagementApiDependencies`: `IGraderEpochEventStore? EpochEvents`, `TranscriptDatabase? Transcripts`, `RouterMemoryDatabase? GradeReceipts`. The inner web host has its own container and cannot resolve the outer singletons. This is the same hand-off `UsageRollupStore` already uses. |
 | `src/TotallyHotArcRouter/Proxy/ProxyServiceCollectionExtensions.cs` | Set those three properties where `ManagementApi` is built (next to `UsageRollupStore`). `GetRequiredService` for `IGraderEpochEventStore`, `TranscriptDatabase`, and `RouterMemoryDatabase`. |
-| `src/TotallyHotArcRouter/Proxy/ProxyServer.cs` | Inside the same `managementApi is not null` block as `new ManagementReportingService(...)` (about line 375), always `services.AddSingleton` a `GraderEpochChartQuery`. When any of the three new properties is null, that query's RPC returns unavailable. The gRPC service still activates. Do not add a `ManagementFacade` method. |
+| `src/TotallyHotArcRouter/Proxy/ProxyServer.cs` | See [Inner-host wiring](#inner-host-wiring). Do not add a `ManagementFacade` method. |
 | `src/TotallyHotArcRouter.Gui.Charts/GraderEpochChartBuilder.cs` | New. Colors, dash style, gap flags, caption. Does not divide. |
 | `src/TotallyHotArcRouter.Gui.Charts/DistributionChart.cs` | No change to `ChartJson`. It drops null properties (`WhenWritingNull`). The gap flag is a bool, so it survives. |
 | `src/TotallyHotArcRouter.Gui.Web/wwwroot/js/echarts-interop.js` | New kind `GraderEpochTime` in `buildOption`. |
@@ -121,6 +121,16 @@ Empty and failure copy, for this panel only:
 No change to `src/TotallyHotArcRouter/Judge/IGraderEpochEventStore.cs`. `ListForPlot` already returns every row, oldest first, with the phase 9 `SELECT`. Do not add a time filter to that method. The chart query filters in memory.
 
 No change to `ITranscriptStore` or `IGradeReceiptStore`. Both have many callers. A new method on either would touch every test double. The two new reader types take the database objects the stores already use.
+
+### Inner-host wiring
+
+`UsageAdminGrpcService` is not constructed in `ProxyServer`. `endpoints.MapGrpcService<UsageAdminGrpcService>()` only reflects over the type. The inner Kestrel container constructs the service on the first RPC. That mapping already sits inside `if (managementApi is not null)`, and the constructor's `ManagementReportingService` is the singleton registered in the matching block just above (the block that does `new ManagementReportingService(...)` and `services.AddSingleton(reportingService)`).
+
+In that same block, always construct one `GraderEpochChartQuery` from the three new `ManagementApiDependencies` properties and `services.AddSingleton` it, including when one of those properties is null. The inner container then resolves the chart query because it is registered. A registered query whose database property is null returns unavailable, and the service still activates.
+
+The C# default is for the hand-built tests. It is also what the container uses when the singleton is missing. On `Microsoft.Extensions.DependencyInjection` 10.0.14, both `GetRequiredService` and `ActivatorUtilities.CreateInstance` pass null for an unregistered parameter that has a default. Forgetting `AddSingleton` does not throw on the first RPC. The chart stays unavailable, which is the same symptom as a null database property, and a test that only does `new UsageAdminGrpcService(reporting)` will not catch it. Register the query beside `ManagementReportingService` anyway. That is how the reporting service reaches this gRPC type today.
+
+`ProxyServerTests` that build `ManagementApiDependencies` without the three new properties stay valid. The query is still registered, and its RPC returns unavailable.
 
 ## Data queries
 
@@ -167,13 +177,13 @@ WHERE grade_status = 'Incomplete'
   AND created_at_utc >= $from AND created_at_utc < $to;
 ```
 
-`grade_status` is the enum name `Incomplete` (`GradeReceiptRecordObserver` writes `ToString()`). `abstained_graders` is the comma-separated `grader:reason` list from `GradeReceiptRecordObserver.FormatAbstainedGraders`. A `Complete` row stores an empty string there, so it is not in this query. Do not select `question_hmac` or any text.
+`grade_status` is the enum name `Incomplete`. `GradeReceiptRecordObserver` puts `result.GradeStatus` on the `GradeReceiptRecord`. `SqliteGradeReceiptStore.BindRecord` writes `record.GradeStatus.ToString()`, which stores `Incomplete`. `abstained_graders` is the comma-separated `grader:reason` list from `GradeReceiptRecordObserver.FormatAbstainedGraders`. A `Complete` row stores an empty string there, so it is not in this query. Do not select `question_hmac` or any text.
 
 `GraderEpochChartQuery` calls these three and does not open one connection that attaches both files.
 
 ### RPC shape
 
-`GetGraderEpochChartRequest`: `from`, `to`, and `width`. `width` is `hour` or `day`. Empty means `day`. Anything else is `InvalidRequest`, the same style `GetUsageSummary` uses for a bad window. The Report Card sends `hour` when the button is Day, and `day` for Month, 3-Month, 6-Month, and Year. `from` is inclusive and `to` is exclusive, matching `GetLearningReportCard`.
+`GetGraderEpochChartRequest`: `from`, `to`, and `width`. `width` is `hour` or `day`. The gRPC method does what `GetLearningReportCard` and `QueryRollup` already do, and nothing more: `ParseTimestamp` on `from` and `to` (a missing field throws `InvalidArgument` with `'{field}' is required.`), and an empty `width` becomes `day` (`string.IsNullOrEmpty(width) ? "day" : width`, copied from `UsageAdminGrpcService.QueryRollup`). `GraderEpochChartQuery` then checks the range. `to <= from` returns `ManagementErrorType.InvalidRequest` with `'to' must be after 'from'.`, copied from `GetLearningReportCardAsync`. Any width other than `hour` or `day` returns `InvalidRequest` with `width must be 'hour' or 'day'.`, copied from `GetUsageRollup`. `UsageAdminGrpcService.Unwrap` maps that `InvalidRequest` to `StatusCode.InvalidArgument`, the same way those two RPCs do. `GetLearningReportCard` has no width field. The new panel chooses the width from the existing filter buttons: `hour` when the button is Day, and `day` for Month, 3-Month, 6-Month, and Year. `from` is inclusive and `to` is exclusive. The buttons already compute that window in `LearningReportCard.razor` (`Day` is `now.AddDays(-1)` through `now`, and the rest follow the same method).
 
 `GraderEpochChartResponse`:
 
@@ -227,7 +237,7 @@ The line series:
 - Do not emit empty buckets before the first known point or after the last one.
 - A known point whose ratio is 0 has `gap: false` and `value: 0`. That point is drawn.
 
-Marks, one per epoch row in the window, in `id` order:
+Marks, one per epoch row in the window, in `ListForPlot` order (`at_utc`, then `id`):
 
 | `epoch_type` | Color | Meaning on the legend |
 |---|---|---|
@@ -255,7 +265,7 @@ The caption in the scope section is part of the chart model, not only a tooltip.
 
 ## Incomplete counts
 
-Eight named reasons, always shown, in this order, from `IncompleteReasons`: `queue_full`, `no_text`, `empty`, `no_judge`, `judge_is_answerer`, `deferred_to_loop`, `loop_unlinked`, `disputed`. A reason with no row shows `0`. That 0 is a count of receipts.
+Eight named reasons, always shown, in the declaration order of `IncompleteReasons`: `queue_full`, `no_text`, `empty`, `no_judge`, `judge_is_answerer`, `disputed`, `deferred_to_loop`, `loop_unlinked`. A reason with no row shows `0`. That 0 is a count of receipts. The query's `grade_status = 'Incomplete'` leaves out `StructureOnly` and `Complete`. `StructureOnly` is a different enum value (`GradeStatus.StructureOnly`) and is not an incomplete reason.
 
 A null or empty `incomplete_reason` is an extra row, `no reason stored`, and only when its count is at least 1. It is not a ninth permanent reason, and it is not shown as 0.
 
@@ -312,7 +322,8 @@ Recorded fixtures. Short tables. No `usage_rollup` rows in the efficiency fixtur
 | `IncompleteCount_AbstainedToken_IsSeparate` | One row with reason `no_judge` and `abstained_graders` `judge:judge-join-timeout` counts once in the headline, once under `no_judge`, and once under that token. |
 | `IncompleteCount_EmptyReason_OnlyWhenPresent` | A null `incomplete_reason` adds `no reason stored` with its count. The label is absent when every incomplete row has a reason. |
 | `ChartQuery_ReadsTheTwoFilesSeparately` | The query calls `ListForPlot` and the transcript reader. It does not execute `ATTACH`. |
-| `GetGraderEpochChart_NullQuery_IsUnavailable` | `UsageAdminGrpcService` constructed without the chart query returns the unavailable status. It does not return an empty success. |
+| `GetGraderEpochChart_NullQuery_IsUnavailable` | `UsageAdminGrpcService` constructed without the chart query returns unavailable and the message `The grader epoch chart is not available.` It does not return an empty success. | 
+| `GetGraderEpochChart_MissingFrom_IsInvalidArgument` | A request with no `from` throws `InvalidArgument` and the detail `'from' is required.` Same helper as `GetLearningReportCard`. |
 | `GetGraderEpochChart_GapOmitsEfficiency` | A gap bucket has no `efficiency` field on the wire. A zero ratio has `efficiency` `"0"`. |
 | `UsageQueryClient_MissingEfficiency_IsNull` | The view model's efficiency is null. It is not 0. |
 | `GraderEpochChart_GapFlag_OmitsValue` | Serialized JSON for a gap point has `"gap":true` and no `"value":0`. A zero ratio has `"value":0` and `"gap":false`. |
@@ -338,7 +349,7 @@ Recorded fixtures. Short tables. No `usage_rollup` rows in the efficiency fixtur
 - **A reader thinks the mark caused the move.** The caption is on the chart model and on the page, not only in a tooltip.
 - **Conversation text on the admin RPC.** The transcript `SELECT` is four columns. The test fails if `prompt_text` or `response_text` appears.
 - **Two database files.** A read cannot be one transaction across them. The chart can show an epoch that was committed a moment after the transcript snapshot. That is a display skew, not a write. The caption already refuses a causal claim.
-- **The inner web host cannot see outer singletons.** Forgetting the three `ManagementApiDependencies` properties makes the RPC permanently unavailable in the real server while unit tests pass. The wiring rows above are the fix. `ProxyServerTests` that build `ManagementApiDependencies` without the new properties stay valid: the RPC is unavailable there.
+- **The inner web host cannot see outer singletons.** Forgetting the three `ManagementApiDependencies` properties makes the RPC permanently unavailable in the real server while unit tests that pass a database still pass. The wiring section above is the fix. Forgetting `services.AddSingleton` of `GraderEpochChartQuery` has the same symptom, not an activation error: the container supplies the constructor default null. A hand-built `UsageAdminGrpcService` test does not catch a missing registration. Register the query in the same block as `ManagementReportingService`.
 - **`ListForPlot` loads every epoch.** The table is append-only and is not purged. Filtering in memory keeps the phase 8 contract. Do not "fix" growth by deleting rows.
 - **The code sweep is still on.** A doc that says "history is not rescanned" without naming `QualityRescanService` would be wrong. The doc section above keeps the sweep and says #304 does not send old prose to the teacher.
 - **A zero receipt count read as an unknown cost.** The incomplete panel's subtitle says a zero means no receipt.
@@ -361,7 +372,7 @@ Checked with CodeGraph and Serena at `5b00300b`. These exist:
 - `IGraderEpochEventStore.ListForPlot` and `SqliteGraderEpochEventStore`, registered in `JudgeServiceCollectionExtensions`. `GraderEpochEventRow` keeps nulls. `Insert` is the only write.
 - `IGraderEpochEventStore` constants: `LocalTakeover` `local_takeover`, `TeacherResumed` `teacher_resumed`, `TeacherChanged` `teacher_changed`, `BgeChanged` `bge_changed`, `FeatureSchemaChanged` `feature_schema_changed`.
 - `GraderEpochOptions` includes `TakeoverEnabled`, `SpotCheckRate`, `SpotCheckWindowSize`, and `SpotCheckRollbackMae`.
-- `UsageAdminService.GetLearningReportCard` in `src/Protos/admin.proto`. `UsageAdminGrpcService` takes `ManagementReportingService`. `ManagementReportingService` is built in `ProxyServer` from `ManagementApiDependencies`. That record is filled in `ProxyServiceCollectionExtensions`, which says the inner host cannot resolve outer singletons.
+- `UsageAdminService.GetLearningReportCard` in `src/Protos/admin.proto`. `UsageAdminGrpcService` takes `ManagementReportingService` and is constructed by the inner container, not by `ProxyServer`. `MapGrpcService<UsageAdminGrpcService>()` is inside `if (managementApi is not null)`. `ManagementReportingService` is `new`'d and `AddSingleton`'d in the matching block. `ManagementApiDependencies` is filled in `ProxyServiceCollectionExtensions`, which says the inner host cannot resolve outer singletons. `UsageAdminGrpcService.QueryRollup` maps an empty width to `day`. `GetUsageRollup` rejects any other width with `width must be 'hour' or 'day'.` `ParseTimestamp` rejects a missing timestamp. `IncompleteReasons` declaration order is `queue_full`, `no_text`, `empty`, `no_judge`, `judge_is_answerer`, `disputed`, `deferred_to_loop`, `loop_unlinked`.
 - `ManagementFacade` is a different type. Reporting was split out of it. This phase does not add a method there.
 - `request_transcripts` in `TranscriptDatabase`: `created_at_utc` `TEXT NOT NULL`, `input_tokens` `INTEGER NULL`, `output_tokens` `INTEGER NULL`, `cost` `REAL NULL`, plus `prompt_text` and `response_text`, which this phase does not select.
 - `SqliteTranscriptStore.ListSessionsAsync` already reads cost and tokens with `IsDBNull`.
