@@ -991,6 +991,17 @@ public class GraderEpochPhase7Tests
         return records.Single(record => record.CorrelationId == correlationId).Blob;
     }
 
+    /// <summary>
+    /// Fails the test when the tick caught an exception and kept going.
+    /// The formatted line includes the exception, so the CI log shows the type and message.
+    /// </summary>
+    /// <param name="lines">The lines the tick's logger stored.</param>
+    internal static void AssertTickDidNotThrow(IReadOnlyList<string> lines)
+    {
+        var thrown = lines.Where(line => line.Contains("threw unexpectedly", StringComparison.Ordinal)).ToArray();
+        Assert.True(thrown.Length == 0, string.Join(Environment.NewLine, thrown));
+    }
+
     internal sealed class World : IDisposable
     {
         private readonly string _directory;
@@ -1145,7 +1156,12 @@ public class GraderEpochPhase7Tests
             PromptVersion = prompt ?? Prompt
         };
 
-        public async Task Tick() => await Service.RunTickAsync(CancellationToken.None);
+        /// <summary>Drives one tick and fails when that tick logged a swallowed exception.</summary>
+        public async Task Tick()
+        {
+            await Service.RunTickAsync(CancellationToken.None);
+            AssertTickDidNotThrow(ServiceLog.Lines);
+        }
 
         public async Task SeedLinear(int count, int holdout, bool invertHoldout = false, bool constantHoldout = false,
             int unparseable = 0, int sharedHoldoutSession = 0, float[]? question = null)
@@ -1626,8 +1642,15 @@ public class GraderEpochPhase7Tests
             public bool IsEnabled(LogLevel logLevel) => true;
 
             public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-                Func<TState, Exception?, string> formatter) =>
-                lines.Add(formatter(state, exception));
+                Func<TState, Exception?, string> formatter)
+            {
+                // LoggerExtensions formats the message only. The exception arrives separately, so append it
+                // or a swallowed tick's assert message would hide the type and message.
+                var text = formatter(state, exception);
+                if (exception is not null)
+                    text += Environment.NewLine + exception;
+                lines.Add(text);
+            }
         }
 
         private sealed class NullScope : IDisposable

@@ -312,6 +312,7 @@ public class GraderEpochPhase8Tests
         await world.Tick();
         await world.Tick();
         await Restart(world).RunTickAsync(CancellationToken.None);
+        GraderEpochPhase7Tests.AssertTickDidNotThrow(world.ServiceLog.Lines);
         Assert.Single(world.Events.ListForPlot(), row => row.EpochType == IGraderEpochEventStore.TeacherChanged);
     }
 
@@ -379,6 +380,7 @@ public class GraderEpochPhase8Tests
         await world.Tick();
         await world.Tick();
         await Restart(world).RunTickAsync(CancellationToken.None);
+        GraderEpochPhase7Tests.AssertTickDidNotThrow(world.ServiceLog.Lines);
         Assert.Single(world.Events.ListForPlot(), row => row.EpochType == IGraderEpochEventStore.BgeChanged);
     }
 
@@ -390,6 +392,7 @@ public class GraderEpochPhase8Tests
         await world.Tick();
         await world.Tick();
         await Restart(world).RunTickAsync(CancellationToken.None);
+        GraderEpochPhase7Tests.AssertTickDidNotThrow(world.ServiceLog.Lines);
         Assert.Single(world.Events.ListForPlot(), row => row.EpochType == IGraderEpochEventStore.FeatureSchemaChanged);
     }
 
@@ -760,7 +763,7 @@ public class GraderEpochPhase8Tests
     }
 
     private static GraderEpochHostedService Restart(GraderEpochPhase7Tests.World world) => new(
-        logger: new GraderEpochPhase7Tests.CaptureLog().For<GraderEpochHostedService>(),
+        logger: world.ServiceLog.For<GraderEpochHostedService>(),
         options: world.Epoch,
         judge: world.Judge,
         embedding: world.Embedding,
