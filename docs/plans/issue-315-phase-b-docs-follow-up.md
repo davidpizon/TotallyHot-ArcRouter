@@ -45,7 +45,7 @@ flowchart LR
   P --> C
 ```
 
-Three pull requests, F1, F2, and F3. Those ids are slices of this follow-up. They are not Phase B. They do not depend on each other. Each is docs only. None of them contains the writer.
+Three pull requests, F1, F2, and F3. Those ids are slices of this follow-up. They are not Phase B. They do not depend on each other. Each is docs only. None of them contains the writer. None of them contains the word-answer routing change. That change is code. It is §9. It needs its own plan and David's go on that plan.
 
 | PR | Items | Files |
 |---|---|---|
@@ -139,11 +139,11 @@ Replace the "Teacher phase and takeover" section with:
 
 **What the doc claims now.** Only fenced responses are graded. Helpers are never graded, and subagent turns rarely are. A quality floor protects only where grades exist.
 
-**What the code does.** Same as §3.3. The route-by-kind decision is still the accepted decision. Grading text helpers does not, by itself, change that decision. Changing the route would be a new ADR. This pull request does not open one.
+**What the code does.** Same as §3.3 for grading. The route in the tree today is still route by kind. A helper reaches the utility rule only when the client delegated the model choice (§9). A helper that names its own model is not moved. Grading a word answer does not, by itself, change that route. David decided on 2026-10-27 that the route for word answers should change. That change is §9. It is not this docs pull request, and this pull request does not open the ADR for it.
 
 **Correction.** Under the three bullets in Decision Drivers ("Respect what the router can measure", lines 44–47), add this note. Do not delete the three bullets. They stay as the measurement in the accepted text (decided 2026-10-02, merged in #186 on 2026-10-03).
 
-> **Amendment (2026-10-27, #315).** The three bullets above are the measurement in the accepted text (decided 2026-10-02, merged in #186 on 2026-10-03). They are not the live path. `QualityIngress.TryIngest` now calls `CreateBootstrapRequest` when `Extract` returns null, so unfenced text can be graded on `GradingRecipes.Bootstrap`. A tool-only turn (`deferred_to_loop`) and a text reply after tool results (`loop_unlinked`) are `Incomplete` and do not learn. A quality floor still protects only a turn that received a score. The route-by-kind outcome below is unchanged.
+> **Amendment (2026-10-27, #315).** The three bullets above are the measurement in the accepted text (decided 2026-10-02, merged in #186 on 2026-10-03). They are not the live path. `QualityIngress.TryIngest` now calls `CreateBootstrapRequest` when `Extract` returns null, so unfenced text can be graded on `GradingRecipes.Bootstrap`. A tool-only turn (`deferred_to_loop`) and a text reply after tool results (`loop_unlinked`) are `Incomplete` and do not learn. A quality floor still protects only a turn that received a score. The route in the tree today is still route by kind. A later code plan (§9 of the #315 docs follow-up) changes how word answers are routed. This note does not make that change.
 
 After the context sentence "It also showed that this router cannot grade most of this traffic." (line 25), add: "That sentence is the same 2026-10-02 measurement. The live path is the amendment under Decision Drivers." Do not rewrite the rest of the context.
 
@@ -151,7 +151,7 @@ After option 3's bullet "Helpers are never graded, so \"no helper floor\" and \"
 
 > That sentence is the measurement in the accepted text. Today's measurement is the amendment under Decision Drivers. It is not a reason to reopen option 3.
 
-**Verify.** The status line still says `accepted`. The Decision Drivers note names `CreateBootstrapRequest`. Option 3 still contains the words "Helpers are never graded", and the next sentence points at the amendment. Search the decision-outcome section for a new routing rule. There is none.
+**Verify.** The status line still says `accepted`. The Decision Drivers note names `CreateBootstrapRequest`. Option 3 still contains the words "Helpers are never graded", and the next sentence points at the amendment. Search the decision-outcome section for a new routing rule. There is none. The note may say a later code plan will change word-answer routing. It must not itself state a new route.
 
 ### 3.5 ADR-0027 still says the drop is "today" and takeover is "a later phase"
 
@@ -317,7 +317,8 @@ Do not rewrite the goal, the constraints, or the task list.
 - Rewriting `telemetry.md`'s service list. It matches the `service` lines and the `MapGrpcService` calls. `GetGraderEpochChart` is an RPC on `UsageAdminService`, which is already named.
 - `docs/plans/router-evaluator-and-live-pricing.md` §14. #351 added the three bullets the phase 9 plan required (teacher, separate epoch, `ScorerVersion` stays `3.0`). They match the code. Do not edit them.
 - Port numbers, ACLs, Serilog `WriteTo`, `management-token.txt`, adaptive-routing default, metadata-only session lists, and the other Phase A items whose sentences were not touched by #304, #319, #326, #350, or #351. A full second pass over those is not this plan. If an edit in F1–F3 happens to sit next to one and the sentence is still true, leave it.
-- Accepting ADR-0017, building `GetSessionTurnDetails`, or changing helper routing (question 2).
+- Accepting ADR-0017, or building `GetSessionTurnDetails`.
+- The word-answer routing change. David settled the direction on 2026-10-27 (question 2). The code is §9. It is not an edit in F1–F3.
 
 ## 5. Checked and left alone
 
@@ -340,16 +341,49 @@ These are real code defects against a written rule. The docs pull requests name 
 
 ## 7. Questions only David can answer
 
-Question 1 is settled. Questions 2 and 3 are still open. For those two, the recommended answer is what this plan does if David says nothing is wrong with it. A different answer changes the named section before implementation.
+Questions 1 and 2 are settled. Question 3 is still open. Questions 4, 5, and 6 are open choices inside the code follow-up (§9). They do not block F1–F3. For an open question, the recommended answer is what the later plan does if David says nothing is wrong with it.
 
 1. **Settled (David, 2026-10-27, on [#356](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/356)).** What should this stack of doc fixes be called? **David's answer:** keep the background writer, the `Channel<ServedRequest>` item in §4 of the approved plan, as Phase B. Call this plan a docs follow-up, not Phase B. The slices of this follow-up are F1, F2, and F3, so they are not read as Phase B. The branch and the filename still contain `phase-b`. That string is not the name of this plan.
 
-2. **Helpers can be graded now when they answer in words. Should we route them differently?** The old decision said helpers are never graded, which is why a helper quality floor never fires. A helper that returns text and no code fence can be graded now. A helper that only calls tools still gets no score.
-   **Recommended answer.** No. Fix the sentences (§3.3 and §3.4). Leave the route-by-kind decision alone. Changing who serves a helper is a new decision, not a doc fix.
+2. **Settled (David, 2026-10-27, on [#356](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/356)).** Helpers can be graded now when they answer in words. Should routing change? **David's answer:** fix the doc sentences, and change how word (non-coding) answers are routed now that they can be graded. The sentences stay in F1 (§3.3 and §3.4). The routing change is code. It is §9. It does not go in F1, F2, or F3.
 
 3. **Three pictures use a `style=` the design rules do not allow. Should the docs allow them?** They set a box's height, a button's height, and a card's width in the markup. The rule says that kind of layout lives in the stylesheet.
    **Recommended answer.** Do not allow them in the docs. Write them down as bugs (§6). A later code change moves them into CSS classes. This plan does not touch the Razor files.
 
+4. **Which requests should read the new word grades?** The classifier has no "this is prose" switch. `KeywordDimensionInferrer.Infer` returns `code_generation` when no keyword matches. A harness helper is not on the utility leg unless the client delegated the model (`IsRouterChoiceModelName` or `IsCopilotUtilityAlias`).
+   **Recommended answer.** Only those delegated helpers, plus a request `InferIsUtility` already marks utility. Leave a helper that names its own model, light subagents, and the orchestrator path on the routes they have today.
+
+5. **Should a delegated helper stay on the cheap rule, or move to the learned path?** Delegated means `IsRouterChoiceModelName` or `SubagentSignalDetector.IsCopilotUtilityAlias`, the same gate as question 4.
+   **Recommended answer.** Stay on `UtilityRoutingPolicy`. Add a floor that reads the separate non-code tally. No non-code score yet means the floor does not fire. Do not send helpers down the exploring path.
+
+6. **Word grades already sit in the neighbor list the learned path reads. Should a code request ignore those neighbors?**
+   **Recommended answer.** Yes. Tag the neighbor with the recipe and skip a bootstrap neighbor when the route is not a word route. That keeps a word grade from steering a code pick.
+
 ## 8. Sign-off
 
-David's comment on #315 or on this pull request, approving this follow-up, is the sign-off for the edits in §3. The comment on 2026-10-27 settles question 1 only. It is not that sign-off. Questions 2 and 3 are still open. Until a comment approves this follow-up, no edit in §3 is in scope for an implementation pull request. Sign-off of this file is not sign-off to build Phase B, and sign-off of Phase B is not sign-off of these doc edits.
+David's comment on #315 or on this pull request, approving this follow-up, is the sign-off for the edits in §3. The comments on 2026-10-27 settle question 1 and the direction of question 2. They are not that sign-off. They are not the go for the code plan in §9. Question 3 is still open. Until a comment approves this follow-up, no edit in §3 is in scope for an implementation pull request. Sign-off of this file is not sign-off to build Phase B, and it is not sign-off to change routing.
+
+## 9. Code follow-up: route word answers
+
+David's answer on question 2 (2026-10-27, [#356](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/356)): fix the doc sentences, and change how word (non-coding) answers are routed now that they can be graded.
+
+F1 still fixes the sentences. F2 and F3 are unchanged. This section does not edit code, does not file an issue, and does not open a pull request. The routing change is a separate code follow-up. It needs its own plan at `docs/plans/issue-<N>-route-word-answers.md`, where `<N>` is the issue David opens for it, and it needs David's go on that plan before any code. This file does not pick `<N>`.
+
+Checked with CodeGraph (`codegraph_explore` on `CompositeRoutingPolicy`, `UtilityRoutingPolicy`, `RouterMemoryScoreObserver`, and `EmbeddingMemoryScoreObserver`) and Serena (`find_symbol` with bodies, session `de845485`, C# language server). Both returned source. Serena was not skipped.
+
+**What routing does with a word answer today.** The route is chosen before the answer exists. `RequestInterceptor` applies a harness helper or light-subagent class only when the client delegated the model: `IsRouterChoiceModelName` or `SubagentSignalDetector.IsCopilotUtilityAlias`. Otherwise `subagentRoute` is `SubagentRouteClass.Normal`, and `IsUtility` stays whatever `HeuristicRequestClassifier.InferIsUtility` already decided. A helper that names its own model, including the auto-mode classifier, is not sent to the cheap path. When the class does apply, `Helper` sets `IsUtility` true and `LightSubagent` sets it false and supplies `NearBestValueFloor`. A helper does not get that floor.
+
+`InferIsUtility` is also true when `max_tokens` (or `max_completion_tokens`) is in `(0, 64]`, or when the prompt is 1 to 200 characters and contains a title, summary, or commit-message phrase. `CompositeRoutingPolicy.SelectModelAsync` calls `UtilityRoutingPolicy.SelectModelAsync` only when `RoutingContext.IsUtility` is true. Otherwise it tries the near-best floor, then `OrchestratorRoutingPolicy` when `EnableOrchestratorPolicy` is true, and `AgentRouterPolicy` when it is false. The utility leg is the one that calls `RouterMemory.GetAverageScore`. The dimension on that call is `RouterDimension.ToLiveKey` of what `KeywordDimensionInferrer.Infer` returned (the default is `code_generation`, so the key looks like `live:code_generation`). A prompt with no keyword match is still `code_generation`. Neither the orchestrator leg nor the general leg reads a separate word-answer tally.
+
+The grade for a word answer does not move that tally. `QualityIngress.CreateBootstrapRequest` builds `GradingRecipes.Bootstrap` with an empty dimension. `RouterMemoryScoreObserver.ObserveAsync` writes `RouterMemory.AddScoreAsync` only when the grade is `Complete` and `GradingRecipes.IsCodeRecipe` is true. A bootstrap grade fails that check, so the next delegated helper is still ranked on the code tally. `EmbeddingMemoryScoreObserver.ObserveAsync` stores a complete bootstrap grade in the neighbor list only when a pending task embedding is waiting for that correlation id. When that write happens and no cost was cached, the stored cost is null.
+
+**What should change.** Give those word routes a score of their own, kept out of the code tallies (ADR-0027). A complete bootstrap grade is written under a fixed live key, `RouterDimension.ToLiveKey` of a non-code name (the default prefix makes that `live:non-code`), not under `live:code_generation` and not under the empty dimension on the bootstrap request. The readers are the same requests that reach the utility leg today: a helper whose route class applied because the client delegated the model, and a request `InferIsUtility` already marks utility. When the new key has no score yet, that request stays on the utility rule it uses today. A missing word score is not a zero. A helper that names its own model stays off the cheap path. Light subagents and the orchestrator path stay on the code tallies until David says otherwise (questions 4 and 5).
+
+**Risks the code plan must keep.**
+
+- BGE stays the frozen ONNX session (`OnnxEmbeddingClient`). Do not fine-tune it, do not load a second embedder, and do not call Python.
+- Unknown cost stays null. `UtilityRoutingPolicy.ResolveCost` returns null when the catalog has no fresh price, and `SelectModelAsync` leaves that candidate out of the price ranking. It does not treat a missing price as free. A known free model is cost 0 because `IsFree` is true. That 0 is a known price. Do not store 0 for a missing price, in the tally or in embedding memory.
+- Do not copy `Quality ?? 0` onto a missing word grade. That `?? 0` is only the utility formula's stand-in when a priced candidate has no dimension average. A model that has never been graded on words must not look like a model that scored 0 on words.
+- Do not pour bootstrap grades into the code tallies. `RouterMemoryScoreObserver` skipping them is the rule ADR-0027 already set.
+
+**Choices only David can make.** Questions 4, 5, and 6. Each has a recommended answer. A different answer is written into the code plan before that plan is implemented. F1–F3 do not wait on them.
