@@ -27,7 +27,13 @@ public enum CostMetric
     TimeToFirstToken,
 
     /// <summary>7. Context buffer margin - % of the context window used.</summary>
-    ContextBufferMargin
+    ContextBufferMargin,
+
+    /// <summary>
+    /// 8. Token efficiency. Tokens per dollar by default, or dollars per 1,000 tokens. The ratio is
+    /// computed on the router. This pill does not read <c>usage_rollup</c>.
+    /// </summary>
+    TokenEfficiency
 }
 
 /// <summary>The time window a metric series is scoped to.</summary>
@@ -136,6 +142,8 @@ public sealed record CostChartPoint(
 /// <param name="Threshold">A horizontal threshold line (context margin's 90%), or null.</param>
 /// <param name="Models">Distinct models present, with colors (drives the legend and bar colors).</param>
 /// <param name="Points">The per-turn points, chronologically ordered.</param>
+/// <param name="Epochs">Grader-epoch marks for the strip above the plot. Null leaves the chart on one grid.</param>
+/// <param name="Efficiency">Token-efficiency buckets. A gap has <see cref="EfficiencyPoint.Gap"/> true and a null value.</param>
 public sealed record CostChartModel(
     string Kind,
     string Title,
@@ -143,7 +151,28 @@ public sealed record CostChartModel(
     string Headline,
     decimal? Threshold,
     IReadOnlyList<CostModelColor> Models,
-    IReadOnlyList<CostChartPoint> Points);
+    IReadOnlyList<CostChartPoint> Points,
+    IReadOnlyList<EpochMarker>? Epochs = null,
+    IReadOnlyList<EfficiencyPoint>? Efficiency = null);
+
+/// <summary>
+/// One grader-epoch mark. <see cref="T"/> is the event's own UTC instant in Unix milliseconds, not a bucket start.
+/// </summary>
+/// <param name="T">Unix milliseconds of <c>at_utc</c>.</param>
+/// <param name="Id">The epoch row id. Click and keyboard use it to open the same <see cref="Tip"/>.</param>
+/// <param name="Color">The fixed color for the epoch type. Not the red or amber alert colors.</param>
+/// <param name="Symbol"><c>circle</c> for code, <c>diamond</c> for non-code.</param>
+/// <param name="Tip">The detail lines. Hover, click, keyboard, and touch all show this list.</param>
+public sealed record EpochMarker(long T, long Id, string Color, string Symbol, IReadOnlyList<string> Tip);
+
+/// <summary>
+/// One token-efficiency bucket on the chart. A gap omits <see cref="Value"/> so the renderer cannot draw it as 0.
+/// </summary>
+/// <param name="T">Unix milliseconds of the bucket start.</param>
+/// <param name="Gap">True when both wire strings were absent, or the chosen string did not parse.</param>
+/// <param name="Value">The parsed ratio. Null when <see cref="Gap"/> is true.</param>
+/// <param name="Tip">One line for a real point. Empty when <see cref="Gap"/> is true.</param>
+public sealed record EfficiencyPoint(long T, bool Gap, decimal? Value, IReadOnlyList<string> Tip);
 
 /// <summary>The bespoke chart format the ECharts renderer draws for a metric. Serialized as its name.</summary>
 public static class CostChartKind
@@ -168,6 +197,9 @@ public static class CostChartKind
 
     /// <summary>Context margin: stepped percentage line with a fixed threshold.</summary>
     public const string ThresholdLine = nameof(ThresholdLine);
+
+    /// <summary>Token efficiency: a line of tokens per dollar or dollars per 1,000 tokens. Gaps are not zeros.</summary>
+    public const string TokenEfficiencyLine = nameof(TokenEfficiencyLine);
 }
 
 /// <summary>
@@ -224,6 +256,7 @@ public static class CostChartBuilder
             CostMetric.CacheHitRate => BuildCache(turns),
             CostMetric.TimeToFirstToken => BuildLatency(turns),
             CostMetric.ContextBufferMargin => BuildContext(turns),
+            CostMetric.TokenEfficiency => Empty(kind: CostChartKind.TokenEfficiencyLine, title: "Token efficiency", unit: "tok/$"),
             _ => Empty(kind: CostChartKind.SteppedCumulativeArea, title: "Cost", unit: "$")
         };
     }
@@ -630,8 +663,14 @@ public static class CostChartBuilder
         return 128_000;
     }
 
-    /// <summary>The earliest instant included in a range window measured back from <paramref name="now"/>.</summary>
-    private static DateTimeOffset WindowStart(MetricRange range, DateTimeOffset now)
+    /// <summary>
+    /// The earliest instant included in a range window measured back from <paramref name="now"/>.
+    /// Cost Analytics sends this as the token-efficiency and epoch-mark <c>from</c>.
+    /// </summary>
+    /// <param name="range">The selected Hour / Day / Week / Month / All pill.</param>
+    /// <param name="now">The instant the window is measured back from.</param>
+    /// <returns>The inclusive start. All time is <see cref="DateTimeOffset.MinValue"/>.</returns>
+    public static DateTimeOffset WindowStart(MetricRange range, DateTimeOffset now)
     {
         return range switch
         {

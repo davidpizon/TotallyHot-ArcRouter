@@ -467,6 +467,10 @@ service UsageAdminService {
   // delta) stores - not a parallel metrics pipeline.
   rpc GetLearningReportCard (GetLearningReportCardRequest) returns (LearningReportCardResponse);
 
+  // Issue #304 phase 9: epoch marks and token efficiency for the Cost Analytics time charts, plus
+  // Incomplete receipt counts for the Report Card. Read-only. The two database files are not joined.
+  rpc GetGraderEpochChart (GetGraderEpochChartRequest) returns (GraderEpochChartResponse);
+
   // §5.12: streams the same rollup buckets GetUsageRollup returns, one message per bucket, so the GUI can
   // render a CSV or JSON download without buffering the whole range server-side first. Export is a
   // rendering choice over the same query GetUsageRollup makes - never a second, independently-written
@@ -576,6 +580,66 @@ message LearningReportCardResponse {
   int32 comparable_requests = 5;
   repeated ModelScoreDeltaRow score_delta_by_model = 6;
   string total_spend_usd = 7;
+}
+
+// Issue #304 phase 9. from is inclusive and to is exclusive. width is "hour" or "day"; empty means day.
+message GetGraderEpochChartRequest {
+  google.protobuf.Timestamp from = 1;
+  google.protobuf.Timestamp to = 2;
+  string width = 3;
+}
+
+// One token-efficiency bucket. The two ratio strings are omitted together. A missing string is a gap,
+// never a plotted 0. Counts of 0 are real counts.
+message GraderEpochEfficiencyPoint {
+  google.protobuf.Timestamp bucket_start_utc = 1;
+  optional string tokens_per_dollar = 2;
+  optional string dollars_per_thousand_tokens = 3;
+  int32 known_rows = 4;
+  int32 skipped_rows = 5;
+}
+
+// One grader_epoch_events row. Optional fields stay unset when the column is null, including a stored
+// schema version of 1 and a rollback mark of 0, which are present values and not null.
+message GraderEpochMarker {
+  int64 id = 1;
+  string at_utc = 2;
+  string kind = 3;
+  string epoch_type = 4;
+  string cause = 5;
+  optional string artifact_id = 6;
+  optional string previous_artifact_id = 7;
+  optional int32 window_size = 8;
+  optional double mean_miss = 9;
+  optional string previous_teacher_model = 10;
+  optional string teacher_model = 11;
+  optional string previous_prompt_version = 12;
+  optional string prompt_version = 13;
+  optional int32 rollback_mark_present = 14;
+  optional string previous_bge_model = 15;
+  optional string bge_model = 16;
+  optional int32 previous_feature_schema_version = 17;
+  optional int32 feature_schema_version = 18;
+}
+
+message IncompleteReasonCount {
+  string reason = 1;
+  int32 count = 2;
+}
+
+message AbstainedTokenCount {
+  string token = 1;
+  int32 count = 2;
+}
+
+// points and markers feed Cost Analytics. The incomplete fields feed the Report Card list. No field
+// holds question text or response text.
+message GraderEpochChartResponse {
+  repeated GraderEpochEfficiencyPoint points = 1;
+  repeated GraderEpochMarker markers = 2;
+  int32 incomplete_receipts = 3;
+  repeated IncompleteReasonCount incomplete_by_reason = 4;
+  repeated AbstainedTokenCount abstained = 5;
 }
 
 message ExportUsageRollupRequest {

@@ -33,7 +33,7 @@
                 {
                     var r = range;
                     var isActive = _range == r;
-                    <button @onclick="() => SelectRange(r)"
+                    <button @onclick="() => SelectRangeAsync(r)"
                             class="metric-button @(isActive ? "active" : "inactive")">
                         @label
                     </button>
@@ -77,7 +77,14 @@
             </div>
         </div>
 
-        @if (_model.Points.Count == 0)
+        @if (_metric == CostMetric.TokenEfficiency && _epochUnavailable)
+        {
+            <div class="flex-1 flex flex-col items-center justify-center gap-1 text-xs text-slate-500">
+                <div>Token efficiency is unavailable.</div>
+                <div>Grader epoch marks are unavailable.</div>
+            </div>
+        }
+        else if (_metric != CostMetric.TokenEfficiency && _model.Points.Count == 0)
         {
             <div class="flex-1 flex items-center justify-center text-xs text-slate-500">
                 No data for this metric in the selected range.
@@ -86,11 +93,10 @@
         else
         {
             <div class="flex-1 min-h-0">
-                <EChart ModelJson="@_modelJson"/>
+                <EChart ModelJson="@_modelJson" EpochClick="OnEpochClicked"/>
             </div>
 
-            @* Model legend (shared color mapping across every metric). *@
-            @if (_model.Models.Count > 0)
+            @if (_metric != CostMetric.TokenEfficiency && _model.Models.Count > 0)
             {
                 <div class="flex flex-wrap gap-x-4 gap-y-1 mt-2 justify-center shrink-0">
                     @foreach (var m in _model.Models)
@@ -102,6 +108,64 @@
                     }
                 </div>
             }
+        }
+
+        @if (_epochUnavailable && _metric != CostMetric.TokenEfficiency)
+        {
+            <div class="text-xs text-slate-500 shrink-0">Grader epoch marks are unavailable.</div>
+        }
+
+        @if (ShowLegend)
+        {
+            <div class="flex flex-wrap gap-x-4 gap-y-1 mt-2 justify-center shrink-0" data-epoch-legend>
+                @foreach (var entry in EpochMarkerPalette.Legend)
+                {
+                    <div class="flex items-center gap-1.5 text-xs font-mono text-slate-400">
+                        <span class="w-2 h-2 rounded-full shrink-0" style="background:@entry.Color"></span>
+                        @entry.Name
+                    </div>
+                }
+                <div class="text-xs font-mono text-slate-400">@EpochMarkerPalette.ShapeLegend</div>
+            </div>
+        }
+
+        @if (ShowSwitch)
+        {
+            @* ARIA role "switch" is the WAI-ARIA toggle. The HTML schema behind Html.AttributeValueNotResolved does not list it. *@
+            @* ReSharper disable once Html.AttributeValueNotResolved *@
+            <button type="button" role="switch" aria-checked="@(_dollarsPerThousand ? "true" : "false")"
+                    class="metric-button mt-2 self-start" @onclick="FlipUnit">
+                <span>Tokens per dollar</span>
+                <span>Up is better</span>
+                <span>Dollars per 1,000 tokens</span>
+                <span>Down is better</span>
+            </button>
+        }
+
+        @if (ShowEpochChrome && _markers.Count > 0)
+        {
+            <div class="mt-2 shrink-0" style="max-height:180px;overflow:auto" data-epoch-marks>
+                @foreach (var marker in _markers)
+                {
+                    <button type="button" class="metric-button" style="min-height:44px"
+                            @onclick="() => ShowMarker(marker)">
+                        @marker.Tip.ElementAtOrDefault(1) @marker.Tip.FirstOrDefault()
+                    </button>
+                }
+            </div>
+        }
+
+        @if (ShowEpochChrome)
+        {
+            <div aria-live="polite" data-epoch-detail class="text-xs font-mono text-slate-400 mt-2 shrink-0">
+                @if (_detail is not null)
+                {
+                    @foreach (var line in _detail)
+                    {
+                        <div>@line</div>
+                    }
+                }
+            </div>
         }
     </div>
 </div>
@@ -139,7 +203,8 @@
         new(Metric: CostMetric.ToolExecutionSteps, Label: "Tool Steps", Description: "Per-turn step bars, segmented by the model that handled each stretch"),
         new(Metric: CostMetric.CacheHitRate, Label: "Cache Hit", Description: "Stepped cache-hit-rate line with a gradient track"),
         new(Metric: CostMetric.TimeToFirstToken, Label: "TTFT", Description: "Latency line over per-model background zones; spikes pinned"),
-        new(Metric: CostMetric.ContextBufferMargin, Label: "Context", Description: "Context-window fill with a 90% safety threshold")
+        new(Metric: CostMetric.ContextBufferMargin, Label: "Context", Description: "Context-window fill with a 90% safety threshold"),
+        new(Metric: CostMetric.TokenEfficiency, Label: "Token efficiency", Description: "The request's own tokens and cost, not the teacher's bill")
     ];
 
     private static readonly (MetricRange Range, string Label)[] Ranges =
@@ -172,6 +237,23 @@
     private Timer? _roiPollTimer;
     private CostChartModel _model = new(Kind: CostChartKind.DualDirectionalBars, Title: "Routing ROI", Unit: "$", Headline: "—", null, Models: [], Points: []);
     private string _modelJson = "{}";
+    private bool _dollarsPerThousand;
+    private bool _epochUnavailable;
+    private GraderEpochChartView? _epoch;
+    private IReadOnlyList<EpochMarker> _markers = [];
+    private IReadOnlyList<string>? _detail;
+    private int _epochGeneration;
+
+    /// <summary>Demo pills hide the epoch legend. Token efficiency is never the demo corpus, so its legend stays.</summary>
+    private bool ShowLegend => _metric == CostMetric.TokenEfficiency || !_isDemoCorpus;
+
+    /// <summary>The unit switch is only on the token-efficiency pill, and only after a successful read.</summary>
+    private bool ShowSwitch => _metric == CostMetric.TokenEfficiency && _epoch is not null;
+
+    /// <summary>
+    /// Real pills and the token-efficiency pill draw marks. A demo metric pill does not, even when the read succeeded.
+    /// </summary>
+    private bool ShowEpochChrome => _epoch is not null && (_metric == CostMetric.TokenEfficiency || !_isDemoCorpus);
 
     /// <summary>The display definition for the currently selected metric.</summary>
     private MetricDef CurrentDef => MetricDefs.First(d => d.Metric == _metric);
@@ -221,6 +303,7 @@
             .ToList();
 
         await RefreshRoiAsync();
+        await LoadEpochAsync();
         _roiPollTimer = new Timer(callback: state => _ = PollRoiAsync(), null, dueTime: RoiPollInterval, period: RoiPollInterval);
         Recompute();
     }
@@ -289,10 +372,15 @@
         Recompute();
     }
 
-    /// <summary>Switches the active time range and recomputes the chart.</summary>
-    private void SelectRange(MetricRange range)
+    /// <summary>Switches the active time range, drops the previous window's marks, and loads the new window.</summary>
+    private async Task SelectRangeAsync(MetricRange range)
     {
         _range = range;
+        _epoch = null;
+        _epochUnavailable = false;
+        _detail = null;
+        Recompute();
+        await LoadEpochAsync();
         Recompute();
     }
 
@@ -303,15 +391,137 @@
         Recompute();
     }
 
-    /// <summary>Rebuilds the corpus and chart model for the current metric/range/session selection.</summary>
+    /// <summary>Rebuilds the corpus and chart model for the current metric, range, unit, and loaded epoch snapshot.</summary>
     private void Recompute()
     {
         var now = DateTimeOffset.UtcNow;
         _isDemoCorpus = false;
-        _corpus = BuildCorpus(now);
-        _model = CostChartBuilder.Build(
-            points: _corpus, metric: _metric, range: _range, sessionId: string.IsNullOrEmpty(_sessionScope) ? null : _sessionScope, now: now);
+        _markers = BuildMarkers();
+        if (_metric == CostMetric.TokenEfficiency)
+        {
+            _model = BuildEfficiency();
+        }
+        else
+        {
+            _corpus = BuildCorpus(now);
+            var built = CostChartBuilder.Build(
+                points: _corpus,
+                metric: _metric,
+                range: _range,
+                sessionId: string.IsNullOrEmpty(_sessionScope) ? null : _sessionScope,
+                now: now);
+            _model = ShowEpochChrome && _markers.Count > 0 ? built with { Epochs = _markers } : built;
+        }
+
         _modelJson = ChartJson.Serialize(_model);
+    }
+
+    /// <summary>
+    /// Loads the account-wide epoch chart for the selected range. The session dropdown does not change this window.
+    /// A slower response for an older range is dropped.
+    /// </summary>
+    private async Task LoadEpochAsync()
+    {
+        var generation = ++_epochGeneration;
+        var now = DateTimeOffset.UtcNow;
+        var from = CostChartBuilder.WindowStart(range: _range, now: now);
+        var width = _range is MetricRange.Hour or MetricRange.Day ? "hour" : "day";
+        var chart = await UsageStore.LoadGraderEpochChartAsync(from: from, to: now, width: width);
+        if (generation != _epochGeneration)
+            return;
+
+        _epochUnavailable = chart is null;
+        _epoch = chart;
+        _detail = null;
+    }
+
+    /// <summary>Maps the loaded marks. Empty when the read has not succeeded.</summary>
+    private IReadOnlyList<EpochMarker> BuildMarkers()
+    {
+        if (_epoch is null)
+            return [];
+
+        return _epoch.Markers.Select(marker => EpochMarkerText.Marker(new EpochEventPlot(
+            Id: marker.Id,
+            AtUtc: marker.AtUtc,
+            Kind: marker.Kind,
+            EpochType: marker.EpochType,
+            Cause: marker.Cause,
+            ArtifactId: marker.ArtifactId,
+            PreviousArtifactId: marker.PreviousArtifactId,
+            WindowSize: marker.WindowSize,
+            MeanMiss: marker.MeanMiss,
+            PreviousTeacherModel: marker.PreviousTeacherModel,
+            TeacherModel: marker.TeacherModel,
+            PreviousPromptVersion: marker.PreviousPromptVersion,
+            PromptVersion: marker.PromptVersion,
+            RollbackMarkPresent: marker.RollbackMarkPresent,
+            PreviousBgeModel: marker.PreviousBgeModel,
+            BgeModel: marker.BgeModel,
+            PreviousFeatureSchemaVersion: marker.PreviousFeatureSchemaVersion,
+            FeatureSchemaVersion: marker.FeatureSchemaVersion))).ToList();
+    }
+
+    /// <summary>
+    /// The token-efficiency line. The switch chooses which router string to plot. A gap stays a gap in both views.
+    /// </summary>
+    private CostChartModel BuildEfficiency()
+    {
+        var unit = _dollarsPerThousand ? "$/1k tok · Down is better" : "tok/$ · Up is better";
+        var shortUnit = _dollarsPerThousand ? "$/1k tok" : "tok/$";
+        var better = _dollarsPerThousand ? "Down is better" : "Up is better";
+        var points = new List<EfficiencyPoint>();
+        if (_epoch is not null)
+        {
+            foreach (var point in _epoch.Points)
+            {
+                var raw = _dollarsPerThousand ? point.DollarsPerThousandTokens : point.TokensPerDollar;
+                var bothMissing = point.TokensPerDollar is null && point.DollarsPerThousandTokens is null;
+                var parsed = !bothMissing && raw is not null &&
+                             decimal.TryParse(s: raw, style: NumberStyles.Float, provider: CultureInfo.InvariantCulture, result: out var value)
+                    ? value
+                    : (decimal?)null;
+                var gap = parsed is null;
+                points.Add(new EfficiencyPoint(
+                    T: point.BucketStartUtc.ToUnixTimeMilliseconds(),
+                    Gap: gap,
+                    Value: parsed,
+                    Tip: gap ? [] : [$"{raw} {shortUnit} · {better}"]));
+            }
+        }
+
+        var headline = points.LastOrDefault(point => !point.Gap)?.Tip.FirstOrDefault() ?? "—";
+        return new CostChartModel(
+            Kind: CostChartKind.TokenEfficiencyLine,
+            Title: "Token efficiency",
+            Unit: unit,
+            Headline: headline,
+            null,
+            Models: [],
+            Points: [],
+            Epochs: ShowEpochChrome && _markers.Count > 0 ? _markers : null,
+            Efficiency: points);
+    }
+
+    /// <summary>Flips the unit. Epoch times stay put, and the router is not asked again.</summary>
+    private void FlipUnit()
+    {
+        _dollarsPerThousand = !_dollarsPerThousand;
+        Recompute();
+    }
+
+    /// <summary>Opens the detail region from a chart click or a tap. Hover does not call this.</summary>
+    private void OnEpochClicked(long id)
+    {
+        var marker = _markers.FirstOrDefault(item => item.Id == id);
+        if (marker is not null)
+            _detail = marker.Tip;
+    }
+
+    /// <summary>Opens the same detail region from the mark's button.</summary>
+    private void ShowMarker(EpochMarker marker)
+    {
+        _detail = marker.Tip;
     }
 
     // Merges live turns (real data) with rollup-backed history (also real, and what survives a GUI

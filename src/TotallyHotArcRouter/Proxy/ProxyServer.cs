@@ -378,6 +378,14 @@ public class ProxyServer : IAsyncDisposable, IDisposable
 
                         services.AddSingleton(facade);
                         services.AddSingleton(reportingService);
+                        // Phase 9 chart. Registered even when one hand-off is null, so the RPC answers
+                        // unavailable instead of failing to activate. The constructor default is what a
+                        // missing registration would supply, and a hand-built test would not catch that.
+                        services.AddSingleton(new GraderEpochChartQuery(
+                            epochEvents: managementApi.EpochEvents,
+                            transcripts: managementApi.Transcripts,
+                            gradeReceipts: managementApi.GradeReceipts,
+                            logger: logger));
                     }
                 });
 

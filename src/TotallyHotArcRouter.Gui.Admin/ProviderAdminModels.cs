@@ -730,6 +730,89 @@ public sealed record ModelSpendRowView(string Model, decimal CostUsd, long Reque
 public sealed record GradeMixRowView(string Grade, int Count, decimal Percent);
 
 /// <summary>
+/// One token-efficiency bucket. A missing ratio string is null, never 0. The page does not divide.
+/// </summary>
+/// <param name="BucketStartUtc">UTC hour or UTC midnight.</param>
+/// <param name="TokensPerDollar">The router-computed tokens-per-dollar string, or null for a gap.</param>
+/// <param name="DollarsPerThousandTokens">The router-computed dollars-per-1,000-tokens string, or null for the same gap.</param>
+/// <param name="KnownRows">Rows that entered both sums.</param>
+/// <param name="SkippedRows">Rows left out of both sums.</param>
+public sealed record GraderEpochEfficiencyPointView(
+    DateTimeOffset BucketStartUtc,
+    string? TokensPerDollar,
+    string? DollarsPerThousandTokens,
+    int KnownRows,
+    int SkippedRows);
+
+/// <summary>
+/// One grader-epoch mark as the dashboard receives it. Null fields stay null, including a schema version
+/// that was stored as 1 and a rollback mark stored as 0, which are present rather than null.
+/// </summary>
+/// <param name="Id">The epoch row id.</param>
+/// <param name="AtUtc">The event instant in UTC.</param>
+/// <param name="Kind"><c>code</c> or <c>non-code</c>.</param>
+/// <param name="EpochType">The epoch type.</param>
+/// <param name="Cause">Why the row was appended.</param>
+/// <param name="ArtifactId">The artifact, or null.</param>
+/// <param name="PreviousArtifactId">The previous artifact, or null.</param>
+/// <param name="WindowSize">Spot-check window size, or null.</param>
+/// <param name="MeanMiss">Spot-check mean miss, or null.</param>
+/// <param name="PreviousTeacherModel">Teacher model before a change, or null.</param>
+/// <param name="TeacherModel">Teacher model on a change, or null.</param>
+/// <param name="PreviousPromptVersion">Prompt version before a change, or null.</param>
+/// <param name="PromptVersion">Prompt version on a change, or null.</param>
+/// <param name="RollbackMarkPresent">1, 0, or null.</param>
+/// <param name="PreviousBgeModel">Previous BGE id, or null.</param>
+/// <param name="BgeModel">BGE id, or null.</param>
+/// <param name="PreviousFeatureSchemaVersion">Previous schema version, or null.</param>
+/// <param name="FeatureSchemaVersion">Schema version, or null. 1 is a real version.</param>
+public sealed record GraderEpochMarkerView(
+    long Id,
+    DateTimeOffset AtUtc,
+    string Kind,
+    string EpochType,
+    string Cause,
+    string? ArtifactId,
+    string? PreviousArtifactId,
+    int? WindowSize,
+    double? MeanMiss,
+    string? PreviousTeacherModel,
+    string? TeacherModel,
+    string? PreviousPromptVersion,
+    string? PromptVersion,
+    int? RollbackMarkPresent,
+    string? PreviousBgeModel,
+    string? BgeModel,
+    int? PreviousFeatureSchemaVersion,
+    int? FeatureSchemaVersion);
+
+/// <summary>One incomplete reason and its receipt count. Zero means no receipt.</summary>
+/// <param name="Reason">The reason name.</param>
+/// <param name="Count">How many incomplete receipts had it.</param>
+public sealed record IncompleteReasonCountView(string Reason, int Count);
+
+/// <summary>One abstention token that occurred in the window.</summary>
+/// <param name="Token">The stored <c>grader:reason</c> piece.</param>
+/// <param name="Count">How many times it occurred.</param>
+public sealed record AbstainedTokenCountView(string Token, int Count);
+
+/// <summary>
+/// The phase 9 chart read. Cost Analytics uses <see cref="Points"/> and <see cref="Markers"/>.
+/// The Report Card uses the incomplete counts. The two tabs do not share one response, because their windows differ.
+/// </summary>
+/// <param name="Points">Token-efficiency buckets.</param>
+/// <param name="Markers">Epoch marks in the window.</param>
+/// <param name="IncompleteReceipts">How many incomplete receipts were in the window.</param>
+/// <param name="IncompleteByReason">Named reasons, including a real zero.</param>
+/// <param name="Abstained">Abstention tokens that occurred.</param>
+public sealed record GraderEpochChartView(
+    IReadOnlyList<GraderEpochEfficiencyPointView> Points,
+    IReadOnlyList<GraderEpochMarkerView> Markers,
+    int IncompleteReceipts,
+    IReadOnlyList<IncompleteReasonCountView> IncompleteByReason,
+    IReadOnlyList<AbstainedTokenCountView> Abstained);
+
+/// <summary>
 /// One model's mean quality-score delta versus the frozen untrained baseline.
 /// </summary>
 /// <param name="Model">The model that actually served the compared requests.</param>

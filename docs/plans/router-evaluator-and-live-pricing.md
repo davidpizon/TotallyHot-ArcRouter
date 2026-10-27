@@ -423,6 +423,9 @@ The quality head learns whatever the grade measures.
 - Benchmark scores (CodeRouterBench, RouterBench) are labels attached to a task. They may train a shadow head independently of live traffic.
 - Live grades may train the quality head and move voter weights only for `Complete` grades that are linked to the question (HMAC today; fingerprint when #294 lands). Until #294, similar-question grouping is exact-match on the HMAC. The epoch may still fit token heads, which do not depend on the judge, and may still record costs. Tool-loop token totals are in that token-head set. Tool success, error, and retry counts are not a grade. "The task finished" is a grade-shaped label and waits on [#294](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/294#issuecomment-6161356279) with the rest of the quality head.
 - [#293](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/293) owns judge criteria, abstention, and privacy. This plan does not redesign the judge.
+- The pinned free teacher grades live text. Two local graders, code and non-code, train on the teacher's judge score.
+- The grader epoch is a separate job from the [#292](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/292) voter epoch. It does not change voter weights. The voter epoch does not fit the local grader.
+- History is not rescanned for this grade. `ScorerVersion` stays `3.0`.
 
 ## 15. Phases
 

@@ -1,8 +1,13 @@
+using System.Text.Json;
 using AwesomeAssertions;
 using Bunit;
+using Google.Protobuf.WellKnownTypes;
+using Grpc.Core;
+using TotallyHot.ArcRouter.Gui.Admin;
 using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Models;
 using TotallyHot.ArcRouter.Gui.Services;
+using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -238,5 +243,227 @@ public sealed class CostAnalyticsTests
         await cut.WaitForAssertionAsync(
             assertion: () => cut.Find(".metric-accent").TextContent.Trim().Should().Be("0"),
             timeout: WaitTimeout);
+    }
+
+    [Fact]
+    public async Task EpochTooltip_Click_ShowsTheSameLines()
+    {
+        await using var ctx = EpochContext(out var calls);
+        var cut = ctx.Render<CostAnalytics>(p => p.Add(parameterSelector: c => c.Conversations, value: []));
+        await OpenTokenEfficiency(cut);
+
+        await cut.InvokeAsync(() => cut.FindComponent<EChart>().Instance.OnEpochClick(42));
+
+        Detail(cut).Should().Contain("Time (UTC): 2026-10-26 15:04:05").And.Contain("This mark does not say it caused the line to move.");
+        calls.ChartCalls.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task EpochTooltip_Keyboard_ShowsTheSameLines()
+    {
+        await using var ctx = EpochContext(out _);
+        var cut = ctx.Render<CostAnalytics>(p => p.Add(parameterSelector: c => c.Conversations, value: []));
+        await OpenTokenEfficiency(cut);
+
+        await cut.InvokeAsync(() => cut.Find("[data-epoch-marks] button").Click());
+
+        Detail(cut).Should().Contain("Time (UTC): 2026-10-26 15:04:05").And.Contain("Local grader took over");
+    }
+
+    [Fact]
+    public async Task EpochTooltip_Touch_UsesTheSameClickLines()
+    {
+        await using var ctx = EpochContext(out _);
+        var cut = ctx.Render<CostAnalytics>(p => p.Add(parameterSelector: c => c.Conversations, value: []));
+        await OpenTokenEfficiency(cut);
+
+        await cut.InvokeAsync(() => cut.FindComponent<EChart>().Instance.OnEpochClick(42));
+
+        Detail(cut).Should().Contain("Time (UTC): 2026-10-26 15:04:05").And.Contain("This mark does not say it caused the line to move.");
+    }
+
+    [Fact]
+    public async Task UnitSwitch_DefaultsToTokensPerDollar()
+    {
+        await using var ctx = EpochContext(out _);
+        var cut = ctx.Render<CostAnalytics>(p => p.Add(parameterSelector: c => c.Conversations, value: []));
+        await OpenTokenEfficiency(cut);
+
+        var toggle = cut.Find("[role='switch']");
+        toggle.GetAttribute("aria-checked").Should().Be("false");
+        ModelJson(cut).Should().Contain("tok/$").And.Contain("Up is better");
+    }
+
+    [Fact]
+    public async Task UnitSwitch_FlipsAxisAndTooltip()
+    {
+        await using var ctx = EpochContext(out var calls);
+        var cut = ctx.Render<CostAnalytics>(p => p.Add(parameterSelector: c => c.Conversations, value: []));
+        await OpenTokenEfficiency(cut);
+        var before = calls.ChartCalls;
+
+        await cut.InvokeAsync(() => cut.Find("[role='switch']").Click());
+
+        cut.Find("[role='switch']").GetAttribute("aria-checked").Should().Be("true");
+        ModelJson(cut).Should().Contain("$/1k tok").And.Contain("Down is better").And.Contain("2.5");
+        calls.ChartCalls.Should().Be(before);
+    }
+
+    [Fact]
+    public async Task UnitSwitch_BlanksStayBlankInBothViews()
+    {
+        await using var ctx = EpochContext(out _);
+        var cut = ctx.Render<CostAnalytics>(p => p.Add(parameterSelector: c => c.Conversations, value: []));
+        await OpenTokenEfficiency(cut);
+
+        GapHasNoValue(ModelJson(cut)).Should().BeTrue();
+        await cut.InvokeAsync(() => cut.Find("[role='switch']").Click());
+        GapHasNoValue(ModelJson(cut)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task UnitSwitch_EpochTimesStayPut()
+    {
+        await using var ctx = EpochContext(out var calls);
+        var cut = ctx.Render<CostAnalytics>(p => p.Add(parameterSelector: c => c.Conversations, value: []));
+        await OpenTokenEfficiency(cut);
+        var before = EpochTime(ModelJson(cut));
+        var chartCalls = calls.ChartCalls;
+
+        await cut.InvokeAsync(() => cut.Find("[role='switch']").Click());
+
+        EpochTime(ModelJson(cut)).Should().Be(before);
+        calls.ChartCalls.Should().Be(chartCalls);
+    }
+
+    [Fact]
+    public async Task UnitSwitch_OnlyOnTheTokenEfficiencyPill()
+    {
+        await using var ctx = EpochContext(out _);
+        var cut = ctx.Render<CostAnalytics>(p => p.Add(parameterSelector: c => c.Conversations, value: []));
+        await cut.WaitForAssertionAsync(assertion: () => cut.FindAll("[role='switch']").Should().BeEmpty(), timeout: WaitTimeout);
+
+        await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Turn Cost").Click());
+        cut.FindAll("[role='switch']").Should().BeEmpty();
+
+        await OpenTokenEfficiency(cut);
+        cut.FindAll("[role='switch']").Should().ContainSingle();
+
+        await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Routing ROI").Click());
+        cut.FindAll("[role='switch']").Should().BeEmpty();
+        cut.FindAll("[data-epoch-legend]").Should().BeEmpty();
+        cut.FindAll("[data-epoch-marks]").Should().BeEmpty();
+        cut.FindAll("[data-epoch-detail]").Should().BeEmpty();
+        cut.Markup.Should().NotContain("Grader epoch marks are unavailable.");
+    }
+
+    [Fact]
+    public async Task UnitSwitch_VisibleLabel_KeyboardButton()
+    {
+        await using var ctx = EpochContext(out _);
+        var cut = ctx.Render<CostAnalytics>(p => p.Add(parameterSelector: c => c.Conversations, value: []));
+        await OpenTokenEfficiency(cut);
+
+        var toggle = cut.Find("button[role='switch']");
+        toggle.TextContent.Should().Contain("Tokens per dollar").And.Contain("Up is better")
+            .And.Contain("Dollars per 1,000 tokens").And.Contain("Down is better");
+        cut.Find("[data-epoch-marks] button").GetAttribute("style").Should().Contain("min-height:44px");
+    }
+
+    private static BunitContext EpochContext(out EpochCalls calls)
+    {
+        calls = new EpochCalls();
+        var ctx = new BunitContext();
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
+        ctx.Services.AddSingleton(new UsageStore(client: new UsageQueryClient(calls)));
+        return ctx;
+    }
+
+    private static async Task OpenTokenEfficiency(IRenderedComponent<CostAnalytics> cut)
+    {
+        await cut.InvokeAsync(() => cut.FindAll("button").First(b => b.TextContent.Trim() == "Token efficiency").Click());
+        await cut.WaitForAssertionAsync(
+            assertion: () => cut.FindAll("[role='switch']").Should().NotBeEmpty(),
+            timeout: WaitTimeout);
+    }
+
+    private static string Detail(IRenderedComponent<CostAnalytics> cut)
+    {
+        return cut.Find("[data-epoch-detail]").TextContent;
+    }
+
+    private static string ModelJson(IRenderedComponent<CostAnalytics> cut)
+    {
+        return cut.FindComponent<EChart>().Instance.ModelJson;
+    }
+
+    private static bool GapHasNoValue(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var gap = document.RootElement.GetProperty("efficiency").EnumerateArray()
+            .Single(point => point.GetProperty("gap").GetBoolean());
+        return !gap.TryGetProperty(propertyName: "value", value: out _);
+    }
+
+    private static long EpochTime(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.GetProperty("epochs")[0].GetProperty("t").GetInt64();
+    }
+
+    private sealed class EpochCalls : Contract.UsageAdminService.UsageAdminServiceClient
+    {
+        public int ChartCalls { get; private set; }
+
+        public override AsyncUnaryCall<Contract.UsageRollupResponse> GetUsageRollupAsync(
+            Contract.GetUsageRollupRequest request, CallOptions options)
+        {
+            return Done(new Contract.UsageRollupResponse());
+        }
+
+        public override AsyncUnaryCall<Contract.RoutingRoiResponse> GetRoutingRoiAsync(
+            Contract.GetRoutingRoiRequest request, CallOptions options)
+        {
+            return Done(new Contract.RoutingRoiResponse());
+        }
+
+        public override AsyncUnaryCall<Contract.GraderEpochChartResponse> GetGraderEpochChartAsync(
+            Contract.GetGraderEpochChartRequest request, CallOptions options)
+        {
+            ChartCalls++;
+            var chart = new Contract.GraderEpochChartResponse();
+            chart.Points.Add(new Contract.GraderEpochEfficiencyPoint
+            {
+                BucketStartUtc = Timestamp.FromDateTimeOffset(new DateTimeOffset(2026, 10, 26, 10, 0, 0, TimeSpan.Zero)),
+                TokensPerDollar = "400",
+                DollarsPerThousandTokens = "2.5",
+                KnownRows = 1
+            });
+            chart.Points.Add(new Contract.GraderEpochEfficiencyPoint
+            {
+                BucketStartUtc = Timestamp.FromDateTimeOffset(new DateTimeOffset(2026, 10, 26, 11, 0, 0, TimeSpan.Zero)),
+                KnownRows = 0,
+                SkippedRows = 1
+            });
+            chart.Markers.Add(new Contract.GraderEpochMarker
+            {
+                Id = 42,
+                AtUtc = "2026-10-26T15:04:05.0000000+00:00",
+                Kind = "code",
+                EpochType = "local_takeover",
+                Cause = "takeover"
+            });
+            return Done(chart);
+        }
+
+        private static AsyncUnaryCall<T> Done<T>(T response)
+        {
+            return new AsyncUnaryCall<T>(
+                responseAsync: Task.FromResult(response),
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
+        }
     }
 }

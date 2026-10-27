@@ -1,6 +1,7 @@
 using System.Globalization;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
+using TotallyHot.ArcRouter.Judge;
 using TotallyHot.ArcRouter.Telemetry;
 using Contract = TotallyHot.ArcRouter.Admin.Contract;
 
@@ -19,13 +20,20 @@ namespace TotallyHot.ArcRouter.Proxy.Management;
 public sealed class UsageAdminGrpcService : Contract.UsageAdminService.UsageAdminServiceBase
 {
     private readonly ManagementReportingService _reportingService;
+    private readonly GraderEpochChartQuery? _epochChart;
 
     /// <summary>Initializes a new instance of the <see cref="UsageAdminGrpcService"/> class.</summary>
     /// <param name="reportingService">The shared reporting service backing every read.</param>
-    public UsageAdminGrpcService(ManagementReportingService reportingService)
+    /// <param name="epochChart">
+    /// The phase 9 chart read. Null in a hand-built test that does not pass one, and when the inner
+    /// container has no registration. A null query answers <c>GetGraderEpochChart</c> with unavailable
+    /// rather than an empty success.
+    /// </param>
+    public UsageAdminGrpcService(ManagementReportingService reportingService, GraderEpochChartQuery? epochChart = null)
     {
         ArgumentNullException.ThrowIfNull(reportingService);
         _reportingService = reportingService;
+        _epochChart = epochChart;
     }
 
     /// <inheritdoc/>
@@ -90,6 +98,21 @@ public sealed class UsageAdminGrpcService : Contract.UsageAdminService.UsageAdmi
             cancellationToken: context.CancellationToken).ConfigureAwait(false);
         var card = Unwrap(result);
         return ToWire(card);
+    }
+
+    /// <inheritdoc/>
+    public override Task<Contract.GraderEpochChartResponse> GetGraderEpochChart(
+        Contract.GetGraderEpochChartRequest request, ServerCallContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var from = ParseTimestamp(request.From, fieldName: "from");
+        var to = ParseTimestamp(request.To, fieldName: "to");
+        var width = string.IsNullOrEmpty(request.Width) ? "day" : request.Width;
+        if (_epochChart is null)
+            throw new RpcException(new Status(statusCode: StatusCode.Unavailable,
+                detail: "The grader epoch chart is not available."));
+
+        return Task.FromResult(ToWire(Unwrap(_epochChart.Get(from: from, to: to, width: width))));
     }
 
     /// <inheritdoc/>
@@ -223,6 +246,72 @@ public sealed class UsageAdminGrpcService : Contract.UsageAdminService.UsageAdmi
             MeanDelta = row.MeanDelta,
             SampleSize = row.SampleSize
         }));
+        return wire;
+    }
+
+    /// <summary>
+    /// Projects a chart snapshot onto the wire. Ratio strings are omitted together. A null epoch field
+    /// stays unset, so proto3 cannot turn it into 0.
+    /// </summary>
+    private static Contract.GraderEpochChartResponse ToWire(GraderEpochChartSnapshot snapshot)
+    {
+        var wire = new Contract.GraderEpochChartResponse
+        {
+            IncompleteReceipts = snapshot.Incomplete.IncompleteReceipts
+        };
+        foreach (var point in snapshot.Points)
+        {
+            var row = new Contract.GraderEpochEfficiencyPoint
+            {
+                BucketStartUtc = Timestamp.FromDateTimeOffset(point.BucketStartUtc),
+                KnownRows = point.KnownRows,
+                SkippedRows = point.SkippedRows
+            };
+            if (point.TokensPerDollar is not null && point.DollarsPerThousandTokens is not null)
+            {
+                row.TokensPerDollar = point.TokensPerDollar;
+                row.DollarsPerThousandTokens = point.DollarsPerThousandTokens;
+            }
+
+            wire.Points.Add(row);
+        }
+
+        foreach (var marker in snapshot.Markers)
+            wire.Markers.Add(ToWire(marker));
+
+        foreach (var reason in snapshot.Incomplete.ByReason)
+            wire.IncompleteByReason.Add(new Contract.IncompleteReasonCount { Reason = reason.Reason, Count = reason.Count });
+
+        foreach (var token in snapshot.Incomplete.Abstained)
+            wire.Abstained.Add(new Contract.AbstainedTokenCount { Token = token.Token, Count = token.Count });
+
+        return wire;
+    }
+
+    /// <summary>Projects one epoch row. Null columns are left unset, including a mean miss that must not become 0.</summary>
+    private static Contract.GraderEpochMarker ToWire(GraderEpochEventRow row)
+    {
+        var wire = new Contract.GraderEpochMarker
+        {
+            Id = row.Id,
+            AtUtc = row.AtUtc,
+            Kind = row.Kind,
+            EpochType = row.EpochType,
+            Cause = row.Cause
+        };
+        if (row.ArtifactId is not null) wire.ArtifactId = row.ArtifactId;
+        if (row.PreviousArtifactId is not null) wire.PreviousArtifactId = row.PreviousArtifactId;
+        if (row.WindowSize is { } window) wire.WindowSize = window;
+        if (row.MeanMiss is { } miss) wire.MeanMiss = miss;
+        if (row.PreviousTeacherModel is not null) wire.PreviousTeacherModel = row.PreviousTeacherModel;
+        if (row.TeacherModel is not null) wire.TeacherModel = row.TeacherModel;
+        if (row.PreviousPromptVersion is not null) wire.PreviousPromptVersion = row.PreviousPromptVersion;
+        if (row.PromptVersion is not null) wire.PromptVersion = row.PromptVersion;
+        if (row.RollbackMarkPresent is { } mark) wire.RollbackMarkPresent = mark;
+        if (row.PreviousBgeModel is not null) wire.PreviousBgeModel = row.PreviousBgeModel;
+        if (row.BgeModel is not null) wire.BgeModel = row.BgeModel;
+        if (row.PreviousFeatureSchemaVersion is { } previousSchema) wire.PreviousFeatureSchemaVersion = previousSchema;
+        if (row.FeatureSchemaVersion is { } schema) wire.FeatureSchemaVersion = schema;
         return wire;
     }
 }

@@ -157,11 +157,11 @@ flowchart TD
 
 2. **Cost Analytics** (`CostAnalytics.razor`) - a **metric explorer** where each metric renders in its
    own bespoke chart format, per [`cost-analytics-visualization-spec.md`](cost-analytics-visualization-spec.md).
-   A control bar lets the user pick one of the seven ranked Perf/$ metrics, a time range, and a
+   A control bar lets the user pick one of eight metrics, a time range, and a
    session scope; one chart below plots the choice.
-   - **Metric selector**: a pill row ranked 1-7 by business priority - Routing ROI, Turn Cost,
-     Tokens, Tool Steps, Cache Hit, TTFT, Context Buffer (the `CostMetric` enum order in
-     `TotallyHot.ArcRouter.Gui.Charts.CostChartBuilder`).
+   - **Metric selector**: a pill row - Routing ROI, Turn Cost,
+     Tokens, Tool Steps, Cache Hit, TTFT, Context Buffer, then Token efficiency (the `CostMetric` enum order in
+     `TotallyHot.ArcRouter.Gui.Charts.CostChartBuilder`). The first seven stay ranked by business priority.
    - **Time range**: Hour / Day / Week / Month / All - the window each chart's per-turn points are
      filtered to.
    - **Session scope**: a `<select>` of `All Sessions` plus each session in the corpus (live
@@ -182,7 +182,12 @@ flowchart TD
      `cache_read_tokens` — not the optional local semantic cache in
      [`../router/semantic-cache.md`](../router/semantic-cache.md), which is off by default and shows
      hits in the Console tab and the `X-ArcRouter-Semantic-Cache` header); TTFT a stepped latency line over per-model background zones with spikes pinned;
-     Context Buffer a stepped % line with a fixed 90% threshold and pulsing breaches. Colors are
+     Context Buffer a stepped % line with a fixed 90% threshold and pulsing breaches. Those pulsing
+     breaches stay red (`#ef4444`). The Tokens runaway dots stay amber (`#f59e0b`). Neither color is reused
+     for a grader-epoch mark. Token efficiency is a line of the request's own tokens per dollar (the
+     default; the axis says up is better) or dollars per 1,000 tokens (down is better). The switch is a
+     button on that pill only. A bucket with an unknown cost, a zero, or a negative is a blank in both
+     views. The page does not divide. Colors are
      deterministic via `TotallyHot.ArcRouter.Gui.Charts.ChartPalette` (which `Utils/ColorUtils` now delegates
      to). The chart models are built by `TotallyHot.ArcRouter.Gui.Charts.CostChartBuilder.Build` (pure,
      unit-tested in `TotallyHot.ArcRouter.Gui.Charts.Tests`), serialized with `ChartJson`, and rendered
@@ -205,8 +210,16 @@ flowchart TD
      telemetry. This supersedes the tab's former combo chart (a single metric line plus per-model
      stacked bars).
 
+     Epoch marks sit on a strip above the metric, sharing its time axis: local takeover, the teacher taking
+     charge again, a teacher or prompt change, an embedding-model change, and a feature-list change. Code
+     is a circle and non-code is a diamond. The strip, its legend, the keyboard list, and the detail region
+     stay off a pill that is showing demo data. Token efficiency is never demo data. The session dropdown
+     does not move the marks or the token-efficiency line; both are account-wide. A mark's detail says it
+     does not claim it caused the line to move.
+
      When the corpus is that mock fallback rather than real rollups/live turns, the chart subtitle
      carries a **`· demo data`** marker (same intent as the Dashboard tab's `(demo)` labels, §3).
+     Token efficiency does not carry that marker.
      Routing ROI is why this matters: it otherwise renders synthetic savings bars and a dollar
      headline that are indistinguishable from real frozen-baseline measurements, directly beside the
      Methodology link vouching for how they were computed.
@@ -225,7 +238,9 @@ flowchart TD
    the existing usage-rollup store (spend) and taxonomy-comparison / learning store (grades + score
    delta). There is no parallel metrics stack. A Day/Month/3-Month/6-Month/Year filter bar matches Model
    Distribution. Offline/no-proxy (or a genuinely empty window) falls back to `MockData` so the three
-   panels still render. Letter grades A–F map from the `[0, 1]` quality score onto the 1–5 judge scale
+   panels still render. A fourth card, **Incomplete grades**, counts receipts that did not learn, by
+   reason, from its own read of the same window. A zero means no receipt. It is not an unknown cost.
+   That card does not use `MockData`. When its read fails it says the counts are unavailable. Letter grades A–F map from the `[0, 1]` quality score onto the 1–5 judge scale
    (`LearningReportCardAggregator.GradeFromScore`). Score delta is observed score minus the frozen
    baseline's predicted score; a missing baseline prediction is skipped rather than drawn as zero.
 
