@@ -49,8 +49,8 @@ Three pull requests. They do not depend on each other. Each is docs only. None o
 
 | PR | Items | Files |
 |---|---|---|
-| **B1. What gets graded** | §3.1–§3.7 | `README.md`, `docs/how-it-learns.md`, `docs/research/subagent-and-helper-routing-evidence.md`, `docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md`, `docs/adr/0027-grade-non-coding-responses-on-a-bootstrap-recipe-and-keep-them-out-of-code-tallies.md`, `docs/plans/issue-293-graders-judge-against-the-question.md`, `docs/plans/issue-163-subagent-aware-routing.md`, `docs/plans/issue-304-grade-non-coding-responses.md`, `docs/plans/issue-315-docs-code-reconciliation.md`, `docs/plans/issue-304-phase-8-grader-takeover.md` |
-| **B2. The eighth pill** | §3.8–§3.10 | `docs/gui/dashboard.md`, `docs/gui/cost-analytics-visualization-spec.md`, `docs/gui/DESIGN.md`, `docs/plans/issue-304-phase-9-epoch-time-graph.md` |
+| **B1. What gets graded** | §3.1–§3.7, §3.12 | `README.md`, `docs/how-it-learns.md`, `docs/router/quality-verifier-architecture.md`, `docs/research/subagent-and-helper-routing-evidence.md`, `docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md`, `docs/adr/0027-grade-non-coding-responses-on-a-bootstrap-recipe-and-keep-them-out-of-code-tallies.md`, `docs/plans/issue-293-graders-judge-against-the-question.md`, `docs/plans/issue-163-subagent-aware-routing.md`, `docs/plans/issue-304-grade-non-coding-responses.md`, `docs/plans/issue-315-docs-code-reconciliation.md`, `docs/plans/issue-304-phase-8-grader-takeover.md` |
+| **B2. The eighth pill** | §3.8–§3.10, §3.13 | `docs/gui/dashboard.md`, `docs/gui/cost-analytics-visualization-spec.md`, `docs/gui/DESIGN.md`, `docs/plans/issue-304-phase-9-epoch-time-graph.md` |
 | **B3. The test plan's status** | §3.11 | `docs/plans/issue-350-flaky-grader-epoch-phase7-tests.md` |
 
 ## 2. Rules for every edit
@@ -104,7 +104,7 @@ Keep the G-Eval citation that follows the paragraph. Do not edit `QualityIngress
 - Lines 133–136: the sweep stamps a prose row that has no fence with a null score and does not send it to the teacher. This sentence is **true**. Do not delete it.
 - Lines 150–156, "Teacher phase and takeover": passing the gate writes a shadow score that "is not the grade of record. Takeover is later."
 
-**What the code does.** A full queue is `QualityIngress` `SubmitTerminal(..., IncompleteReasons.QueueFull)`. That writes an `Incomplete` receipt. It does not enqueue a score, and it does not learn. Takeover is in the tree (`#348`). `TakeoverEnabled` defaults to true. The kind names are `code` and `non-code` (`GraderEpochKinds`), not a prose keyword. `ShadowLocalScoreObserver` still stamps `LocalScore` beside a teacher score and does not change who the grade of record is. That path runs when the teacher still graded the row.
+**What the code does.** A full queue is `QualityIngress` `SubmitTerminal(..., IncompleteReasons.QueueFull)`. That writes an `Incomplete` receipt. It does not enqueue a score, and it does not learn. `TryEnqueue` does not retry, so the live queue still does not defer. Takeover is in the tree (`#348`). `TakeoverEnabled` defaults to true. The kind names are `code` and `non-code` (`GraderEpochKinds`), not a prose keyword. `LocalGradeTakeover.ApplyAsync` is the skip. In `Decide`, `TakeoverEnabled` false forces the teacher and sets `AllowLocalGradeOfRecord` false on every row, including a drawn one. A `rollback.json` marker forces the teacher and clears that flag unless the row was drawn. `ShadowLocalScoreObserver` is a different type. `QualityScoreAggregator.WriteAsync` calls `ObserveAsync` for a finalized grade, including a takeover skip. `Apply` returns without a new write when `LocalScore` is already that artifact's id. It also returns when `TryReadAccepted` finds no artifact, or when the artifact does not match the current teacher, prompt version, and BGE id. The beside-the-teacher stamp happens only in the remaining case, and it does not change who the grade of record is. The rollback bar is mean absolute difference, `RankCorrelation.MeanAbsoluteDifference`, against `SpotCheckRollbackMae` (default 0.10), on a full window of `SpotCheckWindowSize` (default 50). Equal to 0.10 does not roll back.
 
 **Correction.**
 
@@ -114,9 +114,9 @@ Leave the sweep paragraph (lines 133–140) as it is, including the null stamp a
 
 Replace the "Teacher phase and takeover" section with:
 
-> The pinned free teacher grades first. Two local graders, one for code recipes and one for non-code recipes (kind folders `code` and `non-code`), train on the teacher's judge score. `GraderEpochOptions.TakeoverEnabled` defaults to true. When that kind has a matching accepted artifact and no `rollback.json`, a confident answer that the 5% draw did not pick skips the teacher. `LocalScore` is then the grade of record, and `JudgeScore` stays empty. A shadow score written beside a teacher score is not the grade of record. That is what `ShadowLocalScoreObserver` does when there is no matching artifact yet, when the emergency switch is off, or when `rollback.json` is present. A 5% sample and a low-confidence answer still call the teacher. A teacher score that comes back wins: `CollapseLocalGrade` turns the local-grade flag off. A spot-check whose teacher call fails keeps `LocalScore`. A low-confidence miss does not. A spot-check window whose mean miss is greater than 0.10 gives that kind back to the teacher.
+> The pinned free teacher grades first until a kind has a matching accepted artifact. Two local graders, one for code recipes and one for non-code recipes (kind folders `code` and `non-code`), train on the teacher's judge score. `GraderEpochOptions.TakeoverEnabled` defaults to true. When that kind has a matching accepted artifact, the feature schema matches, and no `rollback.json` is present, a confident answer that the 5% draw did not pick skips the teacher. `LocalGradeTakeover.ApplyAsync` sets `LocalScore` as the grade of record and leaves `JudgeScore` empty. `ShadowLocalScoreObserver` does not skip the teacher. `ObserveAsync` still runs when the grade is finalized, including on that skip. `Apply` then returns without a new write, because `LocalScore` is already that artifact's score. `Apply` also returns without writing when `TryReadAccepted` finds no artifact, or when that artifact does not match the current teacher, prompt version, and BGE id. The stamp beside a teacher score is the other case: the teacher graded the row, a matching artifact exists, and `LocalScore` was not already that artifact. That stamp does not change who the grade of record is. `TakeoverEnabled` set to false, and a `rollback.json` marker, are why `LocalGradeTakeover` still calls the teacher. They are not a path where the shadow observer stamps a score with no artifact. Turning `TakeoverEnabled` off clears the local-grade flag on every row, including a drawn one. A `rollback.json` marker clears that flag unless the row was the 5% draw. A 5% sample and a low-confidence answer still call the teacher. A teacher score that comes back wins: `QualityScoreAggregator.CollapseLocalGrade` turns `AllowLocalGradeOfRecord` off when `JudgeScore` is set. A spot-check whose teacher call fails keeps `LocalScore`. A low-confidence miss does not. A window of at least 50 spot-check rows whose mean absolute difference from the teacher is greater than `SpotCheckRollbackMae` (default 0.10) gives that kind back to the teacher. A difference equal to 0.10 does not.
 
-**Verify.** Search this file for `Takeover is later`. It is gone. Search for `never graded *at all*`. It is gone. The sweep sentence about a null stamp on an unfenced row is still present. Re-read `RescanOneAsync` and `GraderEpochOptions.TakeoverEnabled`.
+**Verify.** Search this file for `Takeover is later`. It is gone. Search for `never graded *at all*`. It is gone. The sweep sentence about a null stamp on an unfenced row is still present. The new takeover section names `ShadowLocalScoreObserver.Apply` as a stamp beside a teacher score, and it does not say the observer runs when no artifact exists. Re-read `ShadowLocalScoreObserver.Apply`, `LocalGradeTakeover.Decide`, `RescanOneAsync`, and `GraderEpochOptions.TakeoverEnabled`.
 
 ### 3.3 The subagent evidence doc still says only fences are graded
 
@@ -126,21 +126,32 @@ Replace the "Teacher phase and takeover" section with:
 
 **What the code does.** `TryIngest` does not drop a null extract (§3.1). A helper reply that is unfenced text is a bootstrap request and can be graded. A tool call with no text is `deferred_to_loop` and does not learn. A text reply that follows tool results is `loop_unlinked` and does not learn. A quality floor still protects only a turn that received a score.
 
-**Correction.** Replace those two bullets. State the bootstrap enqueue, the two terminal tool reasons, and that a floor still does nothing for a turn with no score. Do not change §1–§3 (vendor behavior) or the utility-rule numbers in the same section. Those were not re-checked as false.
+**Correction.** Replace the first two bullets of §4 with the text below. Do not change §1–§3 (vendor behavior) or the utility-rule bullets that follow in the same section. Those numbers were not re-checked as false.
 
-**Verify.** Search this file for `TryIngest` then drops. That sentence is gone. The new bullets name `CreateBootstrapRequest`, `deferred_to_loop`, and `loop_unlinked`.
+> - **Fenced blocks and unfenced text are graded on different recipes.** `CodeBlockSignalExtractor.Extract` returns nothing when a response has no fenced code block. On the live path, `QualityIngress.TryIngest` does not drop that null. It calls `CreateBootstrapRequest` (empty code, `GradingRecipes.Bootstrap`) and enqueues that request. A fenced block stays on `GradingRecipes.Code`.
+> - **A score is still not guaranteed, so a floor still protects only a scored turn.** A tool call with no text is stored as `Incomplete` with reason `deferred_to_loop` and does not learn. A text reply whose newest request turn is tool results is `loop_unlinked` and does not learn. Helper output that is only a tool call still writes nothing into router memory. Helper output that is unfenced text can be graded. Subagent turns that are only tool calls are not graded. A quality floor reads scores that exist. It does not fire for a turn with no score.
+
+**Verify.** Search this file for `TryIngest` then drops. That sentence is gone. The new bullets name `CreateBootstrapRequest`, `deferred_to_loop`, and `loop_unlinked`. The utility-rule numbers `ε₁ = 1.0` and `ε₂ = −0.1` are still in the file.
 
 ### 3.4 ADR-0022's "what the router can measure" driver
 
-**File.** `docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md`, Decision Drivers, the three bullets under "Respect what the router can measure" (lines 44–47). Status stays `accepted`. Do not change the decision outcome (route by kind). Do not change option 3's historical "Helpers are never graded" consequence except to point at the new note, so a reader does not apply it as today's measurement.
+**File.** `docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md`. Two places. Status stays `accepted`. Do not change the decision outcome (route by kind).
 
 **What the doc claims now.** Only fenced responses are graded. Helpers are never graded, and subagent turns rarely are. A quality floor protects only where grades exist.
 
 **What the code does.** Same as §3.3. The route-by-kind decision is still the accepted decision. Grading text helpers does not, by itself, change that decision. Changing the route would be a new ADR. This pull request does not open one.
 
-**Correction.** Add a dated note (2026-10-27, #315) directly under those three bullets. Label the three bullets as the measurement on the day the ADR was accepted (2026-10-03). Then state the current measurement in three short sentences: unfenced text is a bootstrap grade; a tool-only turn and a `loop_unlinked` reply are `Incomplete` and do not learn; the floor still protects only a scored turn. The route-by-kind outcome is unchanged.
+**Correction.** Under the three bullets in Decision Drivers ("Respect what the router can measure", lines 44–47), add this note. Do not delete the three bullets. They stay as the measurement in the accepted text (decided 2026-10-02, merged in #186 on 2026-10-03).
 
-**Verify.** The status line still says `accepted`. The note names `CreateBootstrapRequest`. Search the decision-outcome section for a new routing rule. There is none.
+> **Amendment (2026-10-27, #315).** The three bullets above are the measurement in the accepted text (decided 2026-10-02, merged in #186 on 2026-10-03). They are not the live path. `QualityIngress.TryIngest` now calls `CreateBootstrapRequest` when `Extract` returns null, so unfenced text can be graded on `GradingRecipes.Bootstrap`. A tool-only turn (`deferred_to_loop`) and a text reply after tool results (`loop_unlinked`) are `Incomplete` and do not learn. A quality floor still protects only a turn that received a score. The route-by-kind outcome below is unchanged.
+
+After the context sentence "It also showed that this router cannot grade most of this traffic." (line 25), add: "That sentence is the same 2026-10-02 measurement. The live path is the amendment under Decision Drivers." Do not rewrite the rest of the context.
+
+After option 3's bullet "Helpers are never graded, so \"no helper floor\" and \"0.3\" behave the same" (around line 146), add one sentence and do not otherwise rewrite that option:
+
+> That sentence is the measurement in the accepted text. Today's measurement is the amendment under Decision Drivers. It is not a reason to reopen option 3.
+
+**Verify.** The status line still says `accepted`. The Decision Drivers note names `CreateBootstrapRequest`. Option 3 still contains the words "Helpers are never graded", and the next sentence points at the amendment. Search the decision-outcome section for a new routing rule. There is none.
 
 ### 3.5 ADR-0027 still says the drop is "today" and takeover is "a later phase"
 
@@ -225,9 +236,11 @@ Three files. Each gets a dated amendment. Do not rewrite the rest of the plan.
 
 **What the code does.** The seven sections below are still the seven per-turn charts, and `CostChartBuilder` still builds those. The eighth pill is not specified in those sections.
 
-**Correction.** Change the status sentence so the seven sections are the seven per-turn charts, and the eighth pill is Token efficiency, specified in `dashboard.md`, built by `GraderEpochEfficiency` and `CostAnalytics.BuildEfficiency`, not by `CostChartBuilder.Build`. Do not rewrite the seven chart sections. Do not add an eighth section that duplicates `dashboard.md`.
+**Correction.** Replace the opening of the status banner (the "Status: Implemented" sentences through the `CostChartBuilder` clause) with the paragraph below. Leave the four implementation notes (layout, time axis, data, animations), and add one clause to the time-axis note: "one point per turn" is the seven per-turn pills. Token efficiency is buckets from `GraderEpochEfficiency`, not one point per turn. Do not rewrite the seven chart sections. Do not add an eighth section that duplicates `dashboard.md`.
 
-**Verify.** The banner no longer says the seven charts are the whole tab. The seven section headings are still in the file.
+> **Status: Implemented.** The seven per-metric sections below are the seven per-turn charts. They are live in `Components/CostAnalytics.razor`, rendered with **Apache ECharts** (vendored under `wwwroot/lib/echarts`, driven by `wwwroot/js/echarts-interop.js`) via the reusable `<EChart>` host. `TotallyHot.ArcRouter.Gui.Charts.CostChartBuilder` builds those seven. The tab also has an eighth pill, Token efficiency. That pill is specified in [`dashboard.md`](dashboard.md). `GraderEpochEfficiency` and `CostAnalytics.BuildEfficiency` build it from `GetGraderEpochChart`. `CostChartBuilder.Build` does not. The whole dashboard moved off ApexCharts to ECharts in the same change that landed the seven (Model Distribution too). A few implementation notes on how the seven were realized:
+
+**Verify.** The banner no longer says the seven charts are the whole tab. It names `BuildEfficiency`. The seven section headings are still in the file. The time-axis note says the eighth pill is buckets.
 
 ### 3.10 DESIGN.md's `style=` inventory is missing one legal color and hiding three bugs
 
@@ -258,9 +271,43 @@ The design rule in the same section is that static layout is a CSS class, not a 
 
 **What the code does.** [#353](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/353) merged the test change. At `37dfd1d0`, `SqliteConnection.ClearAllPools()` remains in exactly two places, which is decision 5 of that plan: `TestTempDirectorySweeper.Dispose` and `RouterMemoryDatabase.AdoptLegacyInstallDirectoryCopy`. `GraderEpochPhase7Tests.AssertTickDidNotThrow` fails the test when a log line contains `threw unexpectedly`. That is Task 2. The diagnosis in the plan body was not re-litigated. The status line is the sentence that is wrong.
 
-**Correction.** Replace the status paragraph. Implemented in #353. The body below is the record of the decision that shipped. "Implementation waits" described the plan pull request, not the tree. Do not rewrite the hypothesis, the task list, or the "questions for David" inside that file. Do not edit a test.
+**Correction.** Replace the status paragraph with the text below. Do not rewrite the hypothesis, the task list, or the "questions for David" inside that file. Do not edit a test.
+
+> **Status:** Implemented in [#353](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/353). The body below is the record of the decision that shipped. "Waiting for David's approval" and "Implementation waits" described this file when it was the plan pull request. They are not the tree.
 
 **Verify.** The status names #353. Search the status paragraph for `Implementation waits`. It is gone, or it sits in a sentence that says it described the plan pull request. `rg "ClearAllPools" src` still shows the two call sites the plan said to leave, and no others.
+
+### 3.12 The architecture note still says a full queue is never graded
+
+**File.** `docs/router/quality-verifier-architecture.md` §3.3, the Backfill bullet (around lines 202–203) and the Throttle bullet (around lines 207–208).
+
+**What the doc claims now.** A response dropped because `QueueCapacity` was full "is never graded". The live queue "drops rather than defers".
+
+**What the code does.** `QualityIngress.TryIngest` still fails `TryEnqueue` closed. It then calls `SubmitTerminal(..., IncompleteReasons.QueueFull)`. That is an `Incomplete` receipt, not a score, and the queue does not retry. "Drops rather than defers" is still true of the live queue. "Never graded" is too strong. `TranscriptOptions.EnableQualityRescan` defaults to false, so with the default the saved row is not graded later. When the switch is on, `SqliteTranscriptStore.LoadPendingQualityRescanAsync` selects saved transcripts whose `scorer_version` is not the current version, including a row the live path never scored. `QualityRescanService.RescanOneAsync` then scores that row when `Extract` returns a fence, and still stamps null when `Extract` returns null. The null-stamp paragraph later in the same section (around line 219) matches `RescanOneAsync`. Do not change it.
+
+**Correction.** Replace the Backfill bullet with:
+
+> **Backfill.** A response the live queue could not take is not scored on that path. `QualityIngress.TryIngest` stores an `Incomplete` receipt with reason `queue_full` and does not enqueue a grade. `TryEnqueue` does not retry. With `TranscriptOptions.EnableQualityRescan` left at its default (`false`), that saved transcript is not graded later either. When the switch is on, `LoadPendingQualityRescanAsync` can select the row, and `QualityRescanService.RescanOneAsync` scores it when `Extract` returns a fence.
+
+Leave the Throttle bullet's "drops rather than defers". Add one clause: the drop now also stores the `queue_full` receipt, and it still does not put the work back on the queue.
+
+**Verify.** Search this file for `is never graded`. It is gone. The Throttle bullet still says the live queue drops rather than defers. The null-stamp paragraph is still present. Re-read `TryIngest`'s `QueueFull` branch and `LoadPendingQualityRescanAsync`.
+
+### 3.13 The phase 9 plan still says implementation is waiting
+
+**File.** `docs/plans/issue-304-phase-9-epoch-time-graph.md`, the status line (line 3). This is why the file is on PR B2. §3.6 amends the parent #304 plan. It does not edit this file.
+
+**What the doc claims now.** "**Status:** Draft. … Implementation waits until David signs off this plan."
+
+**What the code does.** [#351](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/351) shipped the marks and the token-efficiency pill. `CostAnalytics.BuildEfficiency` builds `CostChartKind.TokenEfficiencyLine`. `UsageAdminGrpcService.GetGraderEpochChart` is the read. The procedure in the rest of this file was the procedure that shipped. This pull request does not re-check every line of that procedure. The status line is the sentence that is false.
+
+**Correction.** Replace line 3 with:
+
+> **Status:** Implemented in [#351](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/351) (2026-10-27). Q1, Q2, Q3, and the unit switch were answered on 2026-10-26. "Draft" and "Implementation waits until David signs off" described this file when it was the plan pull request. They are not the tree. The procedure below is the record of what shipped.
+
+Do not rewrite the goal, the constraints, or the task list.
+
+**Verify.** The status names #351. Search the status line for a bare `Draft`. It is gone. `BuildEfficiency` is still the method a reader is pointed at by §3.8.
 
 ## 4. Out of scope
 
@@ -289,7 +336,7 @@ The design rule in the same section is that static layout is a CSS class, not a 
 These are real code defects against a written rule. The docs pull requests name them. They do not add an exception that makes the defect look intended. A later code pull request, with its own plan if the standing rule requires one, can move the styles into classes or fix the comment.
 
 1. **Static `style=` attributes** from #351, listed in §3.10: `max-height:180px;overflow:auto`, `min-height:44px`, and `min-width:16rem;max-width:22rem`. `DESIGN.md` §7 forbids static layout in `style=`. Do not add them to the sanctioned list.
-2. **`IQualityIngress` summary** (`src/TotallyHotArcRouter.Quality/Ingress/IQualityIngress.cs`). It says the ingress "extracts a runnable snippet, and enqueues it". The live path also enqueues a bootstrap request with empty code, and it stores terminal incomplete receipts. The summary describes the pre-#304 path. Fixing it is a source edit. Not in B1–B3.
+2. **`IQualityIngress` summaries** (`src/TotallyHotArcRouter.Quality/Ingress/IQualityIngress.cs`). The type summary says the ingress "extracts a runnable snippet, and enqueues it". The `TryIngest` summary says it "samples, extracts, and enqueues a snippet". The live path also enqueues a bootstrap request with empty code, and it stores terminal incomplete receipts. Those two summaries describe the pre-#304 path. The parameter docs on `QualityIngestContext` already name `deferred_to_loop`, `no_text`, `empty`, and `loop_unlinked`. Fixing the two summaries is a source edit. Not in B1–B3.
 
 ## 7. Questions only David can answer
 
