@@ -904,7 +904,7 @@ public class SqliteTranscriptStoreTests : IDisposable
         {
             try
             {
-                using var connection = new SqliteConnection($"Data Source={_dbPath}");
+                await using var connection = new SqliteConnection($"Data Source={_dbPath}");
                 connection.Open();
                 SqliteConnection.ClearPool(connection);
             }
