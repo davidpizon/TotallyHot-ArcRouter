@@ -253,18 +253,18 @@ flowchart TD
 
 ## Amendment 4 (2026-10-26): phase 9 marks existing charts
 
-**Status:** accepted for the two answers below. The pulsing-dot chart is not chosen yet. David answered Q1 and Q2 of the [phase 9 plan](../plans/issue-304-phase-9-epoch-time-graph.md) on 2026-10-26. This amendment records those answers so Amendment 3's "phase 9 owns the chart" is not read as a new chart. It does not change the teacher pin, the recipe split, the tally rule, or Amendments 2 and 3. It does not open a second ADR.
+**Status:** accepted. David answered Q1, Q2, Q3, and the unit switch of the [phase 9 plan](../plans/issue-304-phase-9-epoch-time-graph.md) on 2026-10-26. This amendment records those answers so Amendment 3's "phase 9 owns the chart" is not read as a new chart. It does not change the teacher pin, the recipe split, the tally rule, or Amendments 2 and 3. It does not open a second ADR.
 
 ### Why
 
 Amendment 3 says phase 9 graphs the five epoch types on the token-efficiency timeline and that phase 9 owns the chart. The first phase 9 draft turned that into a new Report Card chart. David rejected a new chart. He asked for point-in-time marks on the charts that already exist, reusing a chart that already draws pulsating dots, with a color per epoch type and a tooltip on hover or click.
 
-Two charts draw those dots. Both are `effectScatter` series in `echarts-interop.js`: `optionRunawayArea` (Cost Analytics Tokens, kind `RunawayArea`) and `optionThresholdLine` (Cost Analytics Context Buffer, kind `ThresholdLine`). The spec calls the Context Buffer dots pulsing and the Tokens dots rippling. Which drawing is copied is Q3 in the phase 9 plan. This amendment does not pick it.
+Two charts draw those dots. Both are `effectScatter` series in `echarts-interop.js`: `optionRunawayArea` (Cost Analytics Tokens, kind `RunawayArea`) and `optionThresholdLine` (Cost Analytics Context Buffer, kind `ThresholdLine`). David chose the Context Buffer drawing on 2026-10-26. The same day he added a switch between tokens per dollar and dollars per 1,000 tokens.
 
 ### Decision
 
-- Token efficiency is tokens per dollar. Sum `input_tokens + output_tokens` and sum `cost` over `request_transcripts` rows that have both token counts and a cost greater than 0, then divide. A missing cost, a missing token count, or a zero cost is a blank, never plotted as 0. A reported zero token count with a positive cost stays in the sum.
-- Epochs are single points in time on existing charts. Phase 9 does not add a grader-epoch chart. The five types stay `local_takeover`, `teacher_resumed`, `teacher_changed`, `bge_changed`, and `feature_schema_changed`. The marks do not claim they caused a line to move. #292 voter-weight epochs stay out of this phase.
+- Token efficiency defaults to tokens per dollar: sum `input_tokens + output_tokens` and sum `cost` over rows that have both token counts, a cost greater than 0, and a token sum greater than 0, then divide. The switch shows dollars per 1,000 tokens: that same cost sum divided by that same token sum, times 1,000. A missing cost, a missing token count, a cost that is not greater than 0, or a token sum that is not greater than 0 is a blank in both views, never plotted as 0.
+- Epochs are single points in time on the eight Cost Analytics time charts. The dot drawing is copied from `optionThresholdLine`. The dots do not use the >90% context points and do not use `#ef4444`. Phase 9 does not add a grader-epoch chart. The five types stay `local_takeover`, `teacher_resumed`, `teacher_changed`, `bge_changed`, and `feature_schema_changed`. The marks do not claim they caused a line to move. #292 voter-weight epochs stay out of this phase. Flipping the unit switch does not move the marks.
 - Unknown cost stays null, never 0. A null token count stays null, never 0. The two database files are still not joined in SQL. No row on the chart carries question text or response text.
 - Amendment 3's read query and its null rules still stand. "Phase 9 owns the chart" means phase 9 places those rows on a time axis. It does not mean a new chart kind.
 
@@ -272,4 +272,4 @@ Two charts draw those dots. Both are `effectScatter` series in `echarts-interop.
 
 - Good, because the formula is fixed and a null cost cannot be drawn as zero.
 - Good, because an implementer will not add the Report Card chart the first draft described.
-- Bad, because the host chart, the colors, and the hover and click behavior wait on Q3. Implementation does not start until that answer.
+- Bad, because the first takeover can still grade alone before any live spot-check exists. That risk is Amendment 3's, and this amendment does not change it.
