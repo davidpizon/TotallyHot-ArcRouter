@@ -9,7 +9,6 @@ using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
-using TotallyHot.ArcRouter.Tests;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
 using TotallyHot.ArcRouter.Transcripts;
 using Contract = TotallyHot.ArcRouter.Admin.Contract;

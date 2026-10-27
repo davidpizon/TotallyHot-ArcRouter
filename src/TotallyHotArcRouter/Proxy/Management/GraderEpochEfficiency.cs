@@ -109,7 +109,7 @@ public static class GraderEpochEfficiency
     {
         tokens = 0;
         cost = 0m;
-        if (point.InputTokens is not int input || point.OutputTokens is not int output || point.Cost is not decimal stored)
+        if (point.InputTokens is not { } input || point.OutputTokens is not { } output || point.Cost is not { } stored)
             return false;
 
         var sum = (long)input + output;

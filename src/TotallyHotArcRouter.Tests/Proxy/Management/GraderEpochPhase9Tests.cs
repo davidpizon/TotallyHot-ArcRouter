@@ -7,7 +7,6 @@ using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Quality;
-using TotallyHot.ArcRouter.Tests;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Transcripts;
 
@@ -24,13 +23,13 @@ public sealed class GraderEpochPhase9Tests
     [Fact]
     public void Efficiency_BothViews_MatchTheWorkedExample()
     {
-        var points = new TranscriptTokenCostPoint[]
-        {
+        TranscriptTokenCostPoint[] points =
+        [
             Point(at: Hour, input: 100, output: 50, cost: 0.25m, id: 1),
             Point(at: Hour.AddMinutes(1), input: null, output: 10, cost: 0.10m, id: 2),
             Point(at: Hour.AddMinutes(2), input: 10, output: 0, cost: null, id: 3),
             Point(at: Hour.AddMinutes(3), input: 20, output: 0, cost: 0.10m, id: 4)
-        };
+        ];
 
         var bucket = Assert.Single(GraderEpochEfficiency.Bucket(points: points, width: "hour"));
 
@@ -55,11 +54,11 @@ public sealed class GraderEpochPhase9Tests
     [Fact]
     public void Efficiency_NullToken_IsAGap_InBothViews()
     {
-        var points = new TranscriptTokenCostPoint[]
-        {
+        TranscriptTokenCostPoint[] points =
+        [
             Point(at: Hour, input: null, output: 10, cost: 0.10m, id: 1),
             Point(at: Hour.AddMinutes(1), input: 10, output: null, cost: 0.10m, id: 2)
-        };
+        ];
 
         var bucket = Assert.Single(GraderEpochEfficiency.Bucket(points: points, width: "hour"));
 
@@ -91,11 +90,11 @@ public sealed class GraderEpochPhase9Tests
     [Fact]
     public void Efficiency_NegativeCostAndTokens_AreGapsInBothViews()
     {
-        var points = new TranscriptTokenCostPoint[]
-        {
+        TranscriptTokenCostPoint[] points =
+        [
             Point(at: Hour, input: 10, output: 0, cost: -0.10m, id: 1),
             Point(at: Hour.AddMinutes(1), input: -5, output: 0, cost: 0.10m, id: 2)
-        };
+        ];
 
         var buckets = GraderEpochEfficiency.Bucket(points: points, width: "hour");
 
@@ -113,18 +112,19 @@ public sealed class GraderEpochPhase9Tests
         var eleven = Hour.AddHours(1);
         var noon = Hour.AddHours(2);
         var one = Hour.AddHours(3);
-        var points = new TranscriptTokenCostPoint[]
-        {
+        TranscriptTokenCostPoint[] points =
+        [
             Point(at: nine, input: 1, output: 0, cost: null, id: 1),
             Point(at: Hour, input: 10, output: 0, cost: 0.10m, id: 2),
             Point(at: noon, input: 10, output: 0, cost: 0.10m, id: 3),
             Point(at: one, input: 1, output: 0, cost: null, id: 4)
-        };
+        ];
 
         var buckets = GraderEpochEfficiency.Bucket(points: points, width: "hour");
 
+        DateTimeOffset[] expected = [nine, Hour, eleven, noon, one];
         Assert.Equal(
-            expected: new[] { nine, Hour, eleven, noon, one },
+            expected: expected,
             actual: buckets.Select(bucket => bucket.BucketStartUtc).ToArray());
         Assert.Null(buckets[2].TokensPerDollar);
         Assert.Null(buckets[2].DollarsPerThousandTokens);
@@ -189,10 +189,11 @@ public sealed class GraderEpochPhase9Tests
             planned.Add((Hour.AddMinutes(index++), "non-code", type));
         }
 
-        files.Epochs.Execute(() =>
+        var epochs = files.Epochs;
+        epochs.Execute(() =>
         {
             for (var i = planned.Count - 1; i >= 0; i--)
-                files.Epochs.Insert(Marker(at: planned[i].At, kind: planned[i].Kind, type: planned[i].Type));
+                epochs.Insert(Marker(at: planned[i].At, kind: planned[i].Kind, type: planned[i].Type));
         });
 
         var snapshot = Read(files: files, from: Hour, to: Hour.AddHours(2));
@@ -209,11 +210,12 @@ public sealed class GraderEpochPhase9Tests
     {
         using var files = new ChartFiles();
         var inside = Hour.AddMinutes(30);
-        files.Epochs.Execute(() =>
+        var epochs = files.Epochs;
+        epochs.Execute(() =>
         {
-            files.Epochs.Insert(Marker(at: Hour.AddHours(-1), kind: "code", type: IGraderEpochEventStore.LocalTakeover));
-            files.Epochs.Insert(Marker(at: inside, kind: "code", type: IGraderEpochEventStore.TeacherResumed));
-            files.Epochs.Insert(Marker(at: Hour.AddHours(2), kind: "code", type: IGraderEpochEventStore.BgeChanged));
+            epochs.Insert(Marker(at: Hour.AddHours(-1), kind: "code", type: IGraderEpochEventStore.LocalTakeover));
+            epochs.Insert(Marker(at: inside, kind: "code", type: IGraderEpochEventStore.TeacherResumed));
+            epochs.Insert(Marker(at: Hour.AddHours(2), kind: "code", type: IGraderEpochEventStore.BgeChanged));
         });
 
         var snapshot = Read(files: files, from: Hour, to: Hour.AddHours(2));
@@ -226,7 +228,8 @@ public sealed class GraderEpochPhase9Tests
     public void Markers_NullMeanMiss_StaysNull()
     {
         using var files = new ChartFiles();
-        files.Epochs.Execute(() => files.Epochs.Insert(new GraderEpochEventRow
+        var epochs = files.Epochs;
+        epochs.Execute(() => epochs.Insert(new GraderEpochEventRow
         {
             AtUtc = Hour.ToString(format: "O", formatProvider: CultureInfo.InvariantCulture),
             Kind = "non-code",
@@ -244,7 +247,8 @@ public sealed class GraderEpochPhase9Tests
     public void Markers_SchemaVersionOne_IsNotNull()
     {
         using var files = new ChartFiles();
-        files.Epochs.Execute(() => files.Epochs.Insert(new GraderEpochEventRow
+        var epochs = files.Epochs;
+        epochs.Execute(() => epochs.Insert(new GraderEpochEventRow
         {
             AtUtc = Hour.ToString(format: "O", formatProvider: CultureInfo.InvariantCulture),
             Kind = "code",
@@ -262,9 +266,10 @@ public sealed class GraderEpochPhase9Tests
     public void Markers_RollbackMarkZero_IsZero()
     {
         using var files = new ChartFiles();
-        files.Epochs.Execute(() =>
+        var epochs = files.Epochs;
+        epochs.Execute(() =>
         {
-            files.Epochs.Insert(new GraderEpochEventRow
+            epochs.Insert(new GraderEpochEventRow
             {
                 AtUtc = Hour.ToString(format: "O", formatProvider: CultureInfo.InvariantCulture),
                 Kind = "code",
@@ -272,7 +277,7 @@ public sealed class GraderEpochPhase9Tests
                 Cause = "teacher",
                 RollbackMarkPresent = 0
             });
-            files.Epochs.Insert(new GraderEpochEventRow
+            epochs.Insert(new GraderEpochEventRow
             {
                 AtUtc = Hour.AddMinutes(1).ToString(format: "O", formatProvider: CultureInfo.InvariantCulture),
                 Kind = "code",

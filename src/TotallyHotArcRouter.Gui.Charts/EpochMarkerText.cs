@@ -109,7 +109,7 @@ public static class EpochMarkerText
             lines.Add("Schema version: " + FormatInt(row.FeatureSchemaVersion));
         }
 
-        if (row.RollbackMarkPresent is int mark)
+        if (row.RollbackMarkPresent is { } mark)
             lines.Add(mark == 1 ? "rollback mark: yes" : "rollback mark: no");
 
         lines.Add(NoCause);

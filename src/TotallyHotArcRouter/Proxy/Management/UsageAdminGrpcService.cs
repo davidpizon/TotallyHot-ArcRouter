@@ -301,17 +301,17 @@ public sealed class UsageAdminGrpcService : Contract.UsageAdminService.UsageAdmi
         };
         if (row.ArtifactId is not null) wire.ArtifactId = row.ArtifactId;
         if (row.PreviousArtifactId is not null) wire.PreviousArtifactId = row.PreviousArtifactId;
-        if (row.WindowSize is int window) wire.WindowSize = window;
-        if (row.MeanMiss is double miss) wire.MeanMiss = miss;
+        if (row.WindowSize is { } window) wire.WindowSize = window;
+        if (row.MeanMiss is { } miss) wire.MeanMiss = miss;
         if (row.PreviousTeacherModel is not null) wire.PreviousTeacherModel = row.PreviousTeacherModel;
         if (row.TeacherModel is not null) wire.TeacherModel = row.TeacherModel;
         if (row.PreviousPromptVersion is not null) wire.PreviousPromptVersion = row.PreviousPromptVersion;
         if (row.PromptVersion is not null) wire.PromptVersion = row.PromptVersion;
-        if (row.RollbackMarkPresent is int mark) wire.RollbackMarkPresent = mark;
+        if (row.RollbackMarkPresent is { } mark) wire.RollbackMarkPresent = mark;
         if (row.PreviousBgeModel is not null) wire.PreviousBgeModel = row.PreviousBgeModel;
         if (row.BgeModel is not null) wire.BgeModel = row.BgeModel;
-        if (row.PreviousFeatureSchemaVersion is int previousSchema) wire.PreviousFeatureSchemaVersion = previousSchema;
-        if (row.FeatureSchemaVersion is int schema) wire.FeatureSchemaVersion = schema;
+        if (row.PreviousFeatureSchemaVersion is { } previousSchema) wire.PreviousFeatureSchemaVersion = previousSchema;
+        if (row.FeatureSchemaVersion is { } schema) wire.FeatureSchemaVersion = schema;
         return wire;
     }
 }

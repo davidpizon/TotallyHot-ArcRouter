@@ -131,6 +131,8 @@
 
         @if (ShowSwitch)
         {
+            @* ARIA role "switch" is the WAI-ARIA toggle. The HTML schema behind Html.AttributeValueNotResolved does not list it. *@
+            @* ReSharper disable once Html.AttributeValueNotResolved *@
             <button type="button" role="switch" aria-checked="@(_dollarsPerThousand ? "true" : "false")"
                     class="metric-button mt-2 self-start" @onclick="FlipUnit">
                 <span>Tokens per dollar</span>

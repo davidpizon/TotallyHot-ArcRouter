@@ -13,16 +13,16 @@ public static class EpochMarkerPalette
     public const string TeacherResumed = "#3b82f6";
 
     /// <summary>The teacher model or prompt version changed.</summary>
-    public const string TeacherChanged = "#a855f7";
+    private const string TeacherChanged = "#a855f7";
 
     /// <summary>The embedding model changed.</summary>
-    public const string BgeChanged = "#14b8a6";
+    private const string BgeChanged = "#14b8a6";
 
     /// <summary>The feature list changed.</summary>
-    public const string FeatureSchemaChanged = "#6366f1";
+    private const string FeatureSchemaChanged = "#6366f1";
 
     /// <summary>An epoch type this phase does not name. The mark is still drawn.</summary>
-    public const string Unknown = "#64748b";
+    private const string Unknown = "#64748b";
 
     /// <summary>The context-breach alert. Epoch marks do not use it.</summary>
     public const string AlertRed = "#ef4444";
@@ -31,25 +31,15 @@ public static class EpochMarkerPalette
     public const string AlertAmber = "#f59e0b";
 
     /// <summary>Code epochs use a circle.</summary>
-    public const string CodeSymbol = "circle";
+    private const string CodeSymbol = "circle";
 
     /// <summary>Non-code epochs use a diamond.</summary>
-    public const string NonCodeSymbol = "diamond";
+    private const string NonCodeSymbol = "diamond";
 
     /// <summary>The shape key under every real Cost Analytics pill.</summary>
     public const string ShapeLegend = "circle = code, diamond = non-code";
 
-    /// <summary>The five legend names, in type order.</summary>
-    public static readonly string[] LegendNames =
-    [
-        "Local grader took over",
-        "Teacher took charge again",
-        "Teacher model or prompt changed",
-        "Embedding model changed",
-        "Feature list changed"
-    ];
-
-    /// <summary>The five colors beside those names. An unknown type is not in this list; its mark uses <see cref="Unknown"/>.</summary>
+    /// <summary>The five colors beside their legend names. An unknown type is not in this list; its mark uses <see cref="Unknown"/>.</summary>
     public static readonly (string Color, string Name)[] Legend =
     [
         (LocalTakeover, "Local grader took over"),
