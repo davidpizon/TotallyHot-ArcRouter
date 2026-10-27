@@ -48,11 +48,10 @@ public class LegacyStorageMigrationTests
         // sidecar until a checkpoint folds it into the .db. Copying the .db alone would silently drop it,
         // which for agent_telemetry.db means losing usage-ledger rows on migration.
         var directory = Directory.CreateTempSubdirectory().FullName;
+        var source = Path.Combine(path1: directory, path2: "source.db");
+        var destination = Path.Combine(path1: directory, path2: "destination.db");
         try
         {
-            var source = Path.Combine(path1: directory, path2: "source.db");
-            var destination = Path.Combine(path1: directory, path2: "destination.db");
-
             using (var connection = new SqliteConnection($"Data Source={source}"))
             {
                 connection.Open();
@@ -81,8 +80,39 @@ public class LegacyStorageMigrationTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            // Three pools: the source opened as "Data Source={path}", CopyDatabase's ReadWrite builder
+            // string, and the destination opened Mode=ReadOnly. Each string is its own pool.
+            ClearOwnedPool($"Data Source={source}");
+            ClearOwnedPool(new SqliteConnectionStringBuilder
+            {
+                DataSource = source,
+                Mode = SqliteOpenMode.ReadWrite
+            }.ToString());
+            ClearOwnedPool($"Data Source={destination};Mode=ReadOnly");
             Directory.Delete(path: directory, true);
+        }
+    }
+
+    /// <summary>
+    /// Clears the SQLite pool for one connection string this test opened.
+    /// A different string, including <c>Mode</c>, is a different pool.
+    /// </summary>
+    /// <param name="connectionString">The string the test or <c>CopyDatabase</c> passed to <c>SqliteConnection</c>.</param>
+    private static void ClearOwnedPool(string connectionString)
+    {
+        var databasePath = new SqliteConnectionStringBuilder(connectionString).DataSource;
+        if (!File.Exists(databasePath))
+            return;
+
+        try
+        {
+            using var connection = new SqliteConnection(connectionString);
+            connection.Open();
+            SqliteConnection.ClearPool(connection);
+        }
+        catch (SqliteException)
+        {
+            // Best-effort cleanup. A database already going away is not a test failure.
         }
     }
 }

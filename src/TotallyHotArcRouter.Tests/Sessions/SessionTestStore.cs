@@ -69,7 +69,19 @@ internal sealed class SessionTestStore : IDisposable
     /// <inheritdoc/>
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
+        var databasePath = Path.Combine(Root, "transcripts.db");
+        if (File.Exists(databasePath))
+        {
+            try
+            {
+                using var connection = _database.OpenConnection();
+                SqliteConnection.ClearPool(connection);
+            }
+            catch (SqliteException)
+            {
+                // Best-effort cleanup. A database already going away is not a test failure.
+            }
+        }
         try
         {
             Directory.Delete(Root, recursive: true);

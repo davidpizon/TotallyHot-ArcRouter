@@ -900,7 +900,19 @@ public class SqliteTranscriptStoreTests : IDisposable
         Assert.Null(listed.ResponseText);
         Assert.Equal(expected: "fix this bug".Length, actual: listed.PromptTextLength);
         Assert.Equal(expected: "here is the fix".Length, actual: listed.ResponseTextLength);
-        SqliteConnection.ClearAllPools();
+        if (File.Exists(_dbPath))
+        {
+            try
+            {
+                await using var connection = new SqliteConnection($"Data Source={_dbPath}");
+                connection.Open();
+                SqliteConnection.ClearPool(connection);
+            }
+            catch (SqliteException)
+            {
+                // Best-effort cleanup. A database already going away is not a test failure.
+            }
+        }
         AssertFileDoesNotContain(_dbPath, "fix this bug");
     }
 
@@ -1077,9 +1089,33 @@ public class SqliteTranscriptStoreTests : IDisposable
             create.ExecuteNonQuery();
         }
 
-        SqliteConnection.ClearAllPools();
+        if (File.Exists(_dbPath))
+        {
+            try
+            {
+                using var connection = new SqliteConnection($"Data Source={_dbPath}");
+                connection.Open();
+                SqliteConnection.ClearPool(connection);
+            }
+            catch (SqliteException)
+            {
+                // Best-effort cleanup. A database already going away is not a test failure.
+            }
+        }
         CreateDatabase().EnsureCreated();
-        SqliteConnection.ClearAllPools();
+        if (File.Exists(_dbPath))
+        {
+            try
+            {
+                using var connection = new SqliteConnection($"Data Source={_dbPath}");
+                connection.Open();
+                SqliteConnection.ClearPool(connection);
+            }
+            catch (SqliteException)
+            {
+                // Best-effort cleanup. A database already going away is not a test failure.
+            }
+        }
 
         AssertFileDoesNotContain(_dbPath, planted);
         var wal = _dbPath + "-wal";
