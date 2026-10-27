@@ -395,7 +395,20 @@ public sealed class RouterSettingsAdminGrpcServiceTests
     /// <summary>Releases the SQLite handles of a scratch session store and removes its directory, best effort.</summary>
     private static void DiscardSessionStorage(string root)
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        var databasePath = Path.Combine(root, "transcripts.db");
+        if (File.Exists(databasePath))
+        {
+            try
+            {
+                using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={databasePath}");
+                connection.Open();
+                Microsoft.Data.Sqlite.SqliteConnection.ClearPool(connection);
+            }
+            catch (Microsoft.Data.Sqlite.SqliteException)
+            {
+                // Best-effort cleanup. A database already going away is not a test failure.
+            }
+        }
         try
         {
             Directory.Delete(root, recursive: true);

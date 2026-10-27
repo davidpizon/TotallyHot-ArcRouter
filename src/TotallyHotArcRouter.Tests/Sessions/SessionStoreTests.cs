@@ -41,7 +41,19 @@ public sealed class SessionStoreTests : IDisposable
     /// <inheritdoc/>
     public void Dispose()
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        if (File.Exists(_databasePath))
+        {
+            try
+            {
+                using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_databasePath}");
+                connection.Open();
+                Microsoft.Data.Sqlite.SqliteConnection.ClearPool(connection);
+            }
+            catch (Microsoft.Data.Sqlite.SqliteException)
+            {
+                // Best-effort cleanup. A database already going away is not a test failure.
+            }
+        }
         try
         {
             Directory.Delete(_root, recursive: true);
@@ -522,7 +534,19 @@ public sealed class SessionStoreTests : IDisposable
     {
         var sessionId = _store.ResolveArchiveSessionId("client-1");
         _store.AppendTurn(sessionId, "client-1", NewTurn("a"u8.ToArray(), "b"u8.ToArray()));
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        if (File.Exists(_databasePath))
+        {
+            try
+            {
+                using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_databasePath}");
+                connection.Open();
+                Microsoft.Data.Sqlite.SqliteConnection.ClearPool(connection);
+            }
+            catch (Microsoft.Data.Sqlite.SqliteException)
+            {
+                // Best-effort cleanup. A database already going away is not a test failure.
+            }
+        }
 
         var exitCode = ShredConversationsCommand.Shred(
             databasePath: _databasePath,

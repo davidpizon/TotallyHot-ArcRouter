@@ -131,7 +131,19 @@ public sealed class MemoryEntryEmbeddingModelTests
 
         public void Dispose()
         {
-            SqliteConnection.ClearAllPools();
+            var databasePath = Path.Combine(_directory, "router_memory.db");
+            if (File.Exists(databasePath))
+            {
+                try
+                {
+                    using var connection = Database.OpenConnection();
+                    SqliteConnection.ClearPool(connection);
+                }
+                catch (SqliteException)
+                {
+                    // Best-effort cleanup. A database already going away is not a test failure.
+                }
+            }
             try
             {
                 Directory.Delete(path: _directory, true);

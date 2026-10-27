@@ -1,9 +1,8 @@
 namespace TotallyHot.ArcRouter.Tests.Sessions;
 
 /// <summary>
-/// Serializes the test classes that build a <c>transcripts.db</c> and clean up with
-/// <c>SqliteConnection.ClearAllPools</c>, which is process-wide: run in parallel, one class would close
-/// another's pooled connections and delete its WAL files mid-test.
+/// Serializes the test classes that build a scratch <c>transcripts.db</c>. Teardown clears only that
+/// class's own SQLite pool.
 /// </summary>
 [CollectionDefinition(Name)]
 public sealed class SessionStorageCollection

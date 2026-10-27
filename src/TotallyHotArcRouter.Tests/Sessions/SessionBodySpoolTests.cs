@@ -38,7 +38,20 @@ public sealed class SessionBodySpoolTests : IDisposable
     /// <inheritdoc/>
     public void Dispose()
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        var databasePath = Path.Combine(_root, "transcripts.db");
+        if (File.Exists(databasePath))
+        {
+            try
+            {
+                using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={databasePath}");
+                connection.Open();
+                Microsoft.Data.Sqlite.SqliteConnection.ClearPool(connection);
+            }
+            catch (Microsoft.Data.Sqlite.SqliteException)
+            {
+                // Best-effort cleanup. A database already going away is not a test failure.
+            }
+        }
         try
         {
             Directory.Delete(_root, recursive: true);
