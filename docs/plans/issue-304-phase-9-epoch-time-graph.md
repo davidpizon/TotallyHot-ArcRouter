@@ -1,14 +1,14 @@
-# Plan: #304 phase 9 — grader epoch on the token-efficiency graph
+# Plan: #304 phase 9 — grader epoch marks on existing charts
 
-**Status:** Draft. Waiting on David for Q1 and Q2 below. Do not start the implementation pull request until he answers both. This pull request is docs only. It does not change source, tests, project files, or workflows.
+**Status:** Draft. Q1 and Q2 are answered (David, 2026-10-26). Do not start the implementation pull request until David answers Q3. This pull request is docs only. It does not change source, tests, project files, or workflows.
 
-**Goal:** Show each local-grader takeover and each teacher retake, and each teacher, BGE, or feature-schema change, as a mark on a time graph of token efficiency, and count `Incomplete` receipts by reason. The marks do not say they caused the line to move. Unknown cost stays blank.
+**Goal:** Show each local-grader takeover, each teacher retake, and each teacher, BGE, or feature-schema change as a point-in-time mark on charts that already exist, including a token-efficiency series. Count `Incomplete` receipts by reason. The marks do not say they caused a line to move. Unknown cost stays blank. There is no new grader-epoch chart.
 
-**Architecture:** Phase 8 already appends `grader_epoch_events` in the router-memory database. Token counts and cost already sit on `request_transcripts` in the transcript database. Those are two files. Phase 9 reads each list on its own and places both on one time axis in C#. It does not join them in SQL. The Blazor Report Card tab draws the result. The ratio is computed once, on the router, so the page cannot invent a second formula.
+**Architecture:** Phase 8 already appends `grader_epoch_events` in the router-memory database. Token counts and cost already sit on `request_transcripts` in the transcript database. Those are two files. Phase 9 reads each list on its own and places both on one time axis in C#. It does not join them in SQL. The ratio is computed once, on the router, so the page cannot invent a second formula. Which existing chart's pulsing dots are reused is Q3. Until that answer, do not add a chart kind and do not pick a host chart.
 
-**Tech stack:** C# / .NET 10. The dashboard chart is the existing Apache ECharts host (`EChart.razor` plus `wwwroot/js/echarts-interop.js`). BGE stays the frozen ONNX session (`OnnxEmbeddingClient`). No Python. No second embedder. No fine-tune. No new NuGet package.
+**Tech stack:** C# / .NET 10. Charts already render through Apache ECharts (`EChart.razor` plus `wwwroot/js/echarts-interop.js`). BGE stays the frozen ONNX session (`OnnxEmbeddingClient`). No Python. No second embedder. No fine-tune. No new NuGet package.
 
-**Issue:** [#304](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/304). **Parent plan:** [`issue-304-grade-non-coding-responses.md`](issue-304-grade-non-coding-responses.md) §3.8, §4 phase 9. **Phase 7:** [`issue-304-phase-7-grader-epoch.md`](issue-304-phase-7-grader-epoch.md), implemented in [#346](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/346). **Phase 8:** [`issue-304-phase-8-grader-takeover.md`](issue-304-phase-8-grader-takeover.md), implemented in [#348](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/348). **ADR:** [ADR-0027 Amendment 3](../adr/0027-grade-non-coding-responses-on-a-bootstrap-recipe-and-keep-them-out-of-code-tallies.md#amendment-3-2026-10-26-phase-8-takeover-is-approved) already says phase 9 reads the epoch list and overlays it on `request_transcripts`. This plan does not open a new ADR. After David answers Q1, the implementation pull request adds one sentence to Amendment 3 naming the formula he picked. This pull request does not edit the ADR, because the formula is not decided yet.
+**Issue:** [#304](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/304). **Parent plan:** [`issue-304-grade-non-coding-responses.md`](issue-304-grade-non-coding-responses.md) §3.8, §4 phase 9. **Phase 7:** [`issue-304-phase-7-grader-epoch.md`](issue-304-phase-7-grader-epoch.md), implemented in [#346](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/346). **Phase 8:** [`issue-304-phase-8-grader-takeover.md`](issue-304-phase-8-grader-takeover.md), implemented in [#348](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/348). **ADR:** [Amendment 4](../adr/0027-grade-non-coding-responses-on-a-bootstrap-recipe-and-keep-them-out-of-code-tallies.md#amendment-4-2026-10-26-phase-9-marks-existing-charts) records Q1 and Q2. Q3 stays in this plan.
 
 Checked against `main` at `5b00300b` (the #348 merge) with CodeGraph (`codegraph_explore` after `codegraph init`) and Serena (`find_symbol` on the router project).
 
@@ -24,43 +24,69 @@ Checked against `main` at `5b00300b` (the #348 merge) with CodeGraph (`codegraph
 - `QualityOptions.ScorerVersion` stays `3.0`. No historical rescan is added.
 - Do not add a method to `ManagementFacade`. Do not register `grader_epoch_events` with `ScoreTableRetentionService`.
 
-## Open questions for David
+## Decisions
 
-These two are product choices. The rest of this file is written so that a "yes" to both recommendations can be implemented without another decision. A "no" changes only the section named in the question.
+### Q1. Tokens per dollar. Approved by David on 2026-10-26.
 
-### Q1. What number is the token-efficiency line?
+The line is tokens per dollar. For one bucket, add `input_tokens + output_tokens` and add `cost` over the rows that have both token counts and a cost greater than 0. Divide the token sum by the cost sum. The unit label is `tok/$`.
 
-The parent plan names the columns and does not name the arithmetic. The columns are `request_transcripts.created_at_utc`, `input_tokens`, `output_tokens`, and `cost`. The grade (`score`) is not one of them. There is no judge-cost column. Phase 8 left that out on purpose.
+A row is left out of both sums when `input_tokens` is null, or `output_tokens` is null, or `cost` is null, or `cost` is 0. Leaving it out is not the same as adding 0. A bucket with no usable row is a gap in the line, not a point at 0. A row whose token counts are both 0 and whose cost is greater than 0 stays in the sums. That 0 is a reported zero, not a stand-in for unknown.
 
-**Recommendation:** Tokens per dollar. For one bucket, add `input_tokens + output_tokens` and add `cost` over the rows that have both token counts and a cost greater than 0. Divide the token sum by the cost sum. The unit label is `tok/$`.
+The columns are `request_transcripts.created_at_utc`, `input_tokens`, `output_tokens`, and `cost`. The grade (`score`) is not one of them. There is no judge-cost column.
 
-A row is left out of both sums when `input_tokens` is null, or `output_tokens` is null, or `cost` is null, or `cost` is 0. Leaving it out is not the same as adding 0. A bucket with no usable row is a gap in the line, not a point at 0. A row whose token counts are both 0 and whose cost is greater than 0 stays in the sums, so a real zero-token reply can pull the line down. That 0 is a reported zero, not a stand-in for unknown.
+### Q2. No new grader-epoch chart. David, 2026-10-26.
 
-**In one sentence:** The line is how many tokens we got for each dollar; if we do not know the dollar amount or the token count, we leave a blank, and we never draw that blank as zero.
+David's words: "The epochs should be represented in the existing charts. Epochs represent single points in time. There was a chart that displayed pulsating dots. Could that be repurposed for the epochs? Different types of epochs would be different colors. More information about each epoch would be available as a tooltip when the user mouses over them or clicks them."
 
-If David picks another ratio, replace this section and the tests that lock the number. The queries, the marks, the gaps, and the docs stay.
+What that decides:
 
-### Q2. The report card has no voter-epoch panel. Do we build one?
+- Do not add a separate grader-epoch chart, and do not add a Report Card row titled `Grader epoch`.
+- An epoch is one instant. It is a marker on a chart that already has a time axis, including the token-efficiency series. It is not its own plot.
+- Each epoch type has its own color and a legend. Hover and click both open the same detail. Click also works from the keyboard and from a touch.
+- The detail comes from `grader_epoch_events`: time in a clearly labeled zone, type, kind, cause, artifact ids, and spot-check stats. No question text and no answer text.
+- The marks do not claim they moved the line. Unknown cost stays blank.
+- #292 voter-weight epochs stay out of this phase. Nothing in `src/TotallyHotArcRouter.Gui.Components` draws a voter epoch today. This phase does not add one.
 
-Parent §3.8 says the learning dashboard shows the grader epoch next to the #292 epoch record, labeled so the two cannot be mistaken. The Report Card tab (`LearningReportCard.razor`) has spend, grade mix, and score delta. It has no #292 voter-epoch panel. Nothing in `src/TotallyHotArcRouter.Gui.Components` draws a voter epoch.
+What that does not decide: which pulsing-dot chart to copy. That is Q3. The color legend, which charts receive the marks, how `code` and `non-code` are told apart, and the hover/click tests stay unwritten until David answers Q3.
 
-**Recommendation:** Do not build the #292 panel in this phase. Add the grader-epoch chart to the Report Card tab. Title it `Grader epoch`. The subtitle is `Not the voter-weight epoch (#292).` Building the voter-epoch panel is #292's work. Phase 9's own row does not ask for it.
+## Open question
 
-**In one sentence:** We add the new grader's timeline and label it so nobody mixes it up with the other training timeline, and we do not build that other timeline here.
+### Q3. Which pulsing-dot chart do we copy?
 
-If David wants the #292 panel in this phase, stop and add that scope before coding. Do not invent what the voter-epoch panel shows.
+Two charts in the tree draw pulsing dots. Both sit on the Cost Analytics tab (`CostAnalytics.razor`), one metric at a time. Both are Apache ECharts `effectScatter` series with `rippleEffect` in `src/TotallyHotArcRouter.Gui.Web/wwwroot/js/echarts-interop.js`. Both turn the dot's own tooltip off (`tooltip: { show: false }`). The axis tooltip shows the turn, not a click target. Neither dot is keyboard-focusable today.
+
+| Candidate | What the operator sees | Kind | Function | Dot |
+|---|---|---|---|---|
+| Tokens | Prompt + completion tokens. A hatched band and an amber pulsing dot when tokens jump by more than 2.5× (`CostChartBuilder.RunawayFactor`). | `RunawayArea` | `optionRunawayArea` | `effectScatter`, `symbolSize` 14, `rippleEffect` scale 4, color `#f59e0b`. The spec calls this a rippling alert. |
+| Context Buffer | Percent of the context window used. A dashed red line at 90%. A red pulsing dot when a point is at or over that line. | `ThresholdLine` | `optionThresholdLine` | `effectScatter`, `symbolSize` 16, `rippleEffect` scale 4.5, color `#ef4444`. The function comment calls this the spec's "pulsing" line. `docs/gui/cost-analytics-visualization-spec.md` says the line "begins pulsing" at 90%. `docs/gui/dashboard.md` says "pulsing breaches." |
+
+`docs/gui/cost-analytics-visualization-spec.md` names both in one sentence: rippling `effectScatter` alerts for token runaways and for context breaches. The TTFT chart (`optionZonedLatencyLine`) pins a red spike with `markPoint`. That pin does not ripple. It is not a candidate.
+
+`.pulse-dot` in `docs/gui/MOTION.md` is the live-status dot on a session or a budget. It is CSS. It is not a chart. It is not a candidate.
+
+**Recommendation:** Copy the Context Buffer dots (`optionThresholdLine`). That is the chart the spec and the dashboard call pulsing. Copy the drawing (`effectScatter` plus `rippleEffect`). Do not put grader events on the context-breach points, and do not reuse the breach color `#ef4444` as an epoch color. Epoch colors are a later decision. The Tokens dots are the same kind of animation, and the spec calls those rippling, for a token runaway.
+
+**In one sentence:** Two charts throb with dots; the Context Buffer one is the one we wrote down as pulsing, so copy that dot, and do not drop grader events onto the "context is almost full" spots.
 
 ## Scope
 
-- One time graph on the Report Card tab. The line is token efficiency over the same Day / Month / 3-Month / 6-Month / Year window the tab already uses (`LearningReportCard.razor` `RangeFor`).
-- One mark per `grader_epoch_events` row whose `at_utc` falls in that window. The types are `local_takeover`, `teacher_resumed`, `teacher_changed`, `bge_changed`, and `feature_schema_changed`. Each mark is also split by kind, `code` or `non-code`.
-- A caption on the chart that says the marks do not claim to have moved the line.
-- A count of `Incomplete` receipts in the same window, by `incomplete_reason`, plus the abstention tokens stored in `abstained_graders`.
-- The docs named under [Docs to update](#docs-to-update).
+Decided, and safe to build after Q3 without another product choice:
+
+- Token efficiency is tokens per dollar, as Q1 states. The math is [Token efficiency](#token-efficiency).
+- Epoch rows stay the five types `local_takeover`, `teacher_resumed`, `teacher_changed`, `bge_changed`, and `feature_schema_changed`, for kind `code` and kind `non-code`.
+- A count of `Incomplete` receipts in the same window, by `incomplete_reason`, plus the abstention tokens stored in `abstained_graders`. That count is a list, not a chart.
+- The docs named under [Docs to update](#docs-to-update), except the chart-host sentences, which wait on Q3.
+
+Not decided until Q3, so this plan does not name them:
+
+- Which existing charts get the epoch marks. David said the existing charts, and the token-efficiency series is one of them. The Report Card charts are not time axes: `LearningReportCardChartBuilder.SpendByModel` and `ScoreDelta` are grouped bars by model, and `GradeMix` is a donut. A point in time cannot sit on those three. The Cost Analytics charts are time axes, and only two of them pulse. Naming the host charts before Q3 would guess.
+- The five epoch colors, the legend, and how `code` differs from `non-code` on the dot.
+- The hover tooltip, the click tooltip, and the keyboard and touch path. Today's pulsing dots hide their own tooltip.
 
 ## Out of scope
 
-- A #292 voter-epoch panel, unless Q2 is answered the other way.
+- A new grader-epoch chart, a new `buildOption` kind, and a new Report Card row for epochs. Q2 retired the earlier draft of this plan that added those.
+- A #292 voter-epoch panel.
 - Any change to the fit, the holdout, the reservoir, the agreement gate, takeover, the spot-check draw, or `RollbackToTeacher`.
 - A judge-cost column, a new receipt column, or a new transcript column.
 - Rewriting stored grades, unified scores, `grader_scores` rows, costs, or token counts.
@@ -74,23 +100,13 @@ If David wants the #292 panel in this phase, stop and add that scope before codi
 
 ## What the screen shows
 
-The Report Card tab keeps its three panels. Under them, one new row:
+Held until Q3. Do not add a chart titled `Grader epoch`. Do not draw a token-efficiency line as its own plot until David says which pulsing dots to copy and which existing charts receive the marks.
 
-- Left, the chart. Title `Grader epoch`. Subtitle `Not the voter-weight epoch (#292).` Second line: `Request tokens per dollar. Not the teacher's bill.` The caption under the plot, always visible: `These marks show when a grader started grading on its own, when the teacher took charge again, or when the teacher, the embedding model, or the feature list changed. They do not mean the mark caused the line to move.`
-- Right, the incomplete counts. Title `Incomplete grades`. Subtitle: `Receipts that did not learn, counted by reason. A zero here means no receipt. It is not an unknown cost.`
-
-The existing filter buttons drive both. One reload loads the chart and the counts together. A slower response for an older filter is dropped the same way the tab already drops a stale report-card reload (`_reloadGeneration`).
-
-Empty and failure copy, for this panel only:
-
-| What happened | What the panel says |
-|---|---|
-| The RPC failed, or the query was not registered | `Grader epoch history is unavailable.` No demo marks and no zero line. The other three panels may still fall back to `MockData`. |
-| The RPC succeeded, no efficiency points and no marks | `No token-efficiency points and no grader epochs in this range.` |
-| Points, no marks | The line draws. The caption stays. The legend says no epochs in this range. |
-| Marks, no points | The marks draw on an empty plot. The copy is `No known token cost in this range.` There is no line at 0. |
+The incomplete-count list can still land on the Report Card tab, beside the three panels that already exist. Title `Incomplete grades`. Subtitle: `Receipts that did not learn, counted by reason. A zero here means no receipt. It is not an unknown cost.` It uses the same Day / Month / 3-Month / 6-Month / Year filter (`LearningReportCard.razor` `RangeFor`). A slower response for an older filter is dropped the same way the tab already drops a stale reload (`_reloadGeneration`). This list does not use `MockData`. If the RPC fails, the list says `Incomplete grade counts are unavailable.` It does not show zeros in place of a failed read.
 
 ## Files
+
+Do not edit `echarts-interop.js` to draw epoch dots until David answers Q3. The reader and RPC rows are the data path. They do not choose a host chart.
 
 | File | Change |
 |---|---|
@@ -104,18 +120,16 @@ Empty and failure copy, for this panel only:
 | `src/TotallyHotArcRouter/Proxy/ProxyServerDependencies.cs` | Optional init properties on `ManagementApiDependencies`: `IGraderEpochEventStore? EpochEvents`, `TranscriptDatabase? Transcripts`, `RouterMemoryDatabase? GradeReceipts`. The inner web host has its own container and cannot resolve the outer singletons. This is the same hand-off `UsageRollupStore` already uses. |
 | `src/TotallyHotArcRouter/Proxy/ProxyServiceCollectionExtensions.cs` | Set those three properties where `ManagementApi` is built (next to `UsageRollupStore`). `GetRequiredService` for `IGraderEpochEventStore`, `TranscriptDatabase`, and `RouterMemoryDatabase`. |
 | `src/TotallyHotArcRouter/Proxy/ProxyServer.cs` | See [Inner-host wiring](#inner-host-wiring). Do not add a `ManagementFacade` method. |
-| `src/TotallyHotArcRouter.Gui.Charts/GraderEpochChartBuilder.cs` | New. Colors, dash style, gap flags, caption. Does not divide. |
-| `src/TotallyHotArcRouter.Gui.Charts/DistributionChart.cs` | No change to `ChartJson`. It drops null properties (`WhenWritingNull`). The gap flag is a bool, so it survives. |
-| `src/TotallyHotArcRouter.Gui.Web/wwwroot/js/echarts-interop.js` | New kind `GraderEpochTime` in `buildOption`. |
-| `src/TotallyHotArcRouter.Gui.Components/Components/EChart.razor` | Extend the `ModelJson` summary so it names the new model. The host itself stays the same. |
+| `src/TotallyHotArcRouter.Gui.Charts/DistributionChart.cs` | No change to `ChartJson`. It drops null properties (`WhenWritingNull`). A missing efficiency must stay absent in JSON, so the chart cannot draw it as 0. |
+| `src/TotallyHotArcRouter.Gui.Web/wwwroot/js/echarts-interop.js` | No new `buildOption` kind in this phase. Q3 chooses whether the epoch dots extend `optionThresholdLine`, `optionRunawayArea`, or a shared helper both call. Do not add `GraderEpochTime`. |
 | `src/TotallyHotArcRouter.Gui.Admin/UsageQueryClient.cs` | `GetGraderEpochChartAsync`, beside `GetLearningReportCardAsync`. Map a missing `efficiency` field to null, never to 0. |
 | `src/TotallyHotArcRouter.Gui.Admin/ProviderAdminModels.cs` | View records for the snapshot, next to `GradeMixRowView`. |
 | `src/TotallyHotArcRouter.Gui.Components/Services/UsageStore.cs` | `LoadGraderEpochChartAsync`. Uncached, same reason as `LoadLearningReportCardAsync`: the window is "now minus N" and new rows arrive. |
-| `src/TotallyHotArcRouter.Gui.Components/Components/LearningReportCard.razor` | The new row. Same filter. No `MockData` on this panel. |
+| `src/TotallyHotArcRouter.Gui.Components/Components/LearningReportCard.razor` | The incomplete-count list only. No epoch chart on this tab. |
 | `docs/how-it-learns.md` | Teacher phase and takeover, and the no-rescan sentence. See [Docs](#docs-to-update). |
 | `docs/plans/router-evaluator-and-live-pricing.md` | §14 note. |
 | `docs/gui/dashboard.md` | Report Card section. |
-| `docs/adr/0027-grade-non-coding-responses-on-a-bootstrap-recipe-and-keep-them-out-of-code-tallies.md` | One sentence on Amendment 3, only after Q1 is answered, naming the formula. |
+| `docs/adr/0027-grade-non-coding-responses-on-a-bootstrap-recipe-and-keep-them-out-of-code-tallies.md` | Amendment 4 records Q1 and Q2. It does not pick the pulsing-dot chart. |
 | `docs/plans/issue-304-grade-non-coding-responses.md` | Link this file from the phase 9 row. Done in this pull request. |
 
 No change to `src/TotallyHotArcRouter/Judge/IGraderEpochEventStore.cs`. `ListForPlot` already returns every row, oldest first, with the phase 9 `SELECT`. Do not add a time filter to that method. The chart query filters in memory.
@@ -141,7 +155,7 @@ flowchart LR
     rpc --> counts[SELECT status and reasons from grade_receipts]
     events --> place[Place both series on one time axis in C#]
     tokens --> place
-    place --> chart[Report Card chart]
+    place --> chart[Existing time chart, host is Q3]
     counts --> list[Incomplete counts]
 ```
 
@@ -197,7 +211,7 @@ WHERE grade_status = 'Incomplete'
 
 ## Token efficiency
 
-Pending Q1. This section is the recommendation.
+Approved by David on 2026-10-26. This is the formula.
 
 `GraderEpochEfficiency` buckets the transcript points.
 
@@ -227,41 +241,16 @@ The chart builder does not recompute this. It plots the string the router sent, 
 
 ## Chart behavior
 
-Kind string: `GraderEpochTime`. `buildOption` in `echarts-interop.js` gains that case. An unknown kind still shows the red "Unknown chart kind" title it shows today.
+Held until Q3. Do not add a `buildOption` kind named `GraderEpochTime`. Do not assign epoch colors, a solid-versus-dashed rule, or a click tooltip in this revision. An earlier draft of this file did that for a new chart. Q2 retired that chart.
 
-The line series:
+These rules already apply to whatever host David picks. They do not choose the host:
 
-- One point per known bucket, x = bucket start as Unix milliseconds, y = the efficiency decimal.
-- `connectNulls: false`.
-- The builder is given `width` (`hour` or `day`). Between two known buckets, every missing step is a point with `gap: true`. A step that had only skipped rows is missing from the response, so it becomes a gap too. That is correct: it has no ratio. `ChartJson` omits nulls, so a gap point has no `value` field. The JS checks `p.gap === true` before it reads `value`, and it pushes a JS `null` into the series. That is what breaks the line. `Number(null)` is 0 and `Number(undefined)` is not a gap, so the JS must not coerce a missing value.
-- Do not emit empty buckets before the first known point or after the last one.
-- A known point whose ratio is 0 has `gap: false` and `value: 0`. That point is drawn.
+- Unknown cost, unknown tokens, and zero cost are gaps. `connectNulls` stays false. `ChartJson` omits null properties (`WhenWritingNull`). The script must not turn a missing value into 0. `Number(null)` is 0, so a gap is an explicit flag, not a missing number read as a number.
+- A reported zero token count with a positive cost is a real 0 on the line.
+- An epoch mark uses the row's `at_utc`. It is not snapped to a bucket. The mark does not say it moved the line.
+- The detail payload is the epoch columns already selected. It never includes question text or answer text.
 
-Marks, one per epoch row in the window, in `ListForPlot` order (`at_utc`, then `id`):
-
-| `epoch_type` | Color | Meaning on the legend |
-|---|---|---|
-| `local_takeover` | `#1ed760` | Local grader took over |
-| `teacher_resumed` | `#f59e0b` | Teacher took charge again |
-| `teacher_changed` | `#38bdf8` | Teacher model or prompt changed |
-| `bge_changed` | `#a78bfa` | Embedding model changed |
-| `feature_schema_changed` | `#fb7185` | Feature list changed |
-
-Kind changes the line, not the color. `code` is solid. `non-code` is dashed. The legend says `solid = code, dashed = non-code`. Colors are these five fixed values, not `ChartPalette.ColorFor`, so a restart cannot reshuffle them. An `epoch_type` outside the five is still drawn, in `#7c7c7c`, so a future type is not dropped on the floor. It is not given a friendly name.
-
-The mark sits at the event's own `at_utc`, not snapped to the bucket. Two events in the same millisecond both draw. The tooltip lists every event at that x, in `id` order.
-
-Tooltip lines, and nothing else:
-
-- Kind, epoch type, cause, and the UTC time.
-- Artifact id. Previous artifact id, or the word `none` when that field is null.
-- For cause `spot_check_rollback` or `live_check_pass`: window size, and mean miss. A null mean miss is the word `unknown`, not `0`. A null window size is `unknown`, not `0`.
-- For `teacher_changed`: previous and new teacher model, previous and new prompt version. A null side is `unknown`.
-- For `bge_changed`: previous and new BGE id.
-- For `feature_schema_changed`: previous and new schema version. A stored `1` is shown as `1`. A null is `unknown`, not `0`.
-- `rollback_mark_present` only when the field is present. `1` is `rollback mark: yes`. `0` is `rollback mark: no`. That `0` means the file was absent, which is a real answer. A null field omits the line. Do not say `no` for null. Authority rows store null here on purpose.
-
-The caption in the scope section is part of the chart model, not only a tooltip. Hiding it would let a reader think the mark moved the line.
+Hover, click, keyboard, touch, the five colors, the legend, and how `code` differs from `non-code` are named in tests only after Q3. Today's pulsing dots set `tooltip: { show: false }` and are not a click target, so those tests cannot be written against a chart this plan has not chosen.
 
 ## Incomplete counts
 
@@ -284,7 +273,7 @@ Implementation pull request, after Q1 and Q2 are answered.
 - In Step 4, after the sweep paragraphs, add a short "Teacher phase and takeover" section in the same plain voice. The pinned free teacher grades first. Two local graders, one for code and one for prose, train on the teacher's judge score. Passing the gate in phase 7 writes a shadow score and does not take over. Takeover is later: a confident answer can skip the teacher. A 5% sample and a low-confidence answer still call the teacher. A spot-check window that is too far from the teacher gives the job back to the teacher. Say that a shadow score beside the teacher is not the grade of record.
 - Keep the description of `QualityRescanService`. It still runs. It extracts a fenced snippet through `ISignalExtractor`. A prose row with no fence is stamped with a null score and is not sent to the teacher (`RescanOneAsync` stamps null when `Extract` returns null). Add one sentence: issue #304 does not bump `QualityOptions.ScorerVersion` (it stays `3.0`) and does not walk old receipts to grade them again. Already-stored grades are not rewritten when a local grader takes over.
 - Do not delete the sentence that says bumping `ScorerVersion` re-marks the cabinet. That is the code sweep. Add that #304 does not do that bump.
-- In Honest gaps, add that the grader-epoch chart does not claim the marks moved the token line, and that an unknown cost is a blank on that chart.
+- In Honest gaps, add that epoch marks on a time chart do not claim they moved the token line, and that an unknown cost is a blank. Do not call it a grader-epoch chart.
 
 `docs/plans/router-evaluator-and-live-pricing.md` §14, three short bullets:
 
@@ -292,21 +281,21 @@ Implementation pull request, after Q1 and Q2 are answered.
 - The grader epoch is a separate job from the #292 voter epoch. It does not change voter weights. The voter epoch does not fit the local grader.
 - History is not rescanned for this grade. `ScorerVersion` stays `3.0`.
 
-`docs/gui/dashboard.md`, the Report Card item: the new panel, the caption, the empty copy, and that this panel does not use `MockData`. Say an unknown cost is a gap. Do not add a new design-spec file.
+`docs/gui/dashboard.md`, the Report Card item: the incomplete-count list, and that it does not use `MockData`. Do not describe a new epoch chart. The Cost Analytics sentences that name the pulsing dots stay until Q3 says which one is reused. Do not add a new design-spec file.
 
-`docs/adr/0027` Amendment 3: one sentence naming the formula David picked in Q1, the unit, and that a null cost or a null token count is a gap, never a plotted 0. No new ADR. If Q2 is answered "build the #292 panel," that panel is still not an ADR change. It is more of this plan.
+`docs/adr/0027` Amendment 4, in this pull request, records the tokens-per-dollar formula and that phase 9 does not add a new chart. It leaves the pulsing-dot choice open.
 
-This pull request already points the parent plan's phase 9 row at this file and records that Q1 and Q2 are open. It also corrects two sentences that #346 and #348 made false: `GraderEpochOptions` now has `TakeoverEnabled`, `SpotCheckRate`, `SpotCheckWindowSize`, and `SpotCheckRollbackMae`, and the router project references `Microsoft.ML` 5.0.0.
+This pull request records Q1 and Q2 as answered and Q3 as open. It also corrects two sentences that #346 and #348 made false: `GraderEpochOptions` now has `TakeoverEnabled`, `SpotCheckRate`, `SpotCheckWindowSize`, and `SpotCheckRollbackMae`, and the router project references `Microsoft.ML` 5.0.0.
 
 ## Tests
 
-New `GraderEpochPhase9Tests` in `src/TotallyHotArcRouter.Tests/Proxy/Management/`, beside `LearningReportCardAggregatorTests`. Chart tests go in `src/TotallyHotArcRouter.Gui.Charts.Tests/GraderEpochChartBuilderTests.cs`. The RPC mapping test goes in `UsageAdminGrpcServiceTests`. The client mapping test goes in `src/TotallyHotArcRouter.Gui.Admin.Tests/UsageQueryClientTests.cs`. The panel test goes in `src/TotallyHotArcRouter.Gui.Components.Tests/LearningReportCardTests.cs`.
+New `GraderEpochPhase9Tests` in `src/TotallyHotArcRouter.Tests/Proxy/Management/`, beside `LearningReportCardAggregatorTests`. The RPC mapping test goes in `UsageAdminGrpcServiceTests`. The client mapping test goes in `src/TotallyHotArcRouter.Gui.Admin.Tests/UsageQueryClientTests.cs`. The incomplete-list test goes in `src/TotallyHotArcRouter.Gui.Components.Tests/LearningReportCardTests.cs`. Overlay, color, legend, and tooltip tests (hover, click, keyboard, and touch) are not in this table. They are named after Q3, on the chart David picks. Blank handling is in this table.
 
 Recorded fixtures. Short tables. No `usage_rollup` rows in the efficiency fixture. Each test under 5 seconds.
 
 | Test | Asserts |
 |---|---|
-| `Efficiency_TokensPerDollar_MatchesTheWorkedExample` | The four-row hour above. The decimal equals `150m / 0.35m`. The wire string parses back to that same decimal. `known_rows` is 2. `skipped_rows` is 2. Pending Q1: if the formula changes, this expected number changes with it. |
+| `Efficiency_TokensPerDollar_MatchesTheWorkedExample` | The four-row hour above. The decimal equals `150m / 0.35m`. The wire string parses back to that same decimal. `known_rows` is 2. `skipped_rows` is 2. |
 | `Efficiency_NullCost_IsAGap_NotZero` | A window whose only row has a null cost returns no point. The response omits `efficiency`. It does not send `"0"`. |
 | `Efficiency_NullToken_IsAGap_NotZero` | A null `input_tokens` or a null `output_tokens` is skipped. The other column is not used alone, and it is not treated as 0. |
 | `Efficiency_ZeroCost_IsNotPlotted` | Cost `0` with a non-null token count is skipped. No point at 0 and no point at a huge ratio. The stored cost is left as 0. |
@@ -326,16 +315,14 @@ Recorded fixtures. Short tables. No `usage_rollup` rows in the efficiency fixtur
 | `GetGraderEpochChart_MissingFrom_IsInvalidArgument` | A request with no `from` throws `InvalidArgument` and the detail `'from' is required.` Same helper as `GetLearningReportCard`. |
 | `GetGraderEpochChart_GapOmitsEfficiency` | A gap bucket has no `efficiency` field on the wire. A zero ratio has `efficiency` `"0"`. |
 | `UsageQueryClient_MissingEfficiency_IsNull` | The view model's efficiency is null. It is not 0. |
-| `GraderEpochChart_GapFlag_OmitsValue` | Serialized JSON for a gap point has `"gap":true` and no `"value":0`. A zero ratio has `"value":0` and `"gap":false`. |
-| `GraderEpochChart_MarkerColorAndDash` | `local_takeover` is `#1ed760`. `code` is solid. `non-code` is dashed. `teacher_resumed` is `#f59e0b`. |
-| `GraderEpochChart_Caption_DeniesCausation` | The model caption contains the sentence that the mark did not cause the line to move. |
-| `ReportCard_EpochPanel_DoesNotUseMockData` | When the load returns null, the epoch panel shows the unavailable copy. It does not show `MockData` spend figures as epochs. |
+| `EfficiencyGap_OmitsValue` | Serialized JSON for a gap point has `"gap":true` and no `"value":0`. A zero ratio has `"value":0` and `"gap":false`. |
+| `ReportCard_IncompleteList_DoesNotUseMockData` | When the load returns null, the incomplete list shows `Incomplete grade counts are unavailable.` It does not show `MockData` spend figures as counts. |
 
 `EpochEvent_AppendOnly` and the other phase 8 epoch tests stay green. This phase does not add an update or a delete.
 
 ## Rollout
 
-1. David answers Q1 and Q2.
+1. David answers Q3. Q1 and Q2 are already answered.
 2. The implementation pull request links this file. It builds with no warnings. The tests above pass.
 3. Nothing in grading changes when the chart ships. Takeover stays as phase 8 left it. No config flag. An operator does not turn the chart on.
 4. No migration. `grader_epoch_events` and `request_transcripts` are already there. A database with no epoch rows shows the empty copy.
@@ -345,23 +332,24 @@ Recorded fixtures. Short tables. No `usage_rollup` rows in the efficiency fixtur
 
 - **A null plotted as zero.** `ChartJson` drops null properties. Proto3 drops a missing number into 0. `UsageRollupStore` already stored nulls as 0. The optional string, the `gap` flag, and the ban on the rollup are the three guards. A test covers each.
 - **The line connecting across a hole.** Omitting an empty bucket makes ECharts draw a slope across the missing hour. Gap points between known buckets are what break that slope. `connectNulls` stays false.
-- **The JS coerce.** `Number(null)` is 0. The new kind checks `gap` first.
-- **A reader thinks the mark caused the move.** The caption is on the chart model and on the page, not only in a tooltip.
+- **The JS coerce.** `Number(null)` is 0. The host chart checks the gap flag before it reads the value.
+- **A reader thinks the mark caused the move.** The mark's detail says it did not. Where that sentence sits on the page waits on Q3, because there is no new chart caption.
 - **Conversation text on the admin RPC.** The transcript `SELECT` is four columns. The test fails if `prompt_text` or `response_text` appears.
-- **Two database files.** A read cannot be one transaction across them. The chart can show an epoch that was committed a moment after the transcript snapshot. That is a display skew, not a write. The caption already refuses a causal claim.
+- **Two database files.** A read cannot be one transaction across them. The chart can show an epoch that was committed a moment after the transcript snapshot. That is a display skew, not a write. The mark's detail refuses a causal claim. The page sentence that says the same thing waits on Q3.
 - **The inner web host cannot see outer singletons.** Forgetting the three `ManagementApiDependencies` properties makes the RPC permanently unavailable in the real server while unit tests that pass a database still pass. The wiring section above is the fix. Forgetting `services.AddSingleton` of `GraderEpochChartQuery` has the same symptom, not an activation error: the container supplies the constructor default null. A hand-built `UsageAdminGrpcService` test does not catch a missing registration. Register the query in the same block as `ManagementReportingService`.
 - **`ListForPlot` loads every epoch.** The table is append-only and is not purged. Filtering in memory keeps the phase 8 contract. Do not "fix" growth by deleting rows.
 - **The code sweep is still on.** A doc that says "history is not rescanned" without naming `QualityRescanService` would be wrong. The doc section above keeps the sweep and says #304 does not send old prose to the teacher.
 - **A zero receipt count read as an unknown cost.** The incomplete panel's subtitle says a zero means no receipt.
-- **Demo data that looks like a real takeover.** This panel does not use `MockData`.
+- **Demo data that looks like a real takeover.** The incomplete list does not use `MockData`. Epoch dots are not drawn from `MockData` either.
+- **Copying the breach dots onto the breach series.** Q3 asks to copy the drawing. Putting `grader_epoch_events` on the context-breach points would mark a takeover as "context is almost full."
 
 ## Done when
 
-- David has answered Q1 and Q2, and the implementation pull request links this file.
-- The Report Card shows one token-efficiency line and one mark per epoch row in the window, for all five types and both kinds. The caption says the mark did not cause the line to move. The title says this is the grader epoch, not the #292 voter epoch.
-- A null cost, a null token count, and a zero cost are gaps, not points at 0, unless Q1 changes the zero-cost rule. A reported zero token count with a positive cost is a real 0 on the line. `usage_rollup` is not an input.
+- David has answered Q3, and the implementation pull request links this file. Q1 and Q2 are already answered.
+- Epochs are point-in-time marks on the charts David named, using the pulsing-dot drawing he named. There is no new grader-epoch chart. #292 voter epochs are absent. Colors, legend, kind, hover, and click match the answer to Q3.
+- A null cost, a null token count, and a zero cost are gaps, not points at 0. A reported zero token count with a positive cost is a real 0 on the line. `usage_rollup` is not an input.
 - `Incomplete` receipts in the same window are counted by the eight named reasons, with a real 0 when a reason has no row, and abstention tokens are listed beside that. The headline is the row count.
-- `docs/how-it-learns.md` describes the teacher phase and takeover as two steps, and it says #304 does not rescan history and does not bump `ScorerVersion`. §14 of the evaluator plan names the teacher, the local grader, and the separate epoch. Amendment 3 names the formula David picked.
+- `docs/how-it-learns.md` describes the teacher phase and takeover as two steps, and it says #304 does not rescan history and does not bump `ScorerVersion`. §14 of the evaluator plan names the teacher, the local grader, and the separate epoch. Amendment 4 names tokens per dollar and says phase 9 does not add a new chart.
 - No stored grade, cost, or token count is rewritten. `ManagementFacade` gains no method. `grader_epoch_events` is still not purged.
 - The build is warning-free. New public members have XML docs. Each new test finishes in under 5 seconds.
 
@@ -384,4 +372,6 @@ Checked with CodeGraph and Serena at `5b00300b`. These exist:
 - `ChartPalette` hashes a name to a color. This chart does not use that for epoch types, because the legend must stay put.
 - The router project references `Microsoft.ML` 5.0.0 and `Microsoft.ML.OnnxRuntime` 1.31.0.
 
-Not in the tree, and named by this plan: `TranscriptTokenCostReader`, `IncompleteGradeCountQuery`, `GraderEpochEfficiency`, `GraderEpochChartQuery`, `GraderEpochChartBuilder`, the `GraderEpochTime` chart kind, and `GetGraderEpochChart`.
+Not in the tree, and named by this plan: `TranscriptTokenCostReader`, `IncompleteGradeCountQuery`, `GraderEpochEfficiency`, `GraderEpochChartQuery`, and `GetGraderEpochChart`. `GraderEpochChartBuilder` and the `GraderEpochTime` kind were in an earlier draft. Q2 removed them. Do not add them while Q3 is open.
+
+Pulsing dots that are in the tree: `optionRunawayArea` (`RunawayArea`, Tokens) and `optionThresholdLine` (`ThresholdLine`, Context Buffer), both in `echarts-interop.js`. `optionZonedLatencyLine` uses `markPoint` and does not ripple. `.pulse-dot` is CSS, not a chart.
