@@ -341,7 +341,7 @@ These are real code defects against a written rule. The docs pull requests name 
 
 ## 7. Questions only David can answer
 
-Questions 1, 2, 3, and 4 are settled. Questions 5 and 6 are open choices inside the code follow-up (§9). They do not block F1–F3. For an open question, the recommended answer is what the later plan does if David says nothing is wrong with it.
+Questions 1, 2, 3, 4, and 5 are settled. Questions 6, 7, and 8 are open choices inside the code follow-up (§9). They do not block F1–F3. For an open question, the recommended answer is what the later plan does if David says nothing is wrong with it.
 
 1. **Settled (David, 2026-10-27, on [#356](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/356)).** What should this stack of doc fixes be called? **David's answer:** keep the background writer, the `Channel<ServedRequest>` item in §4 of the approved plan, as Phase B. Call this plan a docs follow-up, not Phase B. The slices of this follow-up are F1, F2, and F3, so they are not read as Phase B. The branch and the filename still contain `phase-b`. That string is not the name of this plan.
 
@@ -351,15 +351,20 @@ Questions 1, 2, 3, and 4 are settled. Questions 5 and 6 are open choices inside 
 
 4. **Settled (David, 2026-10-27, on [#356](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/356)).** Which requests should read the new word grades (`live:non-code`)? **David's answer:** delegated helpers, and requests the cheap utility heuristic already catches, and nothing else. Delegated means `IsRouterChoiceModelName` or `SubagentSignalDetector.IsCopilotUtilityAlias`. The heuristic is `HeuristicRequestClassifier.InferIsUtility`. A helper that names its own model, a light subagent, and the orchestrator path do not read `live:non-code`.
 
-5. **Should a delegated helper stay on the cheap rule, or move to the learned path?** Delegated means `IsRouterChoiceModelName` or `SubagentSignalDetector.IsCopilotUtilityAlias`, the same gate as question 4.
-   **Recommended answer.** Stay on `UtilityRoutingPolicy`. Add a floor that reads the separate non-code tally. No non-code score yet means the floor does not fire. Do not send helpers down the exploring path.
+5. **Settled (David, 2026-10-27, on [#356](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/356)).** Should a delegated helper stay on the cheap rule? **David's answer:** yes. Delegated helpers stay on the cheap utility route (`UtilityRoutingPolicy`), with a floor on the `live:non-code` word score. If the cheap model's word score is below that floor, the router picks a better model. They do not move to the exploring learned path. The floor's number is question 7. A missing word score is question 8. A missing score is never 0.
 
 6. **Word grades already sit in the neighbor list the learned path reads. Should a code request ignore those neighbors?**
    **Recommended answer.** Yes. Tag the neighbor with the recipe and skip a bootstrap neighbor when the route is not a word route. That keeps a word grade from steering a code pick.
 
+7. **What number is the word-score floor?** David said a cheap model below the floor loses to a better model. He did not say the number. Light subagents already use a relative floor of 0.9 (`SubagentBiasOptions.LightSubagentRelativeFloor`). The utility rule also has an absolute minimum of 0.3 (`RoutingOptions.UtilityMinQualityScore`), and that minimum is a code-tally gate, not a word-score floor.
+   **Recommended answer.** Use the same relative floor as light subagents: 0.9 of the best observed `live:non-code` score. Compare it to the cheap pick's own word score. If that score is present and below the bar, pick the next cheap-rule candidate whose word score meets the bar. If none meet it, keep the original cheap pick. Do not send the request to the learned path.
+
+8. **The cheap model has no `live:non-code` score yet. Does the floor fire?** A missing score is not 0. `UtilityRoutingPolicy.SelectModelAsync` uses `Quality ?? 0` only as a stand-in inside the code-tally formula. Do not copy that onto a missing word score.
+   **Recommended answer.** The floor does not fire. The cheap utility pick stands until that model has a real word score. An unscored candidate is not "below the floor" and is not "a better model."
+
 ## 8. Sign-off
 
-David's comment on #315 or on this pull request, approving this follow-up, is the sign-off for the edits in §3. The comments on 2026-10-27 settle questions 1, 2, 3, and 4. They are not that sign-off. They are not the go for the code plan in §9. Questions 5 and 6 are still open. Until a comment approves this follow-up, no edit in §3 is in scope for an implementation pull request. Sign-off of this file is not sign-off to build Phase B, and it is not sign-off to change routing, and it is not a fix for the three `style=` bugs.
+David's comment on #315 or on this pull request, approving this follow-up, is the sign-off for the edits in §3. The comments on 2026-10-27 settle questions 1, 2, 3, 4, and 5. They are not that sign-off. They are not the go for the code plan in §9. Questions 6, 7, and 8 are still open. Until a comment approves this follow-up, no edit in §3 is in scope for an implementation pull request. Sign-off of this file is not sign-off to build Phase B, and it is not sign-off to change routing, and it is not a fix for the three `style=` bugs.
 
 ## 9. Code follow-up: route word answers
 
@@ -375,7 +380,7 @@ Checked with CodeGraph (`codegraph_explore` on `CompositeRoutingPolicy`, `Utilit
 
 The grade for a word answer does not move that tally. `QualityIngress.CreateBootstrapRequest` builds `GradingRecipes.Bootstrap` with an empty dimension. `RouterMemoryScoreObserver.ObserveAsync` writes `RouterMemory.AddScoreAsync` only when the grade is `Complete` and `GradingRecipes.IsCodeRecipe` is true. A bootstrap grade fails that check, so the next delegated helper is still ranked on the code tally. `EmbeddingMemoryScoreObserver.ObserveAsync` stores a complete bootstrap grade in the neighbor list only when a pending task embedding is waiting for that correlation id. When that write happens and no cost was cached, the stored cost is null.
 
-**What should change.** Give those word routes a score of their own, kept out of the code tallies (ADR-0027). A complete bootstrap grade is written under a fixed live key, `RouterDimension.ToLiveKey` of a non-code name (the default prefix makes that `live:non-code`), not under `live:code_generation` and not under the empty dimension on the bootstrap request. The readers are the same requests that reach the utility leg today: a helper whose route class applied because the client delegated the model, and a request `InferIsUtility` already marks utility. When the new key has no score yet, that request stays on the utility rule it uses today. A missing word score is not a zero. David settled question 4 on 2026-10-27: `live:non-code` is read for a delegated helper and for a request `InferIsUtility` already marks utility, and for nothing else. A helper that names its own model, a light subagent, and the orchestrator path do not read it. Question 5, whether a delegated helper stays on the cheap rule, is still open.
+**What should change.** Give those word routes a score of their own, kept out of the code tallies (ADR-0027). A complete bootstrap grade is written under a fixed live key, `RouterDimension.ToLiveKey` of a non-code name (the default prefix makes that `live:non-code`), not under `live:code_generation` and not under the empty dimension on the bootstrap request. The readers are the same requests that reach the utility leg today: a helper whose route class applied because the client delegated the model, and a request `InferIsUtility` already marks utility. David settled question 4 on 2026-10-27: `live:non-code` is read for a delegated helper and for a request `InferIsUtility` already marks utility, and for nothing else. A helper that names its own model, a light subagent, and the orchestrator path do not read it. David settled question 5 on the same day: a delegated helper stays on `UtilityRoutingPolicy`. A floor reads that helper's `live:non-code` score. If the cheap model's word score is below the floor, the router picks a better model. The floor's number is question 7. A missing word score is not 0, and whether the floor fires with no score is question 8.
 
 **Risks the code plan must keep.**
 
@@ -384,4 +389,4 @@ The grade for a word answer does not move that tally. `QualityIngress.CreateBoot
 - Do not copy `Quality ?? 0` onto a missing word grade. That `?? 0` is only the utility formula's stand-in when a priced candidate has no dimension average. A model that has never been graded on words must not look like a model that scored 0 on words.
 - Do not pour bootstrap grades into the code tallies. `RouterMemoryScoreObserver` skipping them is the rule ADR-0027 already set.
 
-**Choices only David can make.** Question 4 is settled. Questions 5 and 6 are still open. Each open question has a recommended answer. A different answer is written into the code plan before that plan is implemented. F1–F3 do not wait on them.
+**Choices only David can make.** Questions 4 and 5 are settled. Questions 6, 7, and 8 are still open. Each open question has a recommended answer. A different answer is written into the code plan before that plan is implemented. F1–F3 do not wait on them.
