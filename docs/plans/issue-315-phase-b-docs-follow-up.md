@@ -347,7 +347,7 @@ These are real code defects against a written rule. The docs pull requests name 
 
 ## 7. Questions only David can answer
 
-Questions 1, 2, 3, 4, 5, and 6 are settled. Questions 7 and 8 are open choices inside the code follow-up (§9). They do not block F1–F3. For an open question, the recommended answer is what the later plan does if David says nothing is wrong with it.
+Questions 1 through 8 are settled. None are open. Settling them is not sign-off to edit §3, and it is not the go for the code plan in §9.
 
 1. **Settled (David, 2026-10-27, on [#356](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/356)).** What should this stack of doc fixes be called? **David's answer:** keep the background writer, the `Channel<ServedRequest>` item in §4 of the approved plan, as Phase B. Call this plan a docs follow-up, not Phase B. The slices of this follow-up are F1, F2, and F3, so they are not read as Phase B. The branch and the filename still contain `phase-b`. That string is not the name of this plan.
 
@@ -357,7 +357,7 @@ Questions 1, 2, 3, 4, 5, and 6 are settled. Questions 7 and 8 are open choices i
 
 4. **Settled (David, 2026-10-27, on [#356](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/356)).** Which requests should read the new word grades (`live:non-code`)? **David's answer:** delegated helpers, and requests the cheap utility heuristic already catches, and nothing else. Delegated means `IsRouterChoiceModelName` or `SubagentSignalDetector.IsCopilotUtilityAlias`. The heuristic is `HeuristicRequestClassifier.InferIsUtility`. A helper that names its own model, a light subagent, and the orchestrator path do not read `live:non-code`.
 
-5. **Settled (David, 2026-10-27, on [#356](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/356)).** Should a delegated helper stay on the cheap rule? **David's answer:** yes. Delegated helpers stay on the cheap utility route (`UtilityRoutingPolicy`), with a floor on the `live:non-code` word score. If the cheap model's word score is below that floor, the router picks a better model. They do not move to the exploring learned path. The floor's number is question 7. A missing word score is question 8. A missing score is never 0.
+5. **Settled (David, 2026-10-27, on [#356](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/356)).** Should a delegated helper stay on the cheap rule? **David's answer:** yes. Delegated helpers stay on the cheap utility route (`UtilityRoutingPolicy`), with a floor on the `live:non-code` word score. If the cheap model's word score is below that floor, the router picks a better model. They do not move to the exploring learned path. The floor's number is question 7. A missing word score is question 8. Both are settled. A missing score is never 0.
 
 6. **Settled (David, 2026-10-27, on [#356](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/356)).** Should a code request ignore word-grade neighbors? **David's answer:** yes. Code requests ignore `live:non-code` neighbors and scores entirely. A coding pick uses coding tallies only. A word route may still read `live:non-code`. That route is the delegated helper and the utility heuristic from question 4.
 
@@ -365,15 +365,13 @@ Questions 1, 2, 3, 4, 5, and 6 are settled. Questions 7 and 8 are open choices i
 
    **Later, in the code plan, not in F1–F3.** Tag the neighbor with the recipe and skip a bootstrap neighbor when the pick is a coding pick. That skip is not in the tree. §9 carries it. This file does not edit the voter.
 
-7. **What number is the word-score floor?** David said a cheap model below the floor loses to a better model. He did not say the number. Light subagents already use a relative floor of 0.9 (`SubagentBiasOptions.LightSubagentRelativeFloor`). The utility rule also has an absolute minimum of 0.3 (`RoutingOptions.UtilityMinQualityScore`), and that minimum is a code-tally gate, not a word-score floor.
-   **Recommended answer.** Use the same relative floor as light subagents: 0.9 of the best observed `live:non-code` score. Compare it to the cheap pick's own word score. If that score is present and below the bar, pick the next cheap-rule candidate whose word score meets the bar. If none meet it, keep the original cheap pick. Do not send the request to the learned path.
+7. **Settled (David, 2026-10-27, on [#356](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/356)).** What number is the word-score floor? **David's answer:** 0.9 of the best observed `live:non-code` score. If the cheap pick's own word score is present and below that bar, take the next cheap-rule candidate that meets it. If none meet it, keep the original cheap pick. Do not send the request to the learned path. Light subagents already use a relative floor of 0.9 (`SubagentBiasOptions.LightSubagentRelativeFloor`). The utility rule's absolute minimum of 0.3 (`RoutingOptions.UtilityMinQualityScore`) is a code-tally gate, not this word-score floor.
 
-8. **The cheap model has no `live:non-code` score yet. Does the floor fire?** A missing score is not 0. `UtilityRoutingPolicy.SelectModelAsync` uses `Quality ?? 0` only as a stand-in inside the code-tally formula. Do not copy that onto a missing word score.
-   **Recommended answer.** The floor does not fire. The cheap utility pick stands until that model has a real word score. An unscored candidate is not "below the floor" and is not "a better model."
+8. **Settled (David, 2026-10-27, on [#356](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/356)).** The cheap model has no `live:non-code` score yet. Does the floor fire? **David's answer:** no. The floor does not fire, and the cheap pick stands. A missing score is never 0. `UtilityRoutingPolicy.SelectModelAsync` uses `Quality ?? 0` only as a stand-in inside the code-tally formula. Do not copy that onto a missing word score. An unscored candidate is not below the floor and is not a better model.
 
 ## 8. Sign-off
 
-David's comment on #315 or on this pull request, approving this follow-up, is the sign-off for the edits in §3. The comments on 2026-10-27 settle questions 1, 2, 3, 4, 5, and 6. They are not that sign-off. They are not the go for the code plan in §9. Questions 7 and 8 are still open. Until a comment approves this follow-up, no edit in §3 is in scope for an implementation pull request. Sign-off of this file is not sign-off to build Phase B, and it is not sign-off to change routing, and it is not a fix for the three `style=` bugs.
+David's comment on #315 or on this pull request, approving this follow-up, is the sign-off for the edits in §3. The comments on 2026-10-27 settle questions 1 through 8. None of those questions remain open. They are not that sign-off. They are not the go for the code plan in §9. Until a comment approves this follow-up, no edit in §3 is in scope for an implementation pull request. Sign-off of this file is not sign-off to build Phase B, and it is not sign-off to change routing, and it is not a fix for the three `style=` bugs.
 
 ## 9. Code follow-up: route word answers
 
@@ -389,18 +387,15 @@ Checked with CodeGraph (`codegraph_explore` on `CompositeRoutingPolicy`, `Utilit
 
 The grade for a word answer does not move that tally. `QualityIngress.CreateBootstrapRequest` builds `GradingRecipes.Bootstrap` with an empty dimension. `RouterMemoryScoreObserver.ObserveAsync` calls `RouterMemory.AddScoreAsync` only when the grade is `GradeStatus.Complete` and `GradingRecipes.IsCodeRecipe` is true. A bootstrap grade fails the recipe check, so it never enters a coding tally, and the next delegated helper is still ranked on the code tally. `EmbeddingMemoryScoreObserver.ObserveAsync` writes a neighbor only after `TryTake` returns a pending embedding, the model is non-empty, and `GradeStatus` is `Complete`. A bootstrap grade can pass those three checks. When that write happens and no cost was cached, the stored cost is null. The tree does not tag that neighbor with the recipe, and it does not skip it on a coding pick.
 
-**Settled, questions 4, 5, and 6.** These are David's answers. They are not a claim that the tree already does the new reads.
+**Settled, questions 4 through 8.** These are David's answers. They are not a claim that the tree already does the new reads.
 
 - Question 4: write a complete bootstrap grade under a fixed live key, `RouterDimension.ToLiveKey` of a non-code name (the default prefix makes that `live:non-code`). Do not write it under `live:code_generation`, and do not write it under the empty dimension on the bootstrap request. Read `live:non-code` for a delegated helper and for a request `InferIsUtility` already marks utility, and for nothing else. A helper that names its own model, a light subagent, and the orchestrator path do not read it.
 - Question 5: a delegated helper stays on `UtilityRoutingPolicy`. A floor reads that helper's `live:non-code` score. If the cheap model's word score is below the floor, the router picks a better model. The helper does not move to the learned path.
 - Question 6: a code request ignores `live:non-code` neighbors and scores entirely. A coding pick uses coding tallies only.
+- Question 7: the floor is 0.9 of the best observed `live:non-code` score. Stay inside the cheap rule. If the cheap pick's own word score is present and below that bar, take the next cheap-rule candidate whose word score meets the bar. If none meet it, keep the original cheap pick. Do not send the request to the learned path.
+- Question 8: if the cheap model has no `live:non-code` score yet, the floor does not fire and the cheap pick stands. A missing score is never 0. An unscored candidate is not below the floor and is not a better model.
 
-**Not in the tree yet.** The code plan tags the embedding neighbor with the recipe and skips a bootstrap neighbor on a coding pick. That skip is question 6's consequence. It is not in F1, F2, or F3. This file does not edit the voter.
-
-**Still open. Recommendations only. David has not picked these.**
-
-- Question 7, the floor's number. Recommended: 0.9 of the best observed `live:non-code` score, the same relative floor light subagents use. Stay inside the cheap rule. If the cheap pick's own word score is present and below that bar, take the next cheap-rule candidate whose word score meets the bar. If none meet it, keep the original cheap pick. Do not send the request to the learned path.
-- Question 8, a missing word score. Recommended: the floor does not fire. A missing score is not 0. The cheap utility pick stands until that model has a real word score. An unscored candidate is not below the floor and is not a better model.
+**Not in the tree yet.** The code plan tags the embedding neighbor with the recipe and skips a bootstrap neighbor on a coding pick. That skip is question 6's consequence. It is not in F1, F2, or F3. This file does not edit the voter. The 0.9 word-score floor and the missing-score rule are also not in the tree. They belong in the same code plan.
 
 **Risks the code plan must keep.**
 
@@ -410,4 +405,4 @@ The grade for a word answer does not move that tally. `QualityIngress.CreateBoot
 - Do not pour bootstrap grades into the code tallies. `RouterMemoryScoreObserver` calling `AddScoreAsync` only for a complete code recipe is the rule ADR-0027 already set. A bootstrap grade fails that check. It does not pass through `AddScoreAsync`.
 - On a coding pick, skip a bootstrap neighbor. That filter is not in the tree. Question 6 requires it. A word route may still read the neighbor.
 
-**Choices only David can make.** Questions 4, 5, and 6 are settled. Questions 7 and 8 are still open. Each open question has a recommended answer in §7. If David does not change that answer, the code plan uses it. A different answer is written into the code plan before that plan is implemented. F1–F3 do not wait on questions 7 and 8. They wait on his approval of this file (§8). The code plan still needs his sign-off on `docs/plans/issue-<N>-route-word-answers.md` before any code.
+**Choices only David can make.** Questions 4 through 8 are settled. This file has no open question left. F1–F3 still wait on his approval of this file (§8). The code plan still needs his sign-off on `docs/plans/issue-<N>-route-word-answers.md` before any code. That later plan copies the settled answers. It does not reopen them.
