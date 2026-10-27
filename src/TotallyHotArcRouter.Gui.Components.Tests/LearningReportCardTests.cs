@@ -55,6 +55,25 @@ public sealed class LearningReportCardTests
     }
 
     [Fact]
+    public void ReportCard_IncompleteList_DoesNotUseMockData()
+    {
+        using var ctx = CreateContext();
+
+        var cut = ctx.Render<LearningReportCard>();
+
+        cut.WaitForAssertion(assertion: () =>
+        {
+            var panel = cut.Find("[data-incomplete-grades]");
+            panel.TextContent.Should().Contain("Incomplete grades");
+            panel.TextContent.Should().Contain("Receipts that did not learn, counted by reason. A zero here means no receipt. It is not an unknown cost.");
+            panel.TextContent.Should().Contain("Incomplete grade counts are unavailable.");
+            panel.TextContent.Should().NotContain("gpt-4o-mini");
+            panel.TextContent.Should().NotContain("$12.40");
+            panel.TextContent.Should().NotContain("Demo data");
+        }, timeout: TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task Clicking_a_time_filter_switches_the_active_selection()
     {
         await using var ctx = CreateContext();
@@ -121,6 +140,17 @@ public sealed class LearningReportCardTests
             Pending.Add(pending);
             return new AsyncUnaryCall<Contract.LearningReportCardResponse>(
                 responseAsync: pending.Task,
+                responseHeadersAsync: Task.FromResult(new Metadata()),
+                getStatusFunc: () => Status.DefaultSuccess,
+                getTrailersFunc: () => [],
+                disposeAction: () => { });
+        }
+
+        public override AsyncUnaryCall<Contract.GraderEpochChartResponse> GetGraderEpochChartAsync(
+            Contract.GetGraderEpochChartRequest request, CallOptions options)
+        {
+            return new AsyncUnaryCall<Contract.GraderEpochChartResponse>(
+                responseAsync: Task.FromResult(new Contract.GraderEpochChartResponse()),
                 responseHeadersAsync: Task.FromResult(new Metadata()),
                 getStatusFunc: () => Status.DefaultSuccess,
                 getTrailersFunc: () => [],

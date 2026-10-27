@@ -130,11 +130,14 @@ queue fills under load, exactly when the evidence is most valuable; changing how
 affects traffic from that moment on, so comparing two ways of grading means waiting weeks; and the queue
 drops work rather than deferring it, so there is no way to grade more cheaply by grading later.
 
-So a background sweep re-reads the saved receipts — which kept the prompt *and* the response — regrades
-them, and writes the result back onto the row. Rows the live path never got to are picked up. Change the
-grading rules and bump `Quality:ScorerVersion`, and the whole filing cabinet is re-marked under the new
-rules, so the old and new way of grading can be compared on the *same* answers rather than on different
-months of traffic.
+So a background sweep, `QualityRescanService`, re-reads the saved receipts — which kept the prompt *and*
+the response — regrades them, and writes the result back onto the row. It extracts a fenced snippet
+through `ISignalExtractor`. A prose row with no fence is stamped with a null score and is not sent to the
+teacher. Rows the live path never got to are picked up. Change the grading rules and bump
+`Quality:ScorerVersion`, and the whole filing cabinet is re-marked under the new rules, so the old and new
+way of grading can be compared on the *same* answers rather than on different months of traffic. Issue
+#304 does not bump `Quality:ScorerVersion` (it stays `3.0`) and does not walk old receipts to grade them
+again. Already-stored grades are not rewritten when a local grader takes over.
 
 One deliberate limit: **the sweep writes only to the receipt, never to the tally sheet.** Drawer A in
 Step 5 keeps a running sum and count, so re-grading an answer that was already counted would count it
@@ -143,6 +146,14 @@ invisible in the resulting average. That is the same miscount
 [**Two graders, one grade**](#two-graders-one-grade) exists to prevent, and a second writer would undo
 it. The sweep produces a re-markable *corpus*; letting any of those marks reach the tally sheet is a
 separate decision.
+
+### Teacher phase and takeover
+
+The pinned free teacher grades first. Two local graders, one for code and one for prose, train on the
+teacher's judge score. Passing the gate writes a shadow score beside the teacher, and that shadow score
+is not the grade of record. Takeover is later: a confident answer can skip the teacher. A 5% sample and a
+low-confidence answer still call the teacher. A spot-check window that is too far from the teacher gives
+the job back to the teacher.
 
 ## Step 5 — File the grade into two memory drawers
 
@@ -433,6 +444,10 @@ A system that grades itself should be candid about what it doesn't yet measure.
   dashboard shows **structure only / learning paused**.
 - **The judge calibration against the static grader is not yet analysed.** Both scores are recorded side
   by side in `judge_shadow_scores` for exactly that purpose. The analysis has not been done.
+- **A mark on the time chart does not say it moved the line.** Local-grader takeover, the teacher taking
+  charge again, and a change of teacher, embedding model, or feature list are drawn at the time they
+  happened. They do not claim they caused the token line to move. An unknown cost is a blank on that
+  line. It is not drawn as zero.
 
 ---
 

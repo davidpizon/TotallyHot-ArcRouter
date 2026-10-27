@@ -132,6 +132,31 @@ public sealed class UsageQueryClient
     }
 
     /// <summary>
+    /// Gets epoch marks, token-efficiency buckets, and incomplete-grade counts for one window
+    /// (issue #304 phase 9). A missing ratio string is null, never 0. The page does not divide.
+    /// </summary>
+    /// <param name="from">Inclusive lower bound.</param>
+    /// <param name="to">Exclusive upper bound.</param>
+    /// <param name="width"><c>hour</c> or <c>day</c>.</param>
+    /// <param name="cancellationToken">A token to cancel the request.</param>
+    /// <exception cref="GrpcAdminException">The chart is unavailable, the range was rejected, or the request failed.</exception>
+    public async Task<GraderEpochChartView> GetGraderEpochChartAsync(
+        DateTimeOffset from, DateTimeOffset to, string width, CancellationToken cancellationToken = default)
+    {
+        var request = new Contract.GetGraderEpochChartRequest
+        {
+            From = Timestamp.FromDateTimeOffset(from),
+            To = Timestamp.FromDateTimeOffset(to),
+            Width = width
+        };
+        var response = await CallAsync(
+            (client, ct) => client.GetGraderEpochChartAsync(request, cancellationToken: ct),
+            "Could not read the grader epoch chart",
+            cancellationToken).ConfigureAwait(false);
+        return ToView(response);
+    }
+
+    /// <summary>
     /// Streams the same rollup buckets <see cref="GetRollupAsync"/> returns for an explicit range, for
     /// rendering a CSV/JSON download without buffering the whole range client-side first via a separate
     /// bulk call (§5.12). The caller assembles the presentation format (CSV text, a JSON array, etc.) from
@@ -223,5 +248,55 @@ public sealed class UsageQueryClient
                 MeanDelta: row.MeanDelta,
                 SampleSize: row.SampleSize)).ToList(),
             TotalSpendUsd: decimal.Parse(card.TotalSpendUsd, CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
+    /// Maps the chart response. A missing ratio string stays null. A marker whose time does not parse is dropped
+    /// rather than plotted at time zero.
+    /// </summary>
+    private static GraderEpochChartView ToView(Contract.GraderEpochChartResponse chart)
+    {
+        var points = chart.Points.Select(point => new GraderEpochEfficiencyPointView(
+            BucketStartUtc: point.BucketStartUtc.ToDateTimeOffset(),
+            TokensPerDollar: point.HasTokensPerDollar ? point.TokensPerDollar : null,
+            DollarsPerThousandTokens: point.HasDollarsPerThousandTokens ? point.DollarsPerThousandTokens : null,
+            KnownRows: point.KnownRows,
+            SkippedRows: point.SkippedRows)).ToList();
+
+        var markers = new List<GraderEpochMarkerView>(chart.Markers.Count);
+        foreach (var marker in chart.Markers)
+        {
+            if (!DateTimeOffset.TryParse(input: marker.AtUtc, formatProvider: CultureInfo.InvariantCulture,
+                    styles: DateTimeStyles.RoundtripKind, result: out var at))
+                continue;
+
+            markers.Add(new GraderEpochMarkerView(
+                Id: marker.Id,
+                AtUtc: at.ToUniversalTime(),
+                Kind: marker.Kind,
+                EpochType: marker.EpochType,
+                Cause: marker.Cause,
+                ArtifactId: marker.HasArtifactId ? marker.ArtifactId : null,
+                PreviousArtifactId: marker.HasPreviousArtifactId ? marker.PreviousArtifactId : null,
+                WindowSize: marker.HasWindowSize ? marker.WindowSize : null,
+                MeanMiss: marker.HasMeanMiss ? marker.MeanMiss : null,
+                PreviousTeacherModel: marker.HasPreviousTeacherModel ? marker.PreviousTeacherModel : null,
+                TeacherModel: marker.HasTeacherModel ? marker.TeacherModel : null,
+                PreviousPromptVersion: marker.HasPreviousPromptVersion ? marker.PreviousPromptVersion : null,
+                PromptVersion: marker.HasPromptVersion ? marker.PromptVersion : null,
+                RollbackMarkPresent: marker.HasRollbackMarkPresent ? marker.RollbackMarkPresent : null,
+                PreviousBgeModel: marker.HasPreviousBgeModel ? marker.PreviousBgeModel : null,
+                BgeModel: marker.HasBgeModel ? marker.BgeModel : null,
+                PreviousFeatureSchemaVersion: marker.HasPreviousFeatureSchemaVersion ? marker.PreviousFeatureSchemaVersion : null,
+                FeatureSchemaVersion: marker.HasFeatureSchemaVersion ? marker.FeatureSchemaVersion : null));
+        }
+
+        return new GraderEpochChartView(
+            Points: points,
+            Markers: markers,
+            IncompleteReceipts: chart.IncompleteReceipts,
+            IncompleteByReason: chart.IncompleteByReason
+                .Select(row => new IncompleteReasonCountView(Reason: row.Reason, Count: row.Count)).ToList(),
+            Abstained: chart.Abstained.Select(row => new AbstainedTokenCountView(Token: row.Token, Count: row.Count)).ToList());
     }
 }

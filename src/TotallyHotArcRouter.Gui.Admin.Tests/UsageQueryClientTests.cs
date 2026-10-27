@@ -299,6 +299,37 @@ public sealed class UsageQueryClientTests
             new UsageQueryClient((Contract.UsageAdminService.UsageAdminServiceClient)null!));
     }
 
+    [Fact]
+    public async Task UsageQueryClient_MissingRatio_IsNull()
+    {
+        var stub = new StubClient
+        {
+            CannedEpochResponse = new Contract.GraderEpochChartResponse
+            {
+                Points =
+                {
+                    new Contract.GraderEpochEfficiencyPoint
+                    {
+                        BucketStartUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-10-26T10:00:00Z")),
+                        KnownRows = 0,
+                        SkippedRows = 1
+                    }
+                }
+            }
+        };
+        var client = new UsageQueryClient(stub);
+
+        var chart = await client.GetGraderEpochChartAsync(
+            from: DateTimeOffset.Parse("2026-10-26T00:00:00Z"),
+            to: DateTimeOffset.Parse("2026-10-27T00:00:00Z"),
+            width: "hour",
+            cancellationToken: Ct);
+
+        var point = Assert.Single(chart.Points);
+        Assert.Null(point.TokensPerDollar);
+        Assert.Null(point.DollarsPerThousandTokens);
+    }
+
     private static Contract.UsageRollupResponse RollupResponse(params Contract.UsageRollupBucketRow[] buckets)
     {
         var response = new Contract.UsageRollupResponse();
@@ -362,6 +393,8 @@ public sealed class UsageQueryClientTests
 
         public Contract.LearningReportCardResponse CannedReportCardResponse { get; init; } = new();
 
+        public Contract.GraderEpochChartResponse CannedEpochResponse { get; init; } = new();
+
         public IReadOnlyList<Contract.UsageRollupBucketRow> ExportRows { get; init; } = [];
 
         public RpcException? Failure { get; init; }
@@ -400,6 +433,12 @@ public sealed class UsageQueryClientTests
         {
             LastReportCardRequest = request;
             return Call(CannedReportCardResponse);
+        }
+
+        public override AsyncUnaryCall<Contract.GraderEpochChartResponse> GetGraderEpochChartAsync(
+            Contract.GetGraderEpochChartRequest request, CallOptions options)
+        {
+            return Call(CannedEpochResponse);
         }
 
         public override AsyncServerStreamingCall<Contract.UsageRollupBucketRow> ExportUsageRollup(

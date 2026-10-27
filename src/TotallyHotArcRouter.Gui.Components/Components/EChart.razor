@@ -15,9 +15,24 @@
     /// </summary>
     [Parameter] [EditorRequired] public string ModelJson { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Invoked when the user clicks or taps an epoch mark. Hover stays in the chart tooltip.
+    /// The argument is the epoch row id. Charts without epoch marks never call it.
+    /// </summary>
+    [Parameter] public EventCallback<long> EpochClick { get; set; }
+
     private readonly string _elementId = "echart-" + Guid.NewGuid().ToString("N");
     private string? _rendered;
     private bool _disposed;
+    private DotNetObjectReference<EChart>? _dotNet;
+
+    /// <summary>Opens the epoch detail for <paramref name="id"/>. The chart script calls this on click and on tap.</summary>
+    /// <param name="id">The epoch row id carried on the mark.</param>
+    [JSInvokable]
+    public Task OnEpochClick(long id)
+    {
+        return EpochClick.InvokeAsync(id);
+    }
 
     /// <inheritdoc/>
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -30,9 +45,10 @@
         }
 
         _rendered = ModelJson;
+        _dotNet ??= DotNetObjectReference.Create(this);
         try
         {
-            await Js.InvokeVoidAsync(identifier: "echartsInterop.render", _elementId, ModelJson);
+            await Js.InvokeVoidAsync(identifier: "echartsInterop.render", _elementId, ModelJson, _dotNet);
         }
         catch (JSDisconnectedException)
         {
@@ -44,6 +60,8 @@
     public async ValueTask DisposeAsync()
     {
         _disposed = true;
+        _dotNet?.Dispose();
+        _dotNet = null;
         try
         {
             await Js.InvokeVoidAsync(identifier: "echartsInterop.dispose", _elementId);

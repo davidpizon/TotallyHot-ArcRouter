@@ -445,7 +445,10 @@ internal static class ProxyServiceCollectionExtensions
                         TaxonomyComparisonStore = sp.GetRequiredService<ITaxonomyComparisonStore>(),
                         // The same singleton registered above and given to RequestInterceptor/ProxyMiddleware,
                         // so the Providers tab's AdminAction/LiveTraffic warnings reflect real hot-path state.
-                        InteractionStatusStore = sp.GetRequiredService<IProviderInteractionStatusStore>()
+                        InteractionStatusStore = sp.GetRequiredService<IProviderInteractionStatusStore>(),
+                        EpochEvents = sp.GetRequiredService<IGraderEpochEventStore>(),
+                        Transcripts = sp.GetRequiredService<TranscriptDatabase>(),
+                        GradeReceipts = sp.GetRequiredService<RouterMemoryDatabase>()
                     },
 
                     // Backs the Governance > Price Sources panel's gRPC API.

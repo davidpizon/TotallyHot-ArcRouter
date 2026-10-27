@@ -632,22 +632,123 @@ window.echartsInterop = (function () {
     });
   }
 
+  function epochScatterSeries(epochs) {
+    return {
+      name: "epochs",
+      type: "effectScatter",
+      xAxisIndex: 0,
+      yAxisIndex: 0,
+      data: epochs.map((e) => ({
+        value: [e.t, 1],
+        id: e.id,
+        symbol: e.symbol || "circle",
+        tip: e.tip || [],
+        itemStyle: { color: e.color, shadowBlur: 14, shadowColor: e.color },
+      })),
+      symbolSize: 16,
+      showEffectOn: "render",
+      rippleEffect: { scale: 4.5, brushType: "stroke" },
+      z: 10,
+      tooltip: {
+        show: true,
+        trigger: "item",
+        triggerOn: "mousemove|click",
+        formatter: (p) => tooltipBox(p.data && p.data.tip ? p.data.tip[0] : "", (p.data && p.data.tip) || [], p.color),
+      },
+    };
+  }
+
+  function timeExtent(m) {
+    const times = [];
+    (m.points || []).forEach((p) => { if (p && p.t != null) times.push(p.t); });
+    (m.efficiency || []).forEach((p) => { if (p && p.t != null) times.push(p.t); });
+    (m.epochs || []).forEach((e) => { if (e && e.t != null) times.push(e.t); });
+    if (!times.length) return null;
+    return { min: Math.min.apply(null, times), max: Math.max.apply(null, times) };
+  }
+
+  // Copies the Context Buffer dot onto its own strip. The breach series and the runaway series are not this series.
+  function appendEpochOverlay(m, option) {
+    const epochs = m.epochs || [];
+    if (!epochs.length) return option;
+    const extent = timeExtent(m);
+    const metricGrid = option.grid && !Array.isArray(option.grid) ? option.grid : baseGrid();
+    const metricTop = metricGrid.top != null ? metricGrid.top : 24;
+    option.grid = [
+      { left: metricGrid.left, right: metricGrid.right, top: 4, height: 18 },
+      Object.assign({}, metricGrid, { top: metricTop + 22 }),
+    ];
+    option.xAxis = [
+      { type: "time", gridIndex: 0, show: false, min: extent.min, max: extent.max, axisPointer: { show: false } },
+      Object.assign({}, option.xAxis, { gridIndex: 1, min: extent.min, max: extent.max }),
+    ];
+    option.yAxis = [
+      { type: "value", gridIndex: 0, min: 0, max: 2, show: false },
+      Object.assign({}, option.yAxis, { gridIndex: 1 }),
+    ];
+    option.series = (option.series || []).map((s) => Object.assign({}, s, { xAxisIndex: 1, yAxisIndex: 1 }));
+    option.series.push(epochScatterSeries(epochs));
+    option.legend = { show: false };
+    return option;
+  }
+
+  function optionTokenEfficiencyLine(m) {
+    const pts = m.efficiency || [];
+    return {
+      grid: baseGrid(),
+      tooltip: Object.assign({ trigger: "axis" }, baseTooltip, {
+        formatter: (ps) => {
+          const p = pts[ps[0].dataIndex];
+          if (!p || p.gap === true) return "";
+          return tooltipBox(m.unit, p.tip, ACCENT);
+        },
+      }),
+      xAxis: timeAxis(),
+      yAxis: {
+        type: "value",
+        name: m.unit || "",
+        nameTextStyle: { color: AXIS_COLOR, fontFamily: FONT, fontSize: 10 },
+        splitLine: { lineStyle: { color: GRID_COLOR, type: "dashed" } },
+        axisLabel: {
+          color: AXIS_COLOR,
+          fontFamily: FONT,
+          fontSize: 10,
+          formatter: (v) => String(v),
+        },
+      },
+      series: [
+        {
+          type: "line",
+          connectNulls: false,
+          showSymbol: true,
+          symbol: "circle",
+          symbolSize: 6,
+          data: pts.map((p) => (p.gap === true ? [p.t, null] : [p.t, Number(p.value)])),
+          lineStyle: { color: ACCENT, width: 2.5 },
+          itemStyle: { color: ACCENT },
+        },
+      ],
+    };
+  }
+
   function buildOption(m) {
     switch (m.kind) {
       case "DualDirectionalBars":
-        return optionDualDirectionalBars(m);
+        return appendEpochOverlay(m, optionDualDirectionalBars(m));
       case "SteppedCumulativeArea":
-        return optionSteppedCumulativeArea(m);
+        return appendEpochOverlay(m, optionSteppedCumulativeArea(m));
       case "RunawayArea":
-        return optionRunawayArea(m);
+        return appendEpochOverlay(m, optionRunawayArea(m));
       case "SegmentedStepBars":
-        return optionSegmentedStepBars(m);
+        return appendEpochOverlay(m, optionSegmentedStepBars(m));
       case "CacheGradientLine":
-        return optionCacheGradientLine(m);
+        return appendEpochOverlay(m, optionCacheGradientLine(m));
       case "ZonedLatencyLine":
-        return optionZonedLatencyLine(m);
+        return appendEpochOverlay(m, optionZonedLatencyLine(m));
       case "ThresholdLine":
-        return optionThresholdLine(m);
+        return appendEpochOverlay(m, optionThresholdLine(m));
+      case "TokenEfficiencyLine":
+        return appendEpochOverlay(m, optionTokenEfficiencyLine(m));
       case "RemainingLine":
         return optionRateLimitTrendLine(m);
       case "GroupedBars":
@@ -661,13 +762,21 @@ window.echartsInterop = (function () {
 
   return {
     // Render (or re-render) the chart for `elementId` from a JSON-encoded chart model.
-    render: function (elementId, modelJson) {
+    render: function (elementId, modelJson, dotNetRef) {
       const el = document.getElementById(elementId);
       if (!el) return;
       const model = typeof modelJson === "string" ? JSON.parse(modelJson) : modelJson;
       const chart = getChart(el, elementId);
       // notMerge:true so switching metric/kind never leaves stale series behind.
       chart.setOption(buildOption(model), true);
+      chart.off("click");
+      if (dotNetRef) {
+        chart.on("click", function (params) {
+          if (params.seriesName === "epochs" && params.data && params.data.id != null) {
+            dotNetRef.invokeMethodAsync("OnEpochClick", params.data.id);
+          }
+        });
+      }
       chart.resize();
     },
     dispose: disposeChart,

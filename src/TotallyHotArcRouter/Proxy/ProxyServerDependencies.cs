@@ -348,6 +348,23 @@ public sealed record ManagementApiDependencies(IProviderConfigStore ConfigStore)
     /// here ever reads, so the Providers tab never sees any live-traffic state.
     /// </summary>
     public IProviderInteractionStatusStore? InteractionStatusStore { get; init; }
+
+    /// <summary>
+    /// Append-only grader epoch rows for the Cost Analytics marks. The inner host cannot resolve this
+    /// singleton itself. Null makes <c>GetGraderEpochChart</c> unavailable.
+    /// </summary>
+    public IGraderEpochEventStore? EpochEvents { get; init; }
+
+    /// <summary>
+    /// The transcript file the token-efficiency line reads. Null makes <c>GetGraderEpochChart</c> unavailable.
+    /// </summary>
+    public TranscriptDatabase? Transcripts { get; init; }
+
+    /// <summary>
+    /// The router-memory file that holds <c>grade_receipts</c> for the incomplete-count list.
+    /// Null makes <c>GetGraderEpochChart</c> unavailable.
+    /// </summary>
+    public RouterMemoryDatabase? GradeReceipts { get; init; }
 }
 
 /// <summary>

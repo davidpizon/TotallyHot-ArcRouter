@@ -166,6 +166,29 @@ public sealed class UsageStore : AdminStoreBase<UsageQueryClient>
     }
 
     /// <summary>
+    /// Loads epoch marks, token efficiency, and incomplete-grade counts for one window. Uncached, same
+    /// reason as <see cref="LoadLearningReportCardAsync"/>: the window is now-minus-N and new rows arrive.
+    /// A failure returns null so the page can say the read is unavailable instead of drawing zeros.
+    /// </summary>
+    /// <param name="from">Inclusive lower bound.</param>
+    /// <param name="to">Exclusive upper bound.</param>
+    /// <param name="width"><c>hour</c> or <c>day</c>.</param>
+    /// <param name="cancellationToken">Cancels the load.</param>
+    /// <returns>The snapshot, or null when the proxy is unreachable or the chart is unavailable.</returns>
+    public async Task<GraderEpochChartView?> LoadGraderEpochChartAsync(
+        DateTimeOffset from, DateTimeOffset to, string width, CancellationToken cancellationToken = default)
+    {
+        GraderEpochChartView? result = null;
+        await LoadGuardedAsync(
+            async ct => result = await Client
+                .GetGraderEpochChartAsync(from: from, to: to, width: width, cancellationToken: ct)
+                .ConfigureAwait(false),
+            "read the grader epoch chart",
+            cancellationToken).ConfigureAwait(false);
+        return result;
+    }
+
+    /// <summary>
     /// Cache key for <see cref="_rollupCache"/>: a rollup's full request shape, so distinct filter selections never
     /// collide.
     /// </summary>

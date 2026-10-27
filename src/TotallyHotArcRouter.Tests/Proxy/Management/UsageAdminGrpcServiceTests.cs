@@ -1,8 +1,15 @@
+using System.Globalization;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Grpc.Core.Testing;
+using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Judge;
+using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Management;
+using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Telemetry;
+using TotallyHot.ArcRouter.Tests;
 using TotallyHot.ArcRouter.Tests.PriceCatalog;
 using TotallyHot.ArcRouter.Transcripts;
 using Contract = TotallyHot.ArcRouter.Admin.Contract;
@@ -208,6 +215,61 @@ public sealed class UsageAdminGrpcServiceTests
         Assert.Equal(expected: StatusCode.InvalidArgument, actual: ex.StatusCode);
     }
 
+    [Fact]
+    public async Task GetGraderEpochChart_NullQuery_IsUnavailable()
+    {
+        var service = new UsageAdminGrpcService(new ManagementReportingService(null, null));
+        var now = DateTimeOffset.UtcNow;
+
+        var ex = await Assert.ThrowsAsync<RpcException>(() => service.GetGraderEpochChart(
+            new Contract.GetGraderEpochChartRequest
+            {
+                From = Timestamp.FromDateTimeOffset(now.AddHours(-1)),
+                To = Timestamp.FromDateTimeOffset(now)
+            },
+            CreateContext()));
+
+        Assert.Equal(expected: StatusCode.Unavailable, actual: ex.StatusCode);
+        Assert.Equal(expected: "The grader epoch chart is not available.", actual: ex.Status.Detail);
+    }
+
+    [Fact]
+    public async Task GetGraderEpochChart_MissingFrom_IsInvalidArgument()
+    {
+        var service = new UsageAdminGrpcService(new ManagementReportingService(null, null));
+
+        var ex = await Assert.ThrowsAsync<RpcException>(() => service.GetGraderEpochChart(
+            new Contract.GetGraderEpochChartRequest { To = Timestamp.FromDateTimeOffset(DateTimeOffset.UtcNow) },
+            CreateContext()));
+
+        Assert.Equal(expected: StatusCode.InvalidArgument, actual: ex.StatusCode);
+        Assert.Equal(expected: "'from' is required.", actual: ex.Status.Detail);
+    }
+
+    [Fact]
+    public async Task GetGraderEpochChart_GapOmitsBothRatios()
+    {
+        using var files = new GapFiles();
+        var service = new UsageAdminGrpcService(
+            new ManagementReportingService(null, null),
+            new GraderEpochChartQuery(files.Epochs, files.Transcripts, files.Memory));
+
+        var response = await service.GetGraderEpochChart(
+            new Contract.GetGraderEpochChartRequest
+            {
+                From = Timestamp.FromDateTimeOffset(files.From),
+                To = Timestamp.FromDateTimeOffset(files.To),
+                Width = "hour"
+            },
+            CreateContext());
+
+        var point = Assert.Single(response.Points);
+        Assert.False(point.HasTokensPerDollar);
+        Assert.False(point.HasDollarsPerThousandTokens);
+        Assert.NotEqual(expected: "0", actual: point.TokensPerDollar);
+        Assert.NotEqual(expected: "0", actual: point.DollarsPerThousandTokens);
+    }
+
     private sealed class FakeServerStreamWriter<T> : IServerStreamWriter<T>
     {
         public List<T> Written { get; } = [];
@@ -239,6 +301,65 @@ public sealed class UsageAdminGrpcServiceTests
             DateTimeOffset since, string? sessionId = null, CancellationToken cancellationToken = default)
         {
             return Task.FromResult<IReadOnlyList<TaxonomyComparisonRecord>>([]);
+        }
+    }
+
+    /// <summary>One null-cost transcript in its own pair of database files. The gap must not become "0".</summary>
+    private sealed class GapFiles : IDisposable
+    {
+        private readonly string _directory = Path.Combine(path1: TestScratchDirectory.RunRoot, path2: Guid.NewGuid().ToString("N"));
+
+        public GapFiles()
+        {
+            Directory.CreateDirectory(_directory);
+            From = new DateTimeOffset(year: 2026, month: 10, day: 26, hour: 10, minute: 0, second: 0, offset: TimeSpan.Zero);
+            To = From.AddHours(1);
+            Transcripts = new TranscriptDatabase(Options.Create(new StorageOptions
+            {
+                TranscriptDatabasePath = Path.Combine(path1: _directory, path2: "transcripts.db")
+            }));
+            Memory = new RouterMemoryDatabase(Options.Create(new RoutingOptions
+            {
+                EmbeddingMemoryDatabasePath = Path.Combine(path1: _directory, path2: "router.db")
+            }));
+            Memory.EnsureCreated();
+            Epochs = new SqliteGraderEpochEventStore(Memory);
+            Transcripts.EnsureCreated();
+            using var connection = Transcripts.OpenConnection();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                                  INSERT INTO request_transcripts (
+                                      correlation_id, created_at_utc, requested_model, routed_model,
+                                      is_utility, is_exploratory, propensity, input_tokens, output_tokens, cost)
+                                  VALUES ('gap', $at, 'm', 'm', 0, 0, 0, 10, 10, NULL);
+                                  """;
+            command.Parameters.AddWithValue(
+                parameterName: "$at",
+                value: From.AddMinutes(5).ToString(format: "O", formatProvider: CultureInfo.InvariantCulture));
+            command.ExecuteNonQuery();
+        }
+
+        public DateTimeOffset From { get; }
+
+        public DateTimeOffset To { get; }
+
+        public TranscriptDatabase Transcripts { get; }
+
+        public RouterMemoryDatabase Memory { get; }
+
+        public SqliteGraderEpochEventStore Epochs { get; }
+
+        public void Dispose()
+        {
+            try
+            {
+                if (Directory.Exists(_directory))
+                    Directory.Delete(path: _directory, recursive: true);
+            }
+            catch (IOException)
+            {
+                // Best-effort cleanup.
+            }
         }
     }
 }
