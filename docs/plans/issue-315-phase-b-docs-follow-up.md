@@ -1,4 +1,4 @@
-# Plan: #315 docs follow-up after the grader epochs (Phase B proposal)
+# Plan: #315 docs follow-up after the grader epochs
 
 > **For agentic workers:** Do not start these edits until David signs off on this file, by a comment on [#315](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/315) or on the pull request that adds this file. The issue being open is not approval. Steps use checkbox (`- [ ]`) syntax. This file changes markdown only.
 
@@ -8,17 +8,17 @@
 **Tree this plan was read against:** `origin/main` at `37dfd1d0` (merge of [#351](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/351), 2026-10-27). Re-read the cited symbol before editing. A shifted line is not a reason to change the decision.
 **Engines:** CodeGraph (`npx @colbymchenry/codegraph init -y`, 1,381 files, 25,813 nodes) and Serena (`find_symbol` / `get_symbols_overview`, session `8356b620`, C# language server). Both returned source. Serena was not skipped. The index was built on `eb909749` (after [#353](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/353), before #351). `QualityIngress`, `QualityRescanService`, `QualityScorer`, `LocalGradeTakeover`, and `GraderEpochOptions` did not change in #351, so those line numbers are the tree at `37dfd1d0`. The #351 chart files were read on this branch after `git fetch` of `37dfd1d0`. CodeGraph's two explore calls did not include those new files.
 
-This pull request **closes nothing**. It does not cancel the writer in the approved plan.
+This pull request **closes nothing**. It does not cancel Phase B. Phase B is the writer in the approved plan. This file is the docs follow-up. It is not Phase B.
 
-## 0. Where Phase B came from
+## 0. Where this follow-up sits
 
-Phase A and the original Phase B are written down. They are not an inference.
+Phase A and Phase B are written down. They are not an inference. David settled the name of this file on 2026-10-27 (question 1).
 
 | What | Where | What it is |
 |---|---|---|
 | Phase A | [#317](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/317) and the leftovers in [#318](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/318), both merged 2026-10-21 | Docs for original items #1–#3 and #5–#26. The plan is [`issue-315-docs-code-reconciliation.md`](issue-315-docs-code-reconciliation.md), merged in [#316](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/316). |
-| Original Phase B | Same plan, §4, and the issue body | One **code** change: item #4, the bounded `Channel<ServedRequest>` writer (ADR-0018 and ADR-0019). Not a docs pass. Not started. |
-| This file | Not in the issue, the comments (there are none), or any pull request | A **proposed** docs pass. The sentences Phase A wrote, and the living docs beside them, that later merges made false. |
+| Phase B | Same plan, §4, and the issue body. Confirmed by David on 2026-10-27, on [#356](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/356). | One **code** change: item #4, the bounded `Channel<ServedRequest>` writer (ADR-0018 and ADR-0019). Not a docs pass. Not started. |
+| This file | Not in the issue or its comments | The **docs follow-up**. The sentences Phase A wrote, and the living docs beside them, that later merges made false. Not Phase B. |
 
 Later merges this file accounts for:
 
@@ -30,28 +30,28 @@ Later merges this file accounts for:
 | [#351](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/351) | Epoch marks, token-efficiency pill, incomplete-grade card. It updated `dashboard.md`, `how-it-learns.md`, and the evaluator plan, and left other sentences on seven pills. |
 | [#353](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/353) | #350 test change. The plan file still says implementation has not started. |
 
-**Open question 1** in §7 is the name. Until David answers, implementers treat this file as extra work beside §4 of the approved plan. They do not delete §4. They do not build the writer from this file.
+**Question 1 is settled** (David, 2026-10-27, on #356). Phase B stays the writer in §4 of the approved plan. This file is the docs follow-up. Implementers do not delete §4. They do not build the writer from this file. The branch and this filename still contain `phase-b`. That string is history. It is not the name of this plan.
 
 ## 1. Split
 
 ```mermaid
 flowchart LR
   P["This plan, after sign-off"]
-  A["PR B1: grading sentences"]
-  B["PR B2: charts and the style list"]
-  C["PR B3: plan status lines"]
+  A["PR F1: grading sentences"]
+  B["PR F2: charts and the style list"]
+  C["PR F3: plan status lines"]
   P --> A
   P --> B
   P --> C
 ```
 
-Three pull requests. They do not depend on each other. Each is docs only. None of them contains the writer.
+Three pull requests, F1, F2, and F3. Those ids are slices of this follow-up. They are not Phase B. They do not depend on each other. Each is docs only. None of them contains the writer.
 
 | PR | Items | Files |
 |---|---|---|
-| **B1. What gets graded** | §3.1–§3.7, §3.12 | `README.md`, `docs/how-it-learns.md`, `docs/router/quality-verifier-architecture.md`, `docs/research/subagent-and-helper-routing-evidence.md`, `docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md`, `docs/adr/0027-grade-non-coding-responses-on-a-bootstrap-recipe-and-keep-them-out-of-code-tallies.md`, `docs/plans/issue-293-graders-judge-against-the-question.md`, `docs/plans/issue-163-subagent-aware-routing.md`, `docs/plans/issue-304-grade-non-coding-responses.md`, `docs/plans/issue-315-docs-code-reconciliation.md`, `docs/plans/issue-304-phase-8-grader-takeover.md` |
-| **B2. The eighth pill** | §3.8–§3.10, §3.13 | `docs/gui/dashboard.md`, `docs/gui/cost-analytics-visualization-spec.md`, `docs/gui/DESIGN.md`, `docs/plans/issue-304-phase-9-epoch-time-graph.md` |
-| **B3. The test plan's status** | §3.11 | `docs/plans/issue-350-flaky-grader-epoch-phase7-tests.md` |
+| **F1. What gets graded** | §3.1–§3.7, §3.12 | `README.md`, `docs/how-it-learns.md`, `docs/router/quality-verifier-architecture.md`, `docs/research/subagent-and-helper-routing-evidence.md`, `docs/adr/0022-route-harness-subagent-and-helper-traffic-by-kind.md`, `docs/adr/0027-grade-non-coding-responses-on-a-bootstrap-recipe-and-keep-them-out-of-code-tallies.md`, `docs/plans/issue-293-graders-judge-against-the-question.md`, `docs/plans/issue-163-subagent-aware-routing.md`, `docs/plans/issue-304-grade-non-coding-responses.md`, `docs/plans/issue-315-docs-code-reconciliation.md`, `docs/plans/issue-304-phase-8-grader-takeover.md` |
+| **F2. The eighth pill** | §3.8–§3.10, §3.13 | `docs/gui/dashboard.md`, `docs/gui/cost-analytics-visualization-spec.md`, `docs/gui/DESIGN.md`, `docs/plans/issue-304-phase-9-epoch-time-graph.md` |
+| **F3. The test plan's status** | §3.11 | `docs/plans/issue-350-flaky-grader-epoch-phase7-tests.md` |
 
 ## 2. Rules for every edit
 
@@ -295,7 +295,7 @@ Leave the Throttle bullet's "drops rather than defers". Add one clause: the drop
 
 ### 3.13 The phase 9 plan still says implementation is waiting
 
-**File.** `docs/plans/issue-304-phase-9-epoch-time-graph.md`, the status line (line 3). This is why the file is on PR B2. §3.6 amends the parent #304 plan. It does not edit this file.
+**File.** `docs/plans/issue-304-phase-9-epoch-time-graph.md`, the status line (line 3). This is why the file is on PR F2. §3.6 amends the parent #304 plan. It does not edit this file.
 
 **What the doc claims now.** "**Status:** Draft. … Implementation waits until David signs off this plan."
 
@@ -311,12 +311,12 @@ Do not rewrite the goal, the constraints, or the task list.
 
 ## 4. Out of scope
 
-- Item #4, the `Channel<ServedRequest>` writer. It stays §4 of [`issue-315-docs-code-reconciliation.md`](issue-315-docs-code-reconciliation.md).
+- Phase B, item #4, the `Channel<ServedRequest>` writer. It stays §4 of [`issue-315-docs-code-reconciliation.md`](issue-315-docs-code-reconciliation.md). This follow-up does not build it and does not rename it.
 - Editing `.cs`, `.razor`, `.js`, `.proto`, tests, or workflows. §6 records the code bugs and does not fix them.
 - Marking G3 shipped. `docs/router/geval-shadow-scoring-plan.md`, `docs/README.md`, and `src/PLAN.md` say G3 is not in the tree because the old non-executable carve-out is not what shipped, and they already say the embedding-memory flag matches `JudgeScore.HasValue` after #319. #304 is a different recipe. Do not collapse those two sentences into "G3 shipped".
 - Rewriting `telemetry.md`'s service list. It matches the `service` lines and the `MapGrpcService` calls. `GetGraderEpochChart` is an RPC on `UsageAdminService`, which is already named.
 - `docs/plans/router-evaluator-and-live-pricing.md` §14. #351 added the three bullets the phase 9 plan required (teacher, separate epoch, `ScorerVersion` stays `3.0`). They match the code. Do not edit them.
-- Port numbers, ACLs, Serilog `WriteTo`, `management-token.txt`, adaptive-routing default, metadata-only session lists, and the other Phase A items whose sentences were not touched by #304, #319, #326, #350, or #351. A full second pass over those is not this plan. If an edit in B1–B3 happens to sit next to one and the sentence is still true, leave it.
+- Port numbers, ACLs, Serilog `WriteTo`, `management-token.txt`, adaptive-routing default, metadata-only session lists, and the other Phase A items whose sentences were not touched by #304, #319, #326, #350, or #351. A full second pass over those is not this plan. If an edit in F1–F3 happens to sit next to one and the sentence is still true, leave it.
 - Accepting ADR-0017, building `GetSessionTurnDetails`, or changing helper routing (question 2).
 
 ## 5. Checked and left alone
@@ -336,14 +336,13 @@ Do not rewrite the goal, the constraints, or the task list.
 These are real code defects against a written rule. The docs pull requests name them. They do not add an exception that makes the defect look intended. A later code pull request, with its own plan if the standing rule requires one, can move the styles into classes or fix the comment.
 
 1. **Static `style=` attributes** from #351, listed in §3.10: `max-height:180px;overflow:auto`, `min-height:44px`, and `min-width:16rem;max-width:22rem`. `DESIGN.md` §7 forbids static layout in `style=`. Do not add them to the sanctioned list.
-2. **`IQualityIngress` summaries** (`src/TotallyHotArcRouter.Quality/Ingress/IQualityIngress.cs`). The type summary says the ingress "extracts a runnable snippet, and enqueues it". The `TryIngest` summary says it "samples, extracts, and enqueues a snippet". The live path also enqueues a bootstrap request with empty code, and it stores terminal incomplete receipts. Those two summaries describe the pre-#304 path. The parameter docs on `QualityIngestContext` already name `deferred_to_loop`, `no_text`, `empty`, and `loop_unlinked`. Fixing the two summaries is a source edit. Not in B1–B3.
+2. **`IQualityIngress` summaries** (`src/TotallyHotArcRouter.Quality/Ingress/IQualityIngress.cs`). The type summary says the ingress "extracts a runnable snippet, and enqueues it". The `TryIngest` summary says it "samples, extracts, and enqueues a snippet". The live path also enqueues a bootstrap request with empty code, and it stores terminal incomplete receipts. Those two summaries describe the pre-#304 path. The parameter docs on `QualityIngestContext` already name `deferred_to_loop`, `no_text`, `empty`, and `loop_unlinked`. Fixing the two summaries is a source edit. Not in F1–F3.
 
 ## 7. Questions only David can answer
 
-Each recommended answer is what this plan does if he says nothing is wrong with the recommendation. A different answer changes the named section before implementation.
+Question 1 is settled. Questions 2 and 3 are still open. For those two, the recommended answer is what this plan does if David says nothing is wrong with it. A different answer changes the named section before implementation.
 
-1. **What should this stack of doc fixes be called?** The first plan already uses the name Phase B for a program: a background saver for request records (item #4). This file is only about words in the docs. Nobody wrote this docs list down before today.
-   **Recommended answer.** Keep the writer where it is, in §4 of the approved plan. Do not build it from this file, and do not delete §4. Call this file the docs follow-up. The filename says `phase-b` because that is the name this task was given. If you want the writer to keep the name Phase B all by itself, say so and a later edit renames this file to Phase C. Until that comment, implementers use this file for the docs and the old §4 for the writer.
+1. **Settled (David, 2026-10-27, on [#356](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/356)).** What should this stack of doc fixes be called? **David's answer:** keep the background writer, the `Channel<ServedRequest>` item in §4 of the approved plan, as Phase B. Call this plan a docs follow-up, not Phase B. The slices of this follow-up are F1, F2, and F3, so they are not read as Phase B. The branch and the filename still contain `phase-b`. That string is not the name of this plan.
 
 2. **Helpers can be graded now when they answer in words. Should we route them differently?** The old decision said helpers are never graded, which is why a helper quality floor never fires. A helper that returns text and no code fence can be graded now. A helper that only calls tools still gets no score.
    **Recommended answer.** No. Fix the sentences (§3.3 and §3.4). Leave the route-by-kind decision alone. Changing who serves a helper is a new decision, not a doc fix.
@@ -353,4 +352,4 @@ Each recommended answer is what this plan does if he says nothing is wrong with 
 
 ## 8. Sign-off
 
-David's comment on #315 or on this pull request is the sign-off. Until that comment exists, no edit in §3 is in scope for an implementation pull request. Sign-off of this file is not sign-off to build the writer, and sign-off of the writer is not sign-off of these doc edits.
+David's comment on #315 or on this pull request, approving this follow-up, is the sign-off for the edits in §3. The comment on 2026-10-27 settles question 1 only. It is not that sign-off. Questions 2 and 3 are still open. Until a comment approves this follow-up, no edit in §3 is in scope for an implementation pull request. Sign-off of this file is not sign-off to build Phase B, and sign-off of Phase B is not sign-off of these doc edits.
