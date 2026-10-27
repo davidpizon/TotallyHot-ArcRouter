@@ -257,9 +257,9 @@ Three files. Each gets a dated amendment. Do not rewrite the rest of the plan.
 | `CostAnalytics.razor` line 150 | `style="min-height:44px"` | Static layout. Not a sanctioned exception. |
 | `LearningReportCard.razor` line 86 | `style="min-width:16rem;max-width:22rem"` | Static layout. Not a sanctioned exception. |
 
-The design rule in the same section is that static layout is a CSS class, not a `style=` attribute. These three are code bugs. §6 says so. This pull request does not edit the `.razor` files, and it does not add the three attributes to the allowed list.
+The design rule in the same section is that static layout is a CSS class, not a `style=` attribute. These three are code bugs. §6 says so. David settled this on 2026-10-27 (question 3, [#356](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/356)): log them as bugs, and do not loosen `DESIGN.md` §7 or add them to the allowed list. This pull request does not edit the `.razor` files. David is filing the bug issue. Its number is not in this file yet. Until it is, the placeholder is `#<N>`. Replace `<N>` with the real number and link `https://github.com/davidpizon/TotallyHot-ArcRouter/issues/<N>`. Do not open that issue from this plan.
 
-**Correction.** Add `background:@entry.Color` to the data-driven color list. Replace "Every remaining `style=` attribute … is one of the sanctioned exceptions" with: every `style=` except the three static attributes above is one of the sanctioned exceptions, and those three violate §7. Name the file and the attribute. Point at §6 of this plan. Do not delete them in this pull request.
+**Correction.** Add `background:@entry.Color` to the data-driven color list. Replace "Every remaining `style=` attribute … is one of the sanctioned exceptions" with: every `style=` except the three static attributes above is one of the sanctioned exceptions, and those three violate §7. Name the file and the attribute. Point at §6 of this plan and at issue `#<N>`. Do not delete the attributes in this pull request. Do not add `max-height:180px`, `min-height:44px`, or `min-width:16rem;max-width:22rem` to the allowed list.
 
 **Verify.** Re-run `git grep -n 'style=' -- 'src/TotallyHotArcRouter.Gui.Components/Components/*.razor'`. Every hit is either on the sanctioned list or named as one of the three bugs. Search `DESIGN.md` for a sentence that calls `max-height:180px` an allowed exception. It is not there.
 
@@ -336,19 +336,18 @@ Do not rewrite the goal, the constraints, or the task list.
 
 These are real code defects against a written rule. The docs pull requests name them. They do not add an exception that makes the defect look intended. A later code pull request, with its own plan if the standing rule requires one, can move the styles into classes or fix the comment.
 
-1. **Static `style=` attributes** from #351, listed in §3.10: `max-height:180px;overflow:auto`, `min-height:44px`, and `min-width:16rem;max-width:22rem`. `DESIGN.md` §7 forbids static layout in `style=`. Do not add them to the sanctioned list.
+1. **Static `style=` attributes** from #351, listed in §3.10. David settled this on 2026-10-27 (question 3): log them as bugs. Do not loosen `DESIGN.md` §7, and do not add them to the sanctioned list. The three are `CostAnalytics.razor` line 147 `style="max-height:180px;overflow:auto"`, `CostAnalytics.razor` line 150 `style="min-height:44px"`, and `LearningReportCard.razor` line 86 `style="min-width:16rem;max-width:22rem"`. Tracked as issue `#<N>`. David is filing that issue. This plan does not open it and does not edit the `.razor` files. When the number exists, replace `<N>` here and in §3.10 with the link `https://github.com/davidpizon/TotallyHot-ArcRouter/issues/<N>`.
 2. **`IQualityIngress` summaries** (`src/TotallyHotArcRouter.Quality/Ingress/IQualityIngress.cs`). The type summary says the ingress "extracts a runnable snippet, and enqueues it". The `TryIngest` summary says it "samples, extracts, and enqueues a snippet". The live path also enqueues a bootstrap request with empty code, and it stores terminal incomplete receipts. Those two summaries describe the pre-#304 path. The parameter docs on `QualityIngestContext` already name `deferred_to_loop`, `no_text`, `empty`, and `loop_unlinked`. Fixing the two summaries is a source edit. Not in F1–F3.
 
 ## 7. Questions only David can answer
 
-Questions 1 and 2 are settled. Question 3 is still open. Questions 4, 5, and 6 are open choices inside the code follow-up (§9). They do not block F1–F3. For an open question, the recommended answer is what the later plan does if David says nothing is wrong with it.
+Questions 1, 2, and 3 are settled. Questions 4, 5, and 6 are open choices inside the code follow-up (§9). They do not block F1–F3. For an open question, the recommended answer is what the later plan does if David says nothing is wrong with it.
 
 1. **Settled (David, 2026-10-27, on [#356](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/356)).** What should this stack of doc fixes be called? **David's answer:** keep the background writer, the `Channel<ServedRequest>` item in §4 of the approved plan, as Phase B. Call this plan a docs follow-up, not Phase B. The slices of this follow-up are F1, F2, and F3, so they are not read as Phase B. The branch and the filename still contain `phase-b`. That string is not the name of this plan.
 
 2. **Settled (David, 2026-10-27, on [#356](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/356)).** Helpers can be graded now when they answer in words. Should routing change? **David's answer:** fix the doc sentences, and change how word (non-coding) answers are routed now that they can be graded. The sentences stay in F1 (§3.3 and §3.4). The routing change is code. It is §9. It does not go in F1, F2, or F3.
 
-3. **Three pictures use a `style=` the design rules do not allow. Should the docs allow them?** They set a box's height, a button's height, and a card's width in the markup. The rule says that kind of layout lives in the stylesheet.
-   **Recommended answer.** Do not allow them in the docs. Write them down as bugs (§6). A later code change moves them into CSS classes. This plan does not touch the Razor files.
+3. **Settled (David, 2026-10-27, on [#356](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/356)).** Three pictures use a `style=` the design rules do not allow. Should the docs allow them? **David's answer:** log the three static attributes as bugs, and do not loosen `DESIGN.md` §7 or add them to the allowed list. They are `CostAnalytics.razor` line 147 (`max-height:180px;overflow:auto`), `CostAnalytics.razor` line 150 (`min-height:44px`), and `LearningReportCard.razor` line 86 (`min-width:16rem;max-width:22rem`). F2 records them in §3.10 and §6. It does not edit the `.razor` files. David is filing the bug issue. Until that number exists, the placeholder is `#<N>`.
 
 4. **Which requests should read the new word grades?** The classifier has no "this is prose" switch. `KeywordDimensionInferrer.Infer` returns `code_generation` when no keyword matches. A harness helper is not on the utility leg unless the client delegated the model (`IsRouterChoiceModelName` or `IsCopilotUtilityAlias`).
    **Recommended answer.** Only those delegated helpers, plus a request `InferIsUtility` already marks utility. Leave a helper that names its own model, light subagents, and the orchestrator path on the routes they have today.
@@ -361,7 +360,7 @@ Questions 1 and 2 are settled. Question 3 is still open. Questions 4, 5, and 6 a
 
 ## 8. Sign-off
 
-David's comment on #315 or on this pull request, approving this follow-up, is the sign-off for the edits in §3. The comments on 2026-10-27 settle question 1 and the direction of question 2. They are not that sign-off. They are not the go for the code plan in §9. Question 3 is still open. Until a comment approves this follow-up, no edit in §3 is in scope for an implementation pull request. Sign-off of this file is not sign-off to build Phase B, and it is not sign-off to change routing.
+David's comment on #315 or on this pull request, approving this follow-up, is the sign-off for the edits in §3. The comments on 2026-10-27 settle questions 1, 2, and 3. They are not that sign-off. They are not the go for the code plan in §9. Questions 4, 5, and 6 are still open. Until a comment approves this follow-up, no edit in §3 is in scope for an implementation pull request. Sign-off of this file is not sign-off to build Phase B, and it is not sign-off to change routing, and it is not a fix for the three `style=` bugs.
 
 ## 9. Code follow-up: route word answers
 
