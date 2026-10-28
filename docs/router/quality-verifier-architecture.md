@@ -199,12 +199,16 @@ re-extracting from the stored response text, grading, and stamping the score and
 
 Three things the live trigger structurally cannot do, and this can:
 
-- **Backfill.** A response dropped because `QueueCapacity` was full is never graded — and the queue fills
-  under load, which is exactly when the evidence matters most.
+- **Backfill.** A response the live queue could not take is not scored on that path. `QualityIngress.TryIngest`
+  stores an `Incomplete` receipt with reason `queue_full` and does not enqueue a grade. `TryEnqueue` does not
+  retry. With `TranscriptOptions.EnableQualityRescan` left at its default (`false`), that saved transcript is
+  not graded later either. When the switch is on, `LoadPendingQualityRescanAsync` can select the row, and
+  `QualityRescanService.RescanOneAsync` scores it when `Extract` returns a fence.
 - **Re-run.** Changing a weight or adding a grader otherwise only affects traffic from that moment on.
   Bumping `Quality:ScorerVersion` re-scores the corpus already captured, so two scorers can be compared
   on the same rows instead of on different weeks of traffic.
-- **Throttle.** The live queue drops rather than defers. A bounded periodic sweep can batch and run
+- **Throttle.** The live queue drops rather than defers. The drop now also stores the `queue_full` receipt,
+  and it still does not put the work back on the queue. A bounded periodic sweep can batch and run
   off-peak, which is what makes an LLM grader affordable at all.
 
 **It deliberately does not write to router memory.** `IQualityScoreObserver`'s contract is that

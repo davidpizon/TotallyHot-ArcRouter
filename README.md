@@ -323,16 +323,31 @@ against are the work of Zhou et al. If you use them, cite their paper:
 }
 ```
 
-**The quality-scoring judge** is an implementation of G-Eval, by Liu et al. Arc
-Router grades fenced code blocks. `QualityIngress` does not enqueue a turn that
-sampling drops, whose `ISignalExtractor.Extract` returns null, or while quality
-scoring is disabled. `CodeBlockSignalExtractor` returns null when the response
-has no fenced code block. The G-Eval judge (`GEvalJudgeClient`) joins only when
-the result has a correlation id, the judge is enabled, and a free backbone
-resolves (`JudgeAvailability`). Static syntax and analysis can score a block
-with no judge. Grading every response, including prose, is open issue
-[#304](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/304), not
-current behavior. When the judge does run, it follows this recipe directly: a
+**The quality-scoring judge** is an implementation of G-Eval, by Liu et al. A fenced
+block is graded on the code recipe (`CodeBlockSignalExtractor.Extract` returns it,
+`GradingRecipes.Code`). Unfenced text is not dropped on the live path.
+`QualityIngress.TryIngest` builds a bootstrap request (`CreateBootstrapRequest`, empty
+dimension, `GradingRecipes.Bootstrap`) when `Extract` returns null, and enqueues that
+request. The ingress still skips a turn when quality scoring is disabled or when
+sampling drops it. It stores a terminal `Incomplete` receipt, and does not enqueue a
+score, for a tool call with no text (`deferred_to_loop`), empty text (`no_text` or
+`empty`), a text reply whose newest request turn is tool results (`loop_unlinked`),
+or a full queue (`queue_full`). The background sweep is a different path:
+`QualityRescanService.RescanOneAsync` still stamps a null score when `Extract`
+returns null and does not build a bootstrap request. The G-Eval judge
+(`GEvalJudgeClient`) joins only when the result has a correlation id, the judge is
+enabled, and a free backbone resolves (`JudgeAvailability`). Static syntax and
+analysis can score a block with no judge. When a kind has a matching accepted
+grader-epoch artifact, `GraderEpochOptions.TakeoverEnabled` (default true) lets a
+confident row that the 5% draw did not pick skip that judge. `JudgeScore` stays
+empty on that row, and `QualityScorer.Score` uses `LocalScore` on the judge axis. A
+5% sample and a low-confidence row still call the teacher. If that call returns a
+score, `QualityScoreAggregator.CollapseLocalGrade` turns `AllowLocalGradeOfRecord`
+off and the scorer uses `JudgeScore`. A spot-check whose teacher call fails keeps
+`LocalScore`. A low-confidence miss does not. Issue
+[#304](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/304) is this
+behavior. It is not a promise that every response receives a score. When the judge
+does run, it follows this recipe directly: a
 per-dimension criteria prompt, a 1–5 form-filling score, and — the part that
 matters most — a **probability-weighted** score taken over the output-token
 logprobs rather than the single digit the model happened to sample. If you use

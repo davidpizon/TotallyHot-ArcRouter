@@ -104,14 +104,15 @@ title and summary requests carry whatever the main model is, which is `auto` und
 
 From the code, not from docs:
 
-- **Only responses with a fenced code block are graded.** `CodeBlockSignalExtractor.Extract` returns nothing when
-  a response has no fenced code block, and `QualityIngress.TryIngest` then drops it. The LLM judges are started
-  downstream of the same intake (`QualityScoreAggregator`, `GraderDispatcher`).
-- **Consequences.** Helper output (titles, commit messages, labels, classifier verdicts) is effectively never
-  graded, so a helper quality floor never fires, and helpers write nothing into router memory. Subagent turns are
-  mostly tool calls and are rarely graded. A quality floor for subagents therefore reads scores earned by graded
-  traffic in the same task category, mostly main-agent code answers: a proxy for "can this model code", not for
-  "can it drive tools".
+- **Fenced blocks and unfenced text are graded on different recipes.** `CodeBlockSignalExtractor.Extract` returns
+  nothing when a response has no fenced code block. On the live path, `QualityIngress.TryIngest` does not drop
+  that null. It calls `CreateBootstrapRequest` (empty code, `GradingRecipes.Bootstrap`) and enqueues that
+  request. A fenced block stays on `GradingRecipes.Code`.
+- **A score is still not guaranteed, so a floor still protects only a scored turn.** A tool call with no text is
+  stored as `Incomplete` with reason `deferred_to_loop` and does not learn. A text reply whose newest request
+  turn is tool results is `loop_unlinked` and does not learn. Helper output that is only a tool call still writes
+  nothing into router memory. Helper output that is unfenced text can be graded. Subagent turns that are only
+  tool calls are not graded. A quality floor reads scores that exist. It does not fire for a turn with no score.
 - **The two routing paths.** The learned path (`OrchestratorRoutingPolicy`) ranks on quality only, explores 5% of
   the time, and records the true selection probability. The utility rule (`UtilityRoutingPolicy`) ranks on
   `ε₁·quality + ε₂·price` with `ε₁ = 1.0`, `ε₂ = −0.1` per USD per million tokens, never explores, and records a

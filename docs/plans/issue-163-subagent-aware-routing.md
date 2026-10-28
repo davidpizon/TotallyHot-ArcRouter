@@ -31,6 +31,7 @@ The first design sent every signal to `UtilityRoutingPolicy`, which ranks mostly
 2. **The router can't grade most of this traffic.** Only responses with a fenced code block are graded (`CodeBlockSignalExtractor`).
    - Helper output is never graded, so a helper quality floor never fires.
    - Subagent turns, which are mostly tool calls, are rarely graded.
+   - **Amendment (2026-10-27, #315).** That was the measurement when this design was written. The live path now calls `CreateBootstrapRequest` when `Extract` returns null. `QualityRescanService.RescanOneAsync` still stamps a null score. Tool-only exceptions are in [§3.3 of the #315 docs follow-up](issue-315-phase-b-docs-follow-up.md#33-the-subagent-evidence-doc-still-says-only-fences-are-graded). This note does not change the approved route.
 3. **One helper class hides a safety decision.**
    - Claude Code's `auxiliary` request class includes classifiers.
    - The auto-mode classifier, which decides whether an action may run, deliberately runs on Sonnet 5 rather than a cheap model.
