@@ -83,6 +83,8 @@ With: outside forced single-model mode, an unresolved or administratively disabl
 
 With: Arc Router grades fenced code blocks. `QualityIngress` does not enqueue a turn that sampling drops, or whose `ISignalExtractor.Extract` returns null. `CodeBlockSignalExtractor` returns null when the response has no fenced code block. The G-Eval judge joins only when it is enabled and a free backbone resolves (`JudgeAvailability`). Static syntax and analysis can score a block with no judge. The sentence that every response is graded, including prose, is open issue #304, not current behavior.
 
+**Amendment (2026-10-27, #315).** The paragraph above is the edit that was correct at `d3452c4a`. After #304 phases 0–9 it is not the current rule. The current README text is [§3.1 of the docs follow-up](issue-315-phase-b-docs-follow-up.md#31-readme-still-says-prose-is-not-graded--original-item-3). §4 of this plan (the `Channel<ServedRequest>` writer) is unchanged.
+
 Keep the G-Eval recipe citation for the judge that does run.
 
 **Verify.** `QualityIngress` returns without enqueue on a dropped sample or a null extract. `CodeBlockSignalExtractor` returns null with no fence. `JudgeAvailability` gates the judge. No edit under `src/TotallyHotArcRouter.Quality/`.

@@ -22,7 +22,8 @@ showed that this conflicts with how the harness vendors treat the same traffic:
 - They put only helpers on cheap models.
 - They keep a safety classifier that shares the helper request class on a strong model.
 
-It also showed that this router cannot grade most of this traffic.
+It also showed that this router cannot grade most of this traffic. That sentence is the same 2026-10-02
+measurement. The live path is the amendment under Decision Drivers.
 
 The choice is hard to reverse quietly: it decides which model does real agent work, and it changes what the router
 learns. That makes it a decision rather than an implementation detail.
@@ -45,6 +46,15 @@ learns. That makes it a decision rather than an implementation detail.
   - Only responses with a fenced code block are graded (`CodeBlockSignalExtractor`).
   - Helpers are never graded, and subagent turns rarely are.
   - A quality floor protects only where grades exist.
+
+  **Amendment (2026-10-27, #315).** The three bullets above are the measurement in the accepted text
+  (decided 2026-10-02, merged in #186 on 2026-10-03). They are not the live path.
+  `QualityIngress.TryIngest` now calls `CreateBootstrapRequest` when `Extract` returns null, so unfenced
+  text can be graded on `GradingRecipes.Bootstrap`. A tool-only turn (`deferred_to_loop`) and a text reply
+  after tool results (`loop_unlinked`) are `Incomplete` and do not learn. A quality floor still protects
+  only a turn that received a score. The route in the tree today is still route by kind. A later code plan
+  ([§9 of the #315 docs follow-up](../plans/issue-315-phase-b-docs-follow-up.md#9-code-follow-up-route-word-answers))
+  changes how word answers are routed. This note does not make that change.
 - **No behavior change without a signal**, and no reroute of an explicit model pick (ADR-0005).
 - **Don't add learning bias.** A path that never explores and records propensity 1.0 must not carry traffic whose
   grades feed router memory.
@@ -144,7 +154,9 @@ the class table, the options and the tests.
 
 - Good, because it keeps helpers cheap and protects subagents.
 - Bad, because the floor that matters most never fires. Helpers are never graded, so "no helper floor" and "0.3"
-  behave the same, and the real risk (the classifier) is not addressed.
+  behave the same, and the real risk (the classifier) is not addressed. That sentence is the measurement in the
+  accepted text. Today's measurement is the amendment under Decision Drivers. It is not a reason to reopen
+  option 3.
 - Bad, because an absolute subagent floor (for example 0.6) has no evidence behind its value and ignores how good
   the best available model is in that category.
 - Bad, because it sends every subagent to the price-weighted rule, including the open-ended ones vendors keep on

@@ -10,8 +10,11 @@
 
 [ADR-0026](0026-grade-a-response-only-against-its-question-and-learn-only-from-complete-grades.md) decides
 how a code reply is graded and when that grade may train the router. It does not decide what happens when
-the reply has no fenced code block. Today `CodeBlockSignalExtractor.Extract` returns null, `QualityIngress.TryIngest`
-enqueues nothing, and `QualityRescanService` stamps a null score. The judge never sees the row. A prose
+the reply has no fenced code block. On 2026-10-23, before phase 0, `CodeBlockSignalExtractor.Extract` returns null,
+`QualityIngress.TryIngest` enqueues nothing, and `QualityRescanService` stamps a null score. The judge never sees
+the row on that tree. After [#334](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/334), a null extract
+calls `CreateBootstrapRequest` and is enqueued. `QualityRescanService.RescanOneAsync` still stamps a null score.
+A prose
 question that does get a fence is filed under a `RouterDimension` (default `code_generation`), so any later
 grade would land in a code tally.
 
@@ -74,6 +77,11 @@ The rules, in short (full design in the plan):
    the 2026-10-23 decision recorded in the plan's §12; narrowed by Amendment 2: phase 7 acceptance is
    shadow only; phase 8 fills the judge axis). This implementation ships the teacher path;
    takeover is a later phase of the same plan, not a second ADR.
+   **Note (2026-10-27, #315).** Phase 8 landed in [#348](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/348)
+   and phase 9 landed in [#351](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/351). "Later phase" means
+   later than phase 7. That later phase is in the tree.
+   [Amendment 3](#amendment-3-2026-10-26-phase-8-takeover-is-approved) is the procedure that shipped. It is not a
+   second ADR, and it is not still waiting.
    [Amendment 2](#amendment-2-2026-10-26-phase-7-acceptance-stays-in-shadow) splits the acceptance sentence:
    phase 7 stores the artifact as accepted and leaves it in shadow, and the teacher stays the grade of
    record. Phase 8 is when the artifact fills the judge axis.

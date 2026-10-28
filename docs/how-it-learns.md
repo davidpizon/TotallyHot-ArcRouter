@@ -125,10 +125,12 @@ Two independent graders run — neither of which executes the code. See
 When that grade arrives, the receipt is found by correlation id and the blank gets filled in.
 
 **Grading can also run later, from the filed receipts themselves.** The live trigger has three limits it
-cannot escape: a response dropped because the grading queue was full is never graded *at all* — and the
-queue fills under load, exactly when the evidence is most valuable; changing how grading works only
-affects traffic from that moment on, so comparing two ways of grading means waiting weeks; and the queue
-drops work rather than deferring it, so there is no way to grade more cheaply by grading later.
+cannot escape: a full queue stores a terminal `Incomplete` receipt with reason `queue_full` and does not
+enqueue a score — that receipt does not learn, and the queue fills under load, exactly when the evidence
+is most valuable; changing how grading works does not rewrite old traffic unless `Quality:ScorerVersion`
+is bumped, and issue #304 does not bump it (`QualityOptions.ScorerVersion` defaults to `3.0`), so
+comparing two ways of grading means waiting for new traffic; and the queue still does not defer the work,
+so there is no way to grade more cheaply by putting the same turn back on the live queue.
 
 So a background sweep, `QualityRescanService`, re-reads the saved receipts — which kept the prompt *and*
 the response — regrades them, and writes the result back onto the row. It extracts a fenced snippet
@@ -149,11 +151,27 @@ separate decision.
 
 ### Teacher phase and takeover
 
-The pinned free teacher grades first. Two local graders, one for code and one for prose, train on the
-teacher's judge score. Passing the gate writes a shadow score beside the teacher, and that shadow score
-is not the grade of record. Takeover is later: a confident answer can skip the teacher. A 5% sample and a
-low-confidence answer still call the teacher. A spot-check window that is too far from the teacher gives
-the job back to the teacher.
+The pinned free teacher grades first until a kind has a matching accepted artifact. Two local graders, one
+for code recipes and one for non-code recipes (kind folders `code` and `non-code`), train on the teacher's
+judge score. `GraderEpochOptions.TakeoverEnabled` defaults to true. When that kind has a matching accepted
+artifact, the feature schema matches, and no `rollback.json` is present, a confident answer that the 5%
+draw did not pick skips the teacher. `LocalGradeTakeover.ApplyAsync` sets `LocalScore` as the grade of
+record and leaves `JudgeScore` empty. `ShadowLocalScoreObserver` does not skip the teacher. `ObserveAsync`
+still runs when the grade is finalized, including on that skip. `Apply` then returns without a new write,
+because `LocalScore` is already that artifact's score. `Apply` also returns without writing when
+`TryReadAccepted` finds no artifact, or when that artifact does not match the current teacher, prompt
+version, and BGE id. The stamp beside a teacher score is the other case: the teacher graded the row, a
+matching artifact exists, and `LocalScore` was not already that artifact. That stamp does not change who
+the grade of record is. `TakeoverEnabled` set to false, and a `rollback.json` marker, are why
+`LocalGradeTakeover` still calls the teacher. They are not a path where the shadow observer stamps a score
+with no artifact. Turning `TakeoverEnabled` off clears the local-grade flag on every row, including a drawn
+one. A `rollback.json` marker clears that flag unless the row was the 5% draw. A 5% sample and a
+low-confidence answer still call the teacher. A teacher score that comes back wins:
+`QualityScoreAggregator.CollapseLocalGrade` turns `AllowLocalGradeOfRecord` off when `JudgeScore` is set. A
+spot-check whose teacher call fails keeps `LocalScore`. A low-confidence miss does not. A window of at
+least 50 spot-check rows whose mean absolute difference from the teacher is greater than
+`SpotCheckRollbackMae` (default 0.10) gives that kind back to the teacher. A difference equal to 0.10 does
+not.
 
 ## Step 5 — File the grade into two memory drawers
 
