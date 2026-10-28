@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Stop `Retirement_TeacherModelPromptBgeOrFeatureSchema_RetiresArtifact` from failing CI when one SDCA draw misses the holdout bars after retirement has already deleted the accepted pointer.
+**Goal:** Stop `Retirement_TeacherModelPromptBgeOrFeatureSchema_RetiresArtifact` from failing CI when one SDCA draw misses the holdout bars after retirement has already deleted the accepted pointer. Approval covers both tasks: the test retry (Task 1) and the gate-failed log sentence (Task 2). Task 2 is a one-sentence production log change plus the assertions and the phase 7 plan row that quote it.
 
 **Architecture:** The tick retires a mismatched artifact before it fits. A fit that misses the gate files the candidate under `failed/` and does not write `accepted.json`. The pointer stays absent, `TryReadAccepted` returns null, and no exception is logged. The trainer's draw is not deterministic, and on this fixture about one draw in 1,800 misses the MAE bar. The test ticks once. The fix ticks again, a few times, only when the logs say the code kind missed the gate. A skip or an unreadable pointer still fails on the first tick.
 
@@ -226,15 +226,17 @@ private static bool ShouldRetick(IReadOnlyList<string> serviceLines, IReadOnlyLi
 }
 ```
 
-In `AssertRetire`, replace the `await world.Tick()` plus `Assert.NotNull(accepted)` with:
+`ServiceLog.Lines` and `StoreLog.Lines` append for the life of the world. Do not clear them between attempts. A `gate failed for kind code` line from an earlier attempt stays, which is why a later attempt may still retry. A `skipped code:` line from any attempt stops the loop.
+
+In `AssertRetire`, delete the `await world.Tick()`, the `TryReadAccepted` line, and `Assert.NotNull(accepted)` together. Leave one assignment:
 
 ```csharp
 var accepted = await RequireCodeArtifact(world, $"No accepted artifact after retirement of {field}.");
 ```
 
-Keep the four asserts that follow (`NotEqual`, `Null` previous id, `File.Exists`, the retirement log line). They already describe the contract.
+Keep the four asserts that follow (`NotEqual`, `Null` previous id, `File.Exists`, the retirement log line). They already describe the contract. A second `var accepted` left behind the helper does not compile.
 
-In `Bootstrap_NotRun_WhenNoComparableLiveArtifact`, replace `await world.Tick()` and `Assert.NotNull(accepted)` with:
+In `Bootstrap_NotRun_WhenNoComparableLiveArtifact`, delete `await world.Tick()`, the `TryReadAccepted` line, and `Assert.NotNull(accepted)` together. Leave one assignment:
 
 ```csharp
 var accepted = await RequireCodeArtifact(world, "No accepted artifact after retiring a non-comparable teacher.");
@@ -296,27 +298,28 @@ host=src/TotallyHotArcRouter.Tests/bin/Release/net10.0/TotallyHotArcRouter.Tests
 fail=0
 for i in $(seq 1 100); do
   "$host" -method TotallyHot.ArcRouter.Tests.Judge.GraderEpochPhase7Tests.Retirement_TeacherModelPromptBgeOrFeatureSchema_RetiresArtifact \
-          -method TotallyHot.ArcRouter.Tests.Judge.GraderEpochPhase7Tests.Bootstrap_NotRun_WhenNoComparableLiveArtifact \
+    || fail=$((fail+1))
+  "$host" -method TotallyHot.ArcRouter.Tests.Judge.GraderEpochPhase7Tests.Bootstrap_NotRun_WhenNoComparableLiveArtifact \
     || fail=$((fail+1))
 done
 echo "failures=$fail"
 ```
 
-Repeated `-method` switches select either method, the same way the #350 plan's repeated `-class` switches select either class. A host that runs nothing under two `-method` switches is combining them with AND. Run each method in its own command and add the failure counts.
+One `-method` per invocation. Two hundred invocations, one hundred of each method.
 
-Expected: `failures=0`. One hundred runs can easily contain zero gate misses (about one method run in 450). Green runs show the helpers did not break the contract. They do not by themselves show a retry absorbing a miss. The theory in Task 1 is what locks the branch. If a run fails, stop. Paste the assert message into the implementation pull request. A message that contains `gate failed for kind code` means the four attempts were not enough or `ShouldRetick` returned false, and this plan's bound needs a new measurement before anyone raises it. A message that contains `could not be read` or `unreadable` is the branch this plan did not reproduce. Do not retune the helper to swallow it.
+Expected: `failures=0`. One hundred runs of the retirement method can easily contain zero gate misses (about one run in 450). Green runs show the helpers did not break the contract. They do not by themselves show a retry absorbing a miss. The theory in Task 1 is what locks the branch. If a run fails, stop. Paste the assert message into the implementation pull request. A message that contains `gate failed for kind code` means the four attempts were not enough or `ShouldRetick` returned false, and this plan's bound needs a new measurement before anyone raises it. A message that contains `could not be read` or `unreadable` is the branch this plan did not reproduce. Do not retune the helper to swallow it.
 
 - [ ] **Step 2: Run the three log-sentence tests and the theory once**
 
 ```bash
-src/TotallyHotArcRouter.Tests/bin/Release/net10.0/TotallyHotArcRouter.Tests \
-  -method TotallyHot.ArcRouter.Tests.Judge.GraderEpochPhase7Tests.ShouldRetick_OnlyAfterACodeGateMiss \
-  -method TotallyHot.ArcRouter.Tests.Judge.GraderEpochPhase7Tests.GateFail_BelowBar_DoesNotAcceptOrRewriteGrades \
-  -method TotallyHot.ArcRouter.Tests.Judge.GraderEpochPhase7Tests.Holdout_ZeroVariance_SpearmanNull_GateFails \
-  -method TotallyHot.ArcRouter.Tests.Judge.GraderEpochPhase7Tests.Bootstrap_ReplacesOnlyWhenLowerBoundGreaterThanZero
+host=src/TotallyHotArcRouter.Tests/bin/Release/net10.0/TotallyHotArcRouter.Tests
+"$host" -method TotallyHot.ArcRouter.Tests.Judge.GraderEpochPhase7Tests.ShouldRetick_OnlyAfterACodeGateMiss
+"$host" -method TotallyHot.ArcRouter.Tests.Judge.GraderEpochPhase7Tests.GateFail_BelowBar_DoesNotAcceptOrRewriteGrades
+"$host" -method TotallyHot.ArcRouter.Tests.Judge.GraderEpochPhase7Tests.Holdout_ZeroVariance_SpearmanNull_GateFails
+"$host" -method TotallyHot.ArcRouter.Tests.Judge.GraderEpochPhase7Tests.Bootstrap_ReplacesOnlyWhenLowerBoundGreaterThanZero
 ```
 
-Expected: 0 failed. `GateFail_BelowBar` and `Holdout_ZeroVariance` expect a miss on every run. They must keep failing the gate and must not go through `RequireCodeArtifact`.
+One `-method` per invocation. Expected: each command exits 0. `GateFail_BelowBar` and `Holdout_ZeroVariance` expect a miss on every run. They must keep failing the gate and must not go through `RequireCodeArtifact`.
 
 - [ ] **Step 3: One full assembly run**
 
