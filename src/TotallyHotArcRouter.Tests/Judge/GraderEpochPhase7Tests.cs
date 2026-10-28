@@ -47,7 +47,7 @@ public class GraderEpochPhase7Tests
         Assert.Null(world.Store.TryReadAccepted(GraderEpochKinds.Code));
         Assert.Equal(grades, world.ScoreSnapshot());
         Assert.Equal(logreg, world.LogRegBytes());
-        Assert.Contains(world.ServiceLog.Lines, line => line.Contains("left unchanged", StringComparison.Ordinal));
+        Assert.Contains(world.ServiceLog.Lines, line => line.Contains("No new accepted artifact was written.", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -210,7 +210,7 @@ public class GraderEpochPhase7Tests
         Assert.Null(failed.Status);
         Assert.Contains(world.ServiceLog.Lines, line =>
             line.Contains("Spearman null", StringComparison.Ordinal) &&
-            line.Contains("left unchanged", StringComparison.Ordinal));
+            line.Contains("No new accepted artifact was written.", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -292,7 +292,7 @@ public class GraderEpochPhase7Tests
             Assert.NotNull(failed.BootstrapLow);
             Assert.True(failed.BootstrapLow <= 0);
             var stayedOnTheBound = stays.ServiceLog.Lines.Any(line =>
-                line.Contains("left unchanged", StringComparison.Ordinal) &&
+                line.Contains("No new accepted artifact was written.", StringComparison.Ordinal) &&
                 line.Contains("bootstrap low ", StringComparison.Ordinal) &&
                 !line.Contains("bootstrap low null", StringComparison.Ordinal));
             Assert.True(stayedOnTheBound, string.Join(Environment.NewLine, stays.ServiceLog.Lines));

@@ -254,7 +254,7 @@ Serilog, through the hosted service's `ILogger`. Every template is a static stri
 | Job disabled, or a tick skipped | Information | The skip reason: disabled, below `MinimumLabels`, holdout shorter than `HoldoutSize`, or fewer than `MinimumTrainingRows` after session exclusion. Include the kind and the counts that were known. |
 | Spot-check window | Information | Every tick, for each kind: the spot-check window is not active in phase 7. This line is not conditional on a fit. Phase 8 deletes this template. |
 | Retirement | Information | Kind, artifact id, and which field mismatched: teacher model, prompt version, BGE model id, or feature schema. |
-| Gate failed | Information | Kind, holdout MAE, Spearman (or a null marker), eligible / holdout / training / session-excluded counts, bootstrap ends or null, and that the accepted artifact was left unchanged. |
+| Gate failed | Information | Kind, holdout MAE, Spearman (or a null marker), eligible / holdout / training / session-excluded counts, bootstrap ends or null, and that no new accepted artifact was written, including when a retirement already cleared the pointer. |
 | Gate passed | Information | Kind, old artifact id or null, new artifact id, the same scores and counts, both bootstrap ends or null, and the status `accepted, shadow`. |
 | Length | Information | Kind, artifact id, and the correlation or a null marker. |
 | Shadow score | Debug | Correlation id, artifact id, and `LocalScore`. One line per stamp. |
