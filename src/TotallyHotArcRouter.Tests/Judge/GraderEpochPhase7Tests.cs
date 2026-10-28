@@ -220,10 +220,7 @@ public class GraderEpochPhase7Tests
         await world.SeedLinear(count: 24, holdout: 6);
         world.AcceptLayout(weightOnResponse0: 0f, bias: 0f, teacherModel: "retired-teacher");
 
-        await world.Tick();
-
-        var accepted = world.Store.TryReadAccepted(GraderEpochKinds.Code);
-        Assert.NotNull(accepted);
+        var accepted = await RequireCodeArtifact(world, "No accepted artifact after retiring a non-comparable teacher.");
         Assert.Null(accepted.PreviousArtifactId);
         Assert.Null(accepted.BootstrapLow);
         Assert.Null(accepted.BootstrapHigh);
@@ -1032,10 +1029,7 @@ public class GraderEpochPhase7Tests
         var retired = world.AcceptLayout(weightOnResponse0: 0f, bias: 0f, schemaVersion: schemaVersion);
         mutate(world);
 
-        await world.Tick();
-
-        var accepted = world.Store.TryReadAccepted(GraderEpochKinds.Code);
-        Assert.NotNull(accepted);
+        var accepted = await RequireCodeArtifact(world, $"No accepted artifact after retirement of {field}.");
         Assert.NotEqual(retired, accepted.ArtifactId);
         Assert.Null(accepted.PreviousArtifactId);
         Assert.True(File.Exists(world.ArtifactPath(GraderEpochKinds.Code, retired)));
@@ -1050,6 +1044,21 @@ public class GraderEpochPhase7Tests
         return records.Single(record => record.CorrelationId == correlationId).Blob;
     }
 
+    [Theory]
+    [InlineData("Grader epoch gate failed for kind code. Holdout MAE 0.14.", "", true)]
+    [InlineData("Grader epoch gate failed for kind code.\nGrader epoch skipped non-code: eligible labels 0 are below the minimum 24.", "", true)]
+    [InlineData("Grader epoch skipped code: eligible labels 23 are below the minimum 24.", "", false)]
+    [InlineData("Grader epoch gate failed for kind non-code.", "", false)]
+    [InlineData("", "Grader epoch accepted artifact for kind code could not be read.", false)]
+    [InlineData("", "Grader epoch accepted pointer for kind code is unreadable; treating it as no artifact.", false)]
+    [InlineData("", "", false)]
+    public void ShouldRetick_OnlyAfterACodeGateMiss(string service, string store, bool expected)
+    {
+        var serviceLines = service.Length == 0 ? [] : service.Split('\n');
+        var storeLines = store.Length == 0 ? [] : store.Split('\n');
+        Assert.Equal(expected, ShouldRetick(serviceLines, storeLines));
+    }
+
     /// <summary>
     /// Fails the test when the tick caught an exception and kept going.
     /// The formatted line includes the exception, so the CI log shows the type and message.
@@ -1059,6 +1068,57 @@ public class GraderEpochPhase7Tests
     {
         var thrown = lines.Where(line => line.Contains("threw unexpectedly", StringComparison.Ordinal)).ToArray();
         Assert.True(thrown.Length == 0, string.Join(Environment.NewLine, thrown));
+    }
+
+    private const int RetickAttempts = 4;
+
+    /// <summary>
+    /// Ticks until the code kind has an accepted artifact, or the logs say this miss is not a bad draw.
+    /// Retirement deletes the pointer before the fit. A fit that misses the holdout bars does not write
+    /// a new pointer, and the trainer's draw is not deterministic. Another tick is another draw.
+    /// The loop stops when the code kind was skipped or the store could not read the pointer, so those
+    /// failures still surface on the first tick.
+    /// </summary>
+    /// <param name="world">The world whose tick and logs to use.</param>
+    /// <param name="whenMissing">Text placed above the logs when no artifact appears.</param>
+    /// <returns>The accepted code artifact.</returns>
+    private static async Task<GraderEpochArtifact> RequireCodeArtifact(World world, string whenMissing)
+    {
+        for (var attempt = 0; attempt < RetickAttempts; attempt++)
+        {
+            await world.Tick();
+            var accepted = world.Store.TryReadAccepted(GraderEpochKinds.Code);
+            if (accepted is not null) return accepted;
+            if (!ShouldRetick(world.ServiceLog.Lines, world.StoreLog.Lines)) break;
+        }
+
+        Assert.Fail(whenMissing + Environment.NewLine + string.Join(Environment.NewLine,
+            world.ServiceLog.Lines.Concat(world.StoreLog.Lines)));
+        // Assert.Fail carries DoesNotReturn, and this compiler still requires a throw for CS0161.
+        throw new System.Diagnostics.UnreachableException();
+    }
+
+    /// <summary>
+    /// True when the code kind missed the holdout bars and the store did not report an unreadable pointer.
+    /// A skipped code kind, an unreadable code pointer, and a miss on the non-code kind are false.
+    /// </summary>
+    /// <param name="serviceLines">Lines from the hosted-service logger.</param>
+    /// <param name="storeLines">Lines from the artifact-store logger.</param>
+    /// <returns>True when another tick is the right next step.</returns>
+    private static bool ShouldRetick(IReadOnlyList<string> serviceLines, IReadOnlyList<string> storeLines)
+    {
+        var kind = GraderEpochKinds.Code;
+        if (storeLines.Any(line =>
+                line.Contains($"for kind {kind}", StringComparison.Ordinal) &&
+                (line.Contains("unreadable", StringComparison.Ordinal) ||
+                 line.Contains("could not be read", StringComparison.Ordinal))))
+            return false;
+
+        if (serviceLines.Any(line => line.Contains($"skipped {kind}:", StringComparison.Ordinal)))
+            return false;
+
+        return serviceLines.Any(line =>
+            line.Contains($"gate failed for kind {kind}", StringComparison.Ordinal));
     }
 
     internal sealed class World : IDisposable
