@@ -237,7 +237,7 @@ public sealed class GraderEpochHostedService : BackgroundService
 
         _logger.LogInformation(
             message:
-            "Grader epoch gate failed for kind {Kind}. Holdout MAE {HoldoutMae}, Spearman {Spearman}, eligible {EligibleCount}, holdout {HoldoutCount}, training {TrainingCount}, session-excluded {SessionExcludedCount}, bootstrap low {BootstrapLow}, bootstrap high {BootstrapHigh}. The accepted artifact was left unchanged.",
+            "Grader epoch gate failed for kind {Kind}. Holdout MAE {HoldoutMae}, Spearman {Spearman}, eligible {EligibleCount}, holdout {HoldoutCount}, training {TrainingCount}, session-excluded {SessionExcludedCount}, bootstrap low {BootstrapLow}, bootstrap high {BootstrapHigh}. No new accepted artifact was written.",
             kind,
             Marker(outcome.Artifact.HoldoutMae),
             Marker(outcome.Artifact.Spearman),
