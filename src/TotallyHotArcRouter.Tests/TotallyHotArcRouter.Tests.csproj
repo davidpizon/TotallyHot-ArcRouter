@@ -15,7 +15,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.13" />
+    <PackageReference Include="AWSSDK.BedrockRuntime" Version="4.0.101.17" />
     <!-- AwesomeAssertions: the Apache-2.0 community fork of FluentAssertions. FluentAssertions 8.x moved to
          the Xceed Community License, which permits non-commercial use only and restricts *use*, not just
          redistribution - so it would constrain how this repository itself may be licensed and used. See
@@ -31,8 +31,8 @@
          the gRPC-Web wrapper are properties of the real Kestrel pipeline, so they need a real bound
          ProxyServer and a real network client to prove - the same client library the eventual Blazor
          WASM GUI (ADR-0011) will use. -->
-    <PackageReference Include="Grpc.Net.Client" Version="2.84.0" />
-    <PackageReference Include="Grpc.Net.Client.Web" Version="2.84.0" />
+    <PackageReference Include="Grpc.Net.Client" Version="2.85.0" />
+    <PackageReference Include="Grpc.Net.Client.Web" Version="2.85.0" />
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.12.0" />
     <PackageReference Include="Moq" Version="4.21.0" />
     <PackageReference Include="xunit.v3" Version="4.0.2" />
