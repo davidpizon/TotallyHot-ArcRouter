@@ -9,6 +9,66 @@
 TotallyHot Arc Router routes coding tasks to different backend models under a
 performance-cost tradeoff.
 
+## Compared with GitHub Copilot Fusion
+
+[GitHub Copilot Fusion](https://docs.github.com/en/copilot/concepts/models/copilot-fusion)
+(page read 2026-11-20) is Copilot's runtime router. You select Fusion in the model picker instead
+of one model. For each prompt it chooses an execution pattern and the models that run it. The
+patterns on that page are single (one model), cascade (an efficient model drafts, a judge accepts
+the draft or escalates to a stronger model), and critique (one model drafts, other models critique
+in parallel, and the original model revises). The effort levels on that page are Fusion Standard,
+Fusion High, and Fusion Max. Fusion Fast is not a user choice; the page says it is used only in
+Visual Studio Code inline chat. Fusion is generally available in Visual Studio Code, Copilot CLI,
+the GitHub Copilot app, JetBrains IDEs, and Copilot on GitHub.com. While a request runs you can
+follow each step; the text you are shown is the final response. Hovering the effort-level name
+under that response lists the models used. The page says routing follows natural cache boundaries
+and large changes in conversation complexity "to avoid additional cache-related costs without
+quality improvements," and that the main conversation stays on the same model when it can. A model that only
+assists, such as a reviewer, receives only the context it needs.
+
+Arc Router is a local proxy. These are the differences the current code implements:
+
+- **OpenAI-compatible clients, plus presets for four harnesses.** One base URL and
+  `"model": "auto"` ([Point a client](#point-a-client)). Presets exist for Claude Code, Cursor,
+  Codex, and Aider ([harness presets](docs/install/harnesses/README.md)). Claude Code speaks
+  Anthropic Messages at the router origin. That native `/v1/messages` path is not rewritten into
+  Chat Completions. On that path, when the router chose the model, it can still remove request
+  features the chosen model's capability record rejects.
+  Cursor's preset is the OpenAI base-URL override; that guide says Tab completion stays on Cursor's
+  models. Codex posts to `/v1/responses`. A provider that does not reshape the URL keeps the client
+  path (`UpstreamRequestBuilder`); the Codex guide says the router does not translate a Responses
+  body into Chat Completions. Aider uses Chat Completions.
+- **Self-hosted.** You run the process: a Windows service, a Linux systemd service, a macOS
+  LaunchDaemon, or the published container image ([Install](#install)). Calls still go to the
+  upstream providers you configure.
+- **Grades served answers and keeps the grades it produces.** After the response has been sent,
+  `QualityIngress` may score it off the request path. Sampling, a disabled scorer, a full queue,
+  or a body with nothing to grade can skip that score. The grade is written back onto that
+  request's transcript, which already stores the model that served
+  ([How Arc Router learns](docs/how-it-learns.md)). A complete code grade can also update live
+  score memory, under the model name the client sent. An `auto` request is filed under `auto`.
+  The kNN voter skips a neighbor that is not a configured candidate, so that row does not vote
+  for a backend.
+- **The cost, the model that served, and why it differs from the requested name.** A response the
+  router has tied to a hop carries `X-ArcRouter-Requested-Model`, `X-ArcRouter-Routed-Model`, and
+  `X-ArcRouter-Substitution-Reason` (`None`, `AutoSelect`, `UnresolvedName`, `ModelStopped`,
+  `CircuitOpen`, or `Failover`). That includes the hop that served the body, a semantic-cache hit,
+  and the explicit circuit-open 503. A model-not-found 400, a routing-disabled 503, and a
+  budget-exhausted 402 do not carry those headers. When usage is priced, the cost is recorded for
+  the model that served. On the Sessions tab the response row is labeled with the routed model, the
+  Message tab shows the turn cost when known, and the Routing tab shows requested → routed. `None`
+  and `AutoSelect` are not repeated as a warning.
+
+Cascade, named effort levels, keeping a model until a cache break, and a per-answer "models used"
+line are proposals. They are not features of this build:
+
+- [Cascade mode](docs/router/todo-cascade-mode.md)
+- [Effort levels](docs/router/todo-effort-levels.md)
+- [Switch models at a cache break](docs/router/todo-cache-break-model-switch.md)
+- [A models-used line](docs/router/todo-dashboard-models-used.md)
+
+Fusion's critique pattern is also absent here. There is no proposal for it.
+
 ## Point a client
 
 One OpenAI-compatible base URL. Send `"model": "auto"` and the router picks the model.

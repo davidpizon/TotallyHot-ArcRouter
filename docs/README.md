@@ -49,9 +49,9 @@ product overview. Closed execution plans live in [`archive/`](archive/README.md)
 ## Design docs
 
 The roadmap of remaining work is [`../src/PLAN.md`](../src/PLAN.md). Every living document under
-[`router/`](router/) is indexed below — this table is **exhaustive**, so a new router doc belongs here
-too. GUI docs live in [`gui/`](gui/) and are not indexed here. Archived stubs remain at their old
-paths so existing links resolve.
+[`router/`](router/) is indexed in the tables below — the index is **exhaustive**, so a new router
+doc belongs in one of them. GUI docs live in [`gui/`](gui/) and are not indexed here. Archived stubs
+remain at their old paths so existing links resolve.
 
 ### Routing and learning
 
@@ -123,6 +123,17 @@ paths so existing links resolve.
 | [`router/codebase-health-survey-2026-09-28.md`](router/codebase-health-survey-2026-09-28.md) | Point-in-time survey, 2026-09-28, with its own implementation-status table. Source of the HS items. Not a living spec and not a stub | Point-in-time (2026-09-28) |
 | [`router/admin-slice-consolidation-plan.md`](router/admin-slice-consolidation-plan.md) | Shared admin seams; closes on golden-path smoke | Implementation shipped; smoke outstanding |
 | [`router/counterfactual-token-estimation-plan.md`](router/counterfactual-token-estimation-plan.md) | Per-request ROI baseline token estimate | Phases 0–3 shipped; 4–6 open |
+
+### Proposals (not built)
+
+Ideas written up so they are not mistaken for shipped behavior. None of these is an approved plan.
+
+| Doc | What it owns | Status |
+|---|---|---|
+| [`router/todo-cascade-mode.md`](router/todo-cascade-mode.md) | A cheaper draft, a judge, and a stronger model if the draft fails | Proposal |
+| [`router/todo-effort-levels.md`](router/todo-effort-levels.md) | Named quality-versus-cost levels on top of the existing reward | Proposal |
+| [`router/todo-cache-break-model-switch.md`](router/todo-cache-break-model-switch.md) | Change models on a cache boundary so a switch keeps the cached-token discount | Proposal |
+| [`router/todo-dashboard-models-used.md`](router/todo-dashboard-models-used.md) | Show the model already reported on each answer in the Sessions pane | Proposal |
 
 ### Working documents
 
