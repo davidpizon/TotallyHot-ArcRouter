@@ -408,7 +408,7 @@ public partial class ProvidersAdmin
     /// <summary>Serializes one budget-utilization bar's chart-model JSON.</summary>
     private static string BudgetBarJson(string label, double pct)
     {
-        var value = (decimal)Math.Round(value: pct, 1);
+        var value = Math.Round(d: (decimal)pct, decimals: 1);
         var model = new GroupedBarsModel(
             title: label,
             categories: [label],

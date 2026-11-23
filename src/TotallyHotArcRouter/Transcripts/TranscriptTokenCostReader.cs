@@ -84,7 +84,7 @@ public sealed class TranscriptTokenCostReader
 
     /// <summary>
     /// Reads <c>cost</c> without turning null into 0. A decimal stored as text keeps its exact digits.
-    /// A REAL comes back as the decimal of that double, which is how <c>SqliteTranscriptStore</c> already reads it.
+    /// A REAL comes back through <see cref="StoredMoney.FromReal"/>, as <c>SqliteTranscriptStore</c> reads it.
     /// </summary>
     private static decimal? ReadCost(SqliteDataReader reader, int ordinal)
     {
@@ -95,8 +95,8 @@ public sealed class TranscriptTokenCostReader
         return value switch
         {
             decimal stored => stored,
-            double real => (decimal)real,
-            float real => (decimal)real,
+            double real => StoredMoney.FromReal(real),
+            float real => StoredMoney.FromReal(real),
             long integer => integer,
             int integer => integer,
             string text => decimal.Parse(s: text, provider: CultureInfo.InvariantCulture),
