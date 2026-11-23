@@ -8,7 +8,7 @@
          (GrpcServices="Client"); that file has its own csharp_namespace so this does not collide with
          Gui.Telemetry's telemetry.proto. This project now references Gui.Telemetry so
          ProviderAdminClient / UsageQueryClient can derive from GrpcAdminClientBase (ADR-0010 Amendment 3). -->
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <RootNamespace>TotallyHot.ArcRouter.Gui.Admin</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

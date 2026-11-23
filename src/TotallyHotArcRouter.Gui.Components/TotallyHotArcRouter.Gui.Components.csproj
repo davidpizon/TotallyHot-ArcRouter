@@ -10,7 +10,7 @@
          what keeps this library itself free of real sockets/TLS/filesystem code: every store here talks
          to the router only through that interface and IClipboardService-style seams, never
          TelemetryChannelFactory directly. -->
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <RootNamespace>TotallyHot.ArcRouter.Gui</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -36,7 +36,7 @@
 
   <ItemGroup>
     <!-- Provides ComponentBase, IJSRuntime, ElementReference, PointerEventArgs, etc. for Components/*.razor -->
-    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.15" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="11.0.0" />
   </ItemGroup>
 
   <ItemGroup>

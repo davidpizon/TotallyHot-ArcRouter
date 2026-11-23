@@ -5,7 +5,7 @@
          wrapper around TotallyHotArcRouter.Tray.Core's platform-agnostic status/routing logic.
          net10.0-windows (not the net10.0-windows10.0.19041.0/UseMaui the old MAUI Gui project needs) -
          WinForms doesn't need the WinUI/UWP API surface, only System.Windows.Forms. -->
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net11.0-windows7.0</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <OutputType>WinExe</OutputType>
