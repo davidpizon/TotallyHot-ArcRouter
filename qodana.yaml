@@ -3,7 +3,21 @@
 ####################################################################################################################
 
 version: "1.0"
-image: jetbrains/qodana-cdnet:2026.3
+image: jetbrains/qodana-cdnet:2026.3-privileged
+
+# The newest cdnet image (2026.3) ships only the .NET 8, 9 and 10 SDKs, so every net11.0 project fails
+# to load (NETSDK1045) and the scan exits with code 4. JetBrains' documented fix is to install the SDK
+# the project needs in `bootstrap`, into /usr/share/dotnet next to the bundled ones; that directory is
+# root-owned, which is why the image above is the `-privileged` variant (its `qodana` user has root
+# rights). Remove this block and the `-privileged` suffix once a cdnet image ships the .NET 11 SDK.
+# https://www.jetbrains.com/help/qodana/dotnet.html#SDK+version
+bootstrap: |+
+  set -eu
+  SUDO=""
+  if [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; fi
+  curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+  $SUDO bash /tmp/dotnet-install.sh --channel 11.0 --install-dir /usr/share/dotnet
+  dotnet --list-sdks
 
 # WHERE THE INSPECTION DECISIONS LIVE: not here.
 #

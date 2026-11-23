@@ -22,12 +22,12 @@ jobs:
     name: Build and test
     runs-on: ubuntu-latest
     env:
-      # TotallyHotArcRouter.Tray.csproj targets net10.0-windows (WinForms) and is intentionally excluded
+      # TotallyHotArcRouter.Tray.csproj targets net11.0-windows (WinForms) and is intentionally excluded
       # here - it cannot build on a Linux runner. Every other project, including the former MAUI
       # TotallyHotArcRouter.Gui's replacement TotallyHotArcRouter.Gui.Components (web GUI migration plan
       # Phase P9 deleted TotallyHotArcRouter.Gui/.Gui.Tests outright) and Tray.Core (Tray's cross-platform
-      # logic library), targets plain net10.0 by design specifically so it builds and tests cross-platform
-      # (see the "Plain net10.0 (not net10.0-windows / MAUI)" comments in those csproj files). Each
+      # logic library), targets plain net11.0 by design specifically so it builds and tests cross-platform
+      # (see the "Plain net11.0 (not net11.0-windows / MAUI)" comments in those csproj files). Each
       # project below is a test project; restoring/building it also covers the production project(s) it
       # references via ProjectReference, so no separate list of production projects is needed.
       PROJECTS: >-
@@ -46,7 +46,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: "10.0.x"
+          dotnet-version: "11.0.x"
 
       # NOTE: an "Allow unprivileged user namespaces" step used to sit here, loosening
       # kernel.apparmor_restrict_unprivileged_userns so a jail-launch test could call `unshare --user
