@@ -51,8 +51,7 @@ public sealed class DiagnosticSeverityAnalyzer : IStaticAnalyzer
 
         if (warnings.Count == 0) return new StaticAnalysisFinding(Analyzer: Name, 1.0, Notes: []);
 
-        List<string> notes = [$"{warnings.Count} parse warning(s)"];
-        notes.AddRange(warnings.Take(MaxQuotedDiagnostics));
+        List<string> notes = [$"{warnings.Count} parse warning(s)", ..warnings.Take(MaxQuotedDiagnostics)];
 
         var score = StaticAnalyzerScoring.ClampScore(floor: Floor, penalty: PenaltyPerWarning * warnings.Count);
         return new StaticAnalysisFinding(Analyzer: Name, Score: score, Notes: notes);

@@ -506,9 +506,7 @@ public sealed class SessionFileTests
         {
             var path = Path.Combine(dir, "session.bin");
             var sessionId = SessionArchiveIds.NewArchiveSessionId();
-            List<byte> header = [.."THSESS01"u8];
-            header.AddRange(sessionId.ToByteArray());
-            header.AddRange([1, 0]);
+            List<byte> header = [.."THSESS01"u8, ..sessionId.ToByteArray(), 1, 0];
             File.WriteAllBytes(path, header.ToArray());
 
             var exception = Assert.Throws<InvalidDataException>(
