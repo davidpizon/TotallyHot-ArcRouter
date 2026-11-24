@@ -98,8 +98,8 @@ public interface ISecretWriter
 /// refused rather than used if that directory is more permissive - see <see cref="EnsureKeyDirectorySecure"/>).
 /// The default store file is <c>secrets.dat</c> in the machine-shared data directory, so that ring is still
 /// <c>&lt;data-dir&gt;/keys</c>. An explicit path keeps its own ring, which is what keeps parallel tests
-/// from sharing one directory.
-/// and every value written this way carries a one-byte format version ahead of the ciphertext (a format
+/// from sharing one directory, and every value written this way carries a one-byte format version ahead of
+/// the ciphertext (a format
 /// with nothing to be backward-compatible with, since <see cref="Write"/> could never previously succeed
 /// there). "Protected" now means DPAPI-strength, user-account-bound secrecy on Windows, and
 /// file-permission-bound secrecy off Windows - a real difference in guarantee, stated plainly rather than
