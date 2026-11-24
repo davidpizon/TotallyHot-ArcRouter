@@ -6,6 +6,7 @@ using System.Text;
 using TotallyHot.ArcRouter.Cache;
 using TotallyHot.ArcRouter.Proxy;
 using TotallyHot.ArcRouter.Router.Embeddings;
+using System.Globalization;
 
 namespace TotallyHot.ArcRouter.Tests.Proxy;
 
@@ -143,7 +144,7 @@ public class ProxyMiddlewareSemanticCacheTests
     public async Task InvokeAsync_ExpiredEntry_CallsTheProviderAgain()
     {
         var calls = 0;
-        var clock = new ManualTimeProvider { UtcNow = DateTimeOffset.Parse("2026-09-28T00:00:00Z") };
+        var clock = new ManualTimeProvider { UtcNow = DateTimeOffset.Parse("2026-09-28T00:00:00Z", CultureInfo.InvariantCulture) };
         var cache = NewCache(enabled: true, timeToLive: TimeSpan.FromMinutes(5), time: clock);
         using var middleware = CreateMiddleware(cache: cache, logger: new CaptureLogger(), onUpstream: () => calls++,
             embed: _ => [1f, 0f]);

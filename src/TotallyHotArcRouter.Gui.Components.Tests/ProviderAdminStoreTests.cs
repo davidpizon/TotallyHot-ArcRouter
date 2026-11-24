@@ -6,6 +6,7 @@ using TotallyHot.ArcRouter.Gui.Admin;
 using TotallyHot.ArcRouter.Gui.Services;
 using TotallyHot.ArcRouter.Gui.Telemetry;
 using Contract = TotallyHot.ArcRouter.Admin.Contract;
+using System.Globalization;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -138,7 +139,7 @@ public sealed class ProviderAdminStoreTests
         var series = new Contract.RateLimitHistorySeries();
         series.Points.Add(new Contract.RateLimitHistoryPoint
         {
-            BucketUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T12:00:00Z")), Remaining = 1000,
+            BucketUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T12:00:00Z", CultureInfo.InvariantCulture)), Remaining = 1000,
             Limit = 2000
         });
         response.Dimensions["tokens"] = series;

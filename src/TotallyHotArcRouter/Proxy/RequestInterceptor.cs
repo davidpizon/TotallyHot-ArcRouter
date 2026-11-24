@@ -347,11 +347,11 @@ public class RequestInterceptor
 
         if (models.Count == 0) return models;
 
-        var listed = new List<AvailableModel>(models.Count + 1)
-        {
-            new(ModelName: RouterModelName, Provider: RouterModelProvider)
-        };
-        listed.AddRange(models);
+        List<AvailableModel> listed =
+        [
+            new(ModelName: RouterModelName, Provider: RouterModelProvider),
+            .. models
+        ];
 
         return listed;
     }

@@ -9,6 +9,7 @@ using TotallyHot.ArcRouter.Quality.Grading;
 using TotallyHot.ArcRouter.Quality.Scoring;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Embeddings;
+using System.Globalization;
 
 namespace TotallyHot.ArcRouter.Tests.Judge;
 
@@ -758,7 +759,7 @@ public class GraderEpochPhase8Tests
             LocalScore = local,
             LocalGraderVersion = artifact,
             SpotCheck = spot,
-            CreatedAt = DateTimeOffset.Parse("2026-06-01T00:00:00Z").AddMinutes(id.Length)
+            CreatedAt = DateTimeOffset.Parse("2026-06-01T00:00:00Z", CultureInfo.InvariantCulture).AddMinutes(id.Length)
         });
     }
 

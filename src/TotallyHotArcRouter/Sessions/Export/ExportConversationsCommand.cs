@@ -243,11 +243,14 @@ internal static class ExportConversationsCommand
         try
         {
             var ticket = await router.CreateApprovalRequestAsync(options, cancellationToken).ConfigureAwait(false);
-            await stdout.WriteLineAsync("Approve this export in your browser:").ConfigureAwait(false);
-            await stdout.WriteLineAsync($"  {ticket.DashboardUrl}").ConfigureAwait(false);
-            await stdout.WriteLineAsync($"Destination: {options.DestinationPath}").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Approve this export in your browser:", cancellationToken)
+                .ConfigureAwait(false);
+            await stdout.WriteLineAsync($"  {ticket.DashboardUrl}", cancellationToken).ConfigureAwait(false);
+            await stdout.WriteLineAsync($"Destination: {options.DestinationPath}", cancellationToken)
+                .ConfigureAwait(false);
             await stdout.WriteLineAsync(
-                $"Waiting for approval; the request expires at {ticket.ExpiresAtUtc:u}.").ConfigureAwait(false);
+                $"Waiting for approval; the request expires at {ticket.ExpiresAtUtc:u}.",
+                cancellationToken).ConfigureAwait(false);
 
             var approval = await WaitAsync(
                 router, ticket.ApprovalId, approvalTimeout ?? PendingApprovalTable.RequestTtl + TimeSpan.FromSeconds(30),
@@ -255,7 +258,8 @@ internal static class ExportConversationsCommand
             switch (approval.Outcome)
             {
                 case PendingApprovalOutcome.Denied:
-                    await stderr.WriteLineAsync("The export was denied in the dashboard. Nothing was written.")
+                    await stderr.WriteLineAsync(
+                            "The export was denied in the dashboard. Nothing was written.", cancellationToken)
                         .ConfigureAwait(false);
                     return ExitDenied;
                 case PendingApprovalOutcome.Expired:
@@ -276,7 +280,9 @@ internal static class ExportConversationsCommand
         }
         catch (OperationCanceledException)
         {
-            await stderr.WriteLineAsync("The export was cancelled. Nothing was written.").ConfigureAwait(false);
+            // The token is already cancelled; None still writes the acknowledgement.
+            await stderr.WriteLineAsync("The export was cancelled. Nothing was written.", CancellationToken.None)
+                .ConfigureAwait(false);
             return ExitFailed;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -284,7 +290,8 @@ internal static class ExportConversationsCommand
             // Top level of a one-shot command: anything else (a malformed response, an I/O error on the console)
             // becomes an exit code instead of a crash dump.
             logger?.LogError(ex, "The conversation export command failed unexpectedly.");
-            await stderr.WriteLineAsync($"The export failed unexpectedly: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"The export failed unexpectedly: {ex.Message}", CancellationToken.None)
+                .ConfigureAwait(false);
             return ExitFailed;
         }
     }
@@ -334,7 +341,7 @@ internal static class ExportConversationsCommand
         TimeProvider time,
         CancellationToken cancellationToken)
     {
-        await stdout.WriteLineAsync("Approved. Exporting...").ConfigureAwait(false);
+        await stdout.WriteLineAsync("Approved. Exporting...", cancellationToken).ConfigureAwait(false);
 
         var lastProgress = time.GetTimestamp();
         ConversationExportResult? result = null;
@@ -352,24 +359,29 @@ internal static class ExportConversationsCommand
             lastProgress = time.GetTimestamp();
             await stdout.WriteLineAsync(string.Create(
                 CultureInfo.InvariantCulture,
-                $"  {progress.TurnsWritten} turns, {progress.BytesWritten} bytes of bodies written so far")).ConfigureAwait(false);
+                $"  {progress.TurnsWritten} turns, {progress.BytesWritten} bytes of bodies written so far"),
+                cancellationToken).ConfigureAwait(false);
         }
 
         if (result is null)
         {
-            await stderr.WriteLineAsync("The router ended the export without a result; check that the zip is complete.")
+            await stderr.WriteLineAsync(
+                    "The router ended the export without a result; check that the zip is complete.",
+                    cancellationToken)
                 .ConfigureAwait(false);
             return ExitFailed;
         }
 
         await stdout.WriteLineAsync(string.Create(
             CultureInfo.InvariantCulture,
-            $"Exported {result.Turns} turns from {result.Conversations} conversations to {result.Path}")).ConfigureAwait(false);
+            $"Exported {result.Turns} turns from {result.Conversations} conversations to {result.Path}"),
+            cancellationToken).ConfigureAwait(false);
         if (result.MissingBodies > 0 || result.CorruptTurns > 0 || result.IncompleteSessions > 0)
         {
             await stderr.WriteLineAsync(string.Create(
                 CultureInfo.InvariantCulture,
-                $"Warning: {result.MissingBodies} missing bodies, {result.CorruptTurns} corrupt turns left out, {result.IncompleteSessions} sessions deleted mid-export.")).ConfigureAwait(false);
+                $"Warning: {result.MissingBodies} missing bodies, {result.CorruptTurns} corrupt turns left out, {result.IncompleteSessions} sessions deleted mid-export."),
+                cancellationToken).ConfigureAwait(false);
         }
 
         return ExitSuccess;

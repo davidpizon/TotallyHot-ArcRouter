@@ -1,4 +1,5 @@
 using TotallyHot.ArcRouter.CodeRouterBench;
+using System.Globalization;
 
 namespace TotallyHot.ArcRouter.Tests.CodeRouterBench;
 
@@ -25,7 +26,7 @@ public class BenchmarkFileLedgerTests
             6_426_347,
             56_640,
             RepoCommit: "deadbeef",
-            SyncedAtUtc: DateTimeOffset.Parse("2026-08-12T00:00:00Z"));
+            SyncedAtUtc: DateTimeOffset.Parse("2026-08-12T00:00:00Z", CultureInfo.InvariantCulture));
 
         ledger.Upsert(entry);
         var found = ledger.TryGet("id_probing_results_long.csv");
@@ -44,12 +45,12 @@ public class BenchmarkFileLedgerTests
             100,
             1,
             RepoCommit: "commit-a",
-            SyncedAtUtc: DateTimeOffset.Parse("2026-08-01T00:00:00Z"));
+            SyncedAtUtc: DateTimeOffset.Parse("2026-08-01T00:00:00Z", CultureInfo.InvariantCulture));
         var second = first with
         {
             PublishedOid = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             RepoCommit = "commit-b",
-            SyncedAtUtc = DateTimeOffset.Parse("2026-08-12T00:00:00Z")
+            SyncedAtUtc = DateTimeOffset.Parse("2026-08-12T00:00:00Z", CultureInfo.InvariantCulture)
         };
 
         ledger.Upsert(first);

@@ -179,9 +179,7 @@ public sealed class ClusterTrainingService : IClusterTrainingService
                 "Excluded {SkippedCount} unjudged memory entry/entries from cluster training per the configured unjudged-row policy.",
                 skippedForUnjudgedPolicy);
 
-        var samples = new List<ClusterTrainingSample>(bootstrapSamples.Count + liveSamples.Count);
-        samples.AddRange(bootstrapSamples);
-        samples.AddRange(liveSamples);
+        List<ClusterTrainingSample> samples = [.. bootstrapSamples, .. liveSamples];
 
         if (samples.Count < _routingOptions.ClusterMinTrainingRows)
         {

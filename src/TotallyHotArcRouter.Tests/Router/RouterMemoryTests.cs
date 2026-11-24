@@ -46,7 +46,7 @@ public class RouterMemoryTests
 
         var models = memory.GetModelsForDimension(dimension);
 
-        Assert.Collection(collection: models.OrderBy(m => m),
+        Assert.Collection(collection: models.OrderBy(keySelector: m => m, comparer: StringComparer.Ordinal),
             m => Assert.Equal(expected: "model1", actual: m),
             m => Assert.Equal(expected: "model2", actual: m));
     }

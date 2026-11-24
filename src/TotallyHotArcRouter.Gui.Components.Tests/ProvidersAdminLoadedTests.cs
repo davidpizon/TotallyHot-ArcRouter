@@ -8,6 +8,7 @@ using TotallyHot.ArcRouter.Gui.Components;
 using TotallyHot.ArcRouter.Gui.Services;
 using Contract = TotallyHot.ArcRouter.Admin.Contract;
 using IElement = AngleSharp.Dom.IElement;
+using System.Globalization;
 
 namespace TotallyHot.ArcRouter.Gui.Tests;
 
@@ -41,7 +42,7 @@ public sealed class ProvidersAdminLoadedTests
             EndpointCapabilities = new Contract.EndpointCapabilitiesState
             {
                 AnthropicCompatible = true,
-                ScannedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-08-01T00:00:00Z"))
+                ScannedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-08-01T00:00:00Z", CultureInfo.InvariantCulture))
             }
         };
         anthropic.Models.Add(new Contract.ModelState
@@ -71,7 +72,7 @@ public sealed class ProvidersAdminLoadedTests
             WindowKind = "Monthly",
             EndpointCapabilities = new Contract.EndpointCapabilitiesState
             {
-                ScannedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-08-01T00:00:00Z")),
+                ScannedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-08-01T00:00:00Z", CultureInfo.InvariantCulture)),
                 ScanError = "timed out"
             }
         });
@@ -92,7 +93,7 @@ public sealed class ProvidersAdminLoadedTests
             WindowKind = "Monthly", HasStoredAdminKey = true,
             ReportedUsage = new Contract.ProviderReportedUsageState
             {
-                FetchedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-02T04:00:00Z"))
+                FetchedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-02T04:00:00Z", CultureInfo.InvariantCulture))
             }
         };
         anthropic.ReportedUsage.Rows.Add(new Contract.ReportedUsageRow
@@ -117,17 +118,17 @@ public sealed class ProvidersAdminLoadedTests
                     Key = "anthropic", Name = "Anthropic Prod", BaseUrl = "https://api.anthropic.com",
                     ProviderType = "Anthropic", DollarSpent = "12.5", TokensUsed = 158000,
                     Enabled = true, WindowKind = "Monthly",
-                    UsageLastRecordedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T08:00:00Z")),
+                    UsageLastRecordedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T08:00:00Z", CultureInfo.InvariantCulture)),
                     RateLimit = new Contract.ProviderRateLimitState
                     {
-                        ObservedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T12:00:00Z")),
+                        ObservedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T12:00:00Z", CultureInfo.InvariantCulture)),
                         IsStale = true,
                         Dimensions =
                         {
                             ["tokens"] = new Contract.RateLimitDimensionState
                             {
                                 Limit = 200000, Remaining = 158000,
-                                ResetAt = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T13:00:00Z"))
+                                ResetAt = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T13:00:00Z", CultureInfo.InvariantCulture))
                             }
                         }
                     }
@@ -151,16 +152,16 @@ public sealed class ProvidersAdminLoadedTests
                     Key = "anthropic", Name = "Anthropic Prod", BaseUrl = "https://api.anthropic.com",
                     ProviderType = "Anthropic", DollarSpent = "12.5", TokensUsed = 158000,
                     Enabled = true, WindowKind = "Monthly",
-                    UsageLastRecordedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T08:00:00Z")),
+                    UsageLastRecordedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T08:00:00Z", CultureInfo.InvariantCulture)),
                     RateLimit = new Contract.ProviderRateLimitState
                     {
-                        ObservedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T12:00:00Z")),
+                        ObservedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T12:00:00Z", CultureInfo.InvariantCulture)),
                         Dimensions =
                         {
                             ["tokens"] = new Contract.RateLimitDimensionState
                             {
                                 Limit = 200000, Remaining = 158000,
-                                ResetAt = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T13:00:00Z")),
+                                ResetAt = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T13:00:00Z", CultureInfo.InvariantCulture)),
                                 TimeToExhaustionSeconds = 19 * 60, BurnRatePerMinute = 2210.5
                             }
                         },
@@ -169,7 +170,7 @@ public sealed class ProvidersAdminLoadedTests
                             ["5h"] = new Contract.UnifiedWindowState
                             {
                                 Status = "allowed",
-                                ResetAt = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T13:00:00Z"))
+                                ResetAt = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T13:00:00Z", CultureInfo.InvariantCulture))
                             }
                         }
                     }
@@ -202,7 +203,7 @@ public sealed class ProvidersAdminLoadedTests
             {
                 Ok = false, Operation = "Refresh from endpoint",
                 Message = "Provider returned 401 for https://api.openai.com/v1/models.",
-                AtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-08-24T09:00:00Z")), Kind = "None"
+                AtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-08-24T09:00:00Z", CultureInfo.InvariantCulture)), Kind = "None"
             }
         });
         return response;
@@ -301,7 +302,7 @@ public sealed class ProvidersAdminLoadedTests
         {
             var record = new Contract.ModelCapabilitiesState
             {
-                ScannedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-10-02T12:00:00Z"))
+                ScannedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-10-02T12:00:00Z", CultureInfo.InvariantCulture))
             };
             record.Groups.AddRange(groups);
             return record;

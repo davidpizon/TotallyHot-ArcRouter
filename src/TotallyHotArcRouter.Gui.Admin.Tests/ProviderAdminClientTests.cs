@@ -2,6 +2,7 @@ using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using TotallyHot.ArcRouter.Gui.Telemetry;
 using Contract = TotallyHot.ArcRouter.Admin.Contract;
+using System.Globalization;
 
 namespace TotallyHot.ArcRouter.Gui.Admin.Tests;
 
@@ -94,7 +95,7 @@ public sealed class ProviderAdminClientTests
         provider.EndpointCapabilities = new Contract.EndpointCapabilitiesState
         {
             OpenaiCompatible = true, LmStudioNative = true, OllamaNative = false, AnthropicCompatible = false,
-            ScannedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-07-31T00:00:00Z"))
+            ScannedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-07-31T00:00:00Z", CultureInfo.InvariantCulture))
         };
         var stub = new StubClient { ListProvidersResponse = ListResponse(provider) };
         var client = new ProviderAdminClient(stub);
@@ -118,7 +119,7 @@ public sealed class ProviderAdminClientTests
             ModelName = "claude-haiku", ProviderModelId = "claude-haiku-4-5-20251001",
             Capabilities = new Contract.ModelCapabilitiesState
             {
-                ScannedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-10-02T12:00:00Z"))
+                ScannedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-10-02T12:00:00Z", CultureInfo.InvariantCulture))
             }
         };
         var thinking = new Contract.CapabilityGroupState { Name = "thinking", Supported = true };
@@ -136,7 +137,7 @@ public sealed class ProviderAdminClientTests
 
         var capabilities = models[0].Capabilities;
         Assert.NotNull(capabilities);
-        Assert.Equal(expected: DateTimeOffset.Parse("2026-10-02T12:00:00Z"), actual: capabilities.ScannedAtUtc);
+        Assert.Equal(expected: DateTimeOffset.Parse("2026-10-02T12:00:00Z", CultureInfo.InvariantCulture), actual: capabilities.ScannedAtUtc);
         var group = capabilities.Groups[0];
         Assert.Equal(expected: "thinking", actual: group.Name);
         Assert.True(group.Supported);
@@ -335,7 +336,7 @@ public sealed class ProviderAdminClientTests
         provider.EndpointCapabilities = new Contract.EndpointCapabilitiesState
         {
             OpenaiCompatible = true, LmStudioNative = true,
-            ScannedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-07-31T00:00:00Z"))
+            ScannedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-07-31T00:00:00Z", CultureInfo.InvariantCulture))
         };
         var stub = new StubClient
         {
@@ -436,7 +437,7 @@ public sealed class ProviderAdminClientTests
         var series = new Contract.RateLimitHistorySeries();
         series.Points.Add(new Contract.RateLimitHistoryPoint
         {
-            BucketUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T12:00:00Z")), Remaining = 1000,
+            BucketUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-03-01T12:00:00Z", CultureInfo.InvariantCulture)), Remaining = 1000,
             Limit = 2000
         });
         response.Dimensions["tokens"] = series;

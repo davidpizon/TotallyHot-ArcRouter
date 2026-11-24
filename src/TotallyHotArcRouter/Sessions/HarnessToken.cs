@@ -12,6 +12,8 @@ namespace TotallyHot.ArcRouter.Sessions;
 public static partial class HarnessToken
 {
     /// <summary>The products that are recorded by name; compared case-insensitively.</summary>
+    // A collection expression cannot take a comparer, and this set has to match case-insensitively.
+    // ReSharper disable once UseCollectionExpression
     private static readonly HashSet<string> Allowlist = new(StringComparer.OrdinalIgnoreCase)
     {
         "claude-cli",

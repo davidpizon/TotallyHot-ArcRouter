@@ -2,6 +2,7 @@ using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using TotallyHot.ArcRouter.Gui.Telemetry;
 using Contract = TotallyHot.ArcRouter.Admin.Contract;
+using System.Globalization;
 
 namespace TotallyHot.ArcRouter.Gui.Admin.Tests;
 
@@ -60,8 +61,8 @@ public sealed class UsageQueryClientTests
                 cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: "1.20"))
         };
         var client = new UsageQueryClient(stub);
-        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
-        var to = DateTimeOffset.Parse("2026-02-01T00:00:00Z");
+        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture);
+        var to = DateTimeOffset.Parse("2026-02-01T00:00:00Z", CultureInfo.InvariantCulture);
 
         var buckets = await client.GetRollupAsync(from: from, to: to, width: "day", groupBy: "model",
             cancellationToken: Ct);
@@ -83,7 +84,7 @@ public sealed class UsageQueryClientTests
     {
         var stub = new StubClient { CannedRollupResponse = new Contract.UsageRollupResponse() };
         var client = new UsageQueryClient(stub);
-        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
+        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture);
 
         var buckets = await client.GetRollupAsync(from: from, to: from.AddDays(1), width: "hour",
             groupBy: "provider", cancellationToken: Ct);
@@ -100,7 +101,7 @@ public sealed class UsageQueryClientTests
         {
             CannedRoutingRoiResponse = RoutingRoiResponse(new Contract.RoutingRoiEntry
             {
-                ComparedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-01-05T10:00:00Z")),
+                ComparedAtUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-01-05T10:00:00Z", CultureInfo.InvariantCulture)),
                 SessionId = "session-7",
                 RoutedModel = "kimi-k2.5",
                 BaselineModel = "glm-5",
@@ -111,8 +112,8 @@ public sealed class UsageQueryClientTests
             })
         };
         var client = new UsageQueryClient(stub);
-        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
-        var to = DateTimeOffset.Parse("2026-02-01T00:00:00Z");
+        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture);
+        var to = DateTimeOffset.Parse("2026-02-01T00:00:00Z", CultureInfo.InvariantCulture);
 
         var points = await client.GetRoutingRoiAsync(from: from, to: to, cancellationToken: Ct);
 
@@ -130,7 +131,7 @@ public sealed class UsageQueryClientTests
     {
         var stub = new StubClient { CannedRoutingRoiResponse = new Contract.RoutingRoiResponse() };
         var client = new UsageQueryClient(stub);
-        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
+        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture);
 
         await client.GetRoutingRoiAsync(from: from, to: from.AddDays(1), sessionId: "s-1", cancellationToken: Ct);
 
@@ -155,7 +156,7 @@ public sealed class UsageQueryClientTests
             })
         };
         var client = new UsageQueryClient(stub);
-        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
+        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture);
 
         var point = Assert.Single(await client.GetRoutingRoiAsync(from: from, to: from.AddDays(30),
             cancellationToken: Ct));
@@ -191,8 +192,8 @@ public sealed class UsageQueryClientTests
             Model = "gpt-4o-mini", MeanDelta = 0.082, SampleSize = 40
         });
         var client = new UsageQueryClient(stub);
-        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
-        var to = DateTimeOffset.Parse("2026-02-01T00:00:00Z");
+        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture);
+        var to = DateTimeOffset.Parse("2026-02-01T00:00:00Z", CultureInfo.InvariantCulture);
 
         var card = await client.GetLearningReportCardAsync(from: from, to: to, cancellationToken: Ct);
 
@@ -245,7 +246,7 @@ public sealed class UsageQueryClientTests
             ]
         };
         var client = new UsageQueryClient(stub);
-        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
+        var from = DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture);
 
         var rows = new List<UsageRollupBucketView>();
         await foreach (var row in client.ExportRollupAsync(from: from, to: from.AddDays(2), width: "day",
@@ -310,7 +311,7 @@ public sealed class UsageQueryClientTests
                 {
                     new Contract.GraderEpochEfficiencyPoint
                     {
-                        BucketStartUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-10-26T10:00:00Z")),
+                        BucketStartUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse("2026-10-26T10:00:00Z", CultureInfo.InvariantCulture)),
                         KnownRows = 0,
                         SkippedRows = 1
                     }
@@ -320,8 +321,8 @@ public sealed class UsageQueryClientTests
         var client = new UsageQueryClient(stub);
 
         var chart = await client.GetGraderEpochChartAsync(
-            from: DateTimeOffset.Parse("2026-10-26T00:00:00Z"),
-            to: DateTimeOffset.Parse("2026-10-27T00:00:00Z"),
+            from: DateTimeOffset.Parse("2026-10-26T00:00:00Z", CultureInfo.InvariantCulture),
+            to: DateTimeOffset.Parse("2026-10-27T00:00:00Z", CultureInfo.InvariantCulture),
             width: "hour",
             cancellationToken: Ct);
 
@@ -350,7 +351,7 @@ public sealed class UsageQueryClientTests
     {
         return new Contract.UsageRollupBucketRow
         {
-            BucketStartUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse(bucketStartUtc)),
+            BucketStartUtc = Timestamp.FromDateTimeOffset(DateTimeOffset.Parse(bucketStartUtc, CultureInfo.InvariantCulture)),
             BucketWidth = bucketWidth,
             GroupKey = groupKey,
             Requests = requests,

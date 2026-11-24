@@ -1,4 +1,5 @@
 using TotallyHot.ArcRouter.PriceCatalog;
+using System.Globalization;
 
 namespace TotallyHot.ArcRouter.Tests.PriceCatalog;
 
@@ -26,7 +27,7 @@ public class RateLimitSnapshotParserTests
         var requests = view.StandardDimensions["requests"];
         Assert.Equal(50, actual: requests.Limit);
         Assert.Equal(49, actual: requests.Remaining);
-        Assert.Equal(expected: DateTimeOffset.Parse("2026-03-01T12:00:00Z"), actual: requests.ResetAt);
+        Assert.Equal(expected: DateTimeOffset.Parse("2026-03-01T12:00:00Z", CultureInfo.InvariantCulture), actual: requests.ResetAt);
 
         var inputTokens = view.StandardDimensions["input-tokens"];
         Assert.Equal(200000, actual: inputTokens.Limit);
@@ -57,14 +58,14 @@ public class RateLimitSnapshotParserTests
         var view = RateLimitSnapshotParser.Parse(rows);
 
         Assert.Equal(expected: "allowed", actual: view.UnifiedStatus);
-        Assert.Equal(expected: DateTimeOffset.Parse("2026-03-01T17:00:00Z"), actual: view.UnifiedResetAt);
+        Assert.Equal(expected: DateTimeOffset.Parse("2026-03-01T17:00:00Z", CultureInfo.InvariantCulture), actual: view.UnifiedResetAt);
         Assert.Equal(expected: "org-123", actual: view.RepresentativeClaim);
 
         Assert.Equal(2, actual: view.UnifiedWindows.Count);
         var fiveHour = view.UnifiedWindows["5h"];
         Assert.Equal(expected: "allowed", actual: fiveHour.Status);
         Assert.Equal(42, actual: fiveHour.Remaining);
-        Assert.Equal(expected: DateTimeOffset.Parse("2026-03-01T13:00:00Z"), actual: fiveHour.ResetAt);
+        Assert.Equal(expected: DateTimeOffset.Parse("2026-03-01T13:00:00Z", CultureInfo.InvariantCulture), actual: fiveHour.ResetAt);
 
         Assert.Equal(expected: "allowed", actual: view.UnifiedWindows["7d"].Status);
     }
@@ -138,7 +139,7 @@ public class RateLimitSnapshotParserTests
             new RateLimitHeaderRow(HeaderName: "x-ratelimit-remaining-tokens", HeaderValue: "159975"),
             new RateLimitHeaderRow(HeaderName: "x-ratelimit-reset-tokens", HeaderValue: "6m0s")
         };
-        var observedAt = DateTimeOffset.Parse("2026-03-01T12:00:00Z");
+        var observedAt = DateTimeOffset.Parse("2026-03-01T12:00:00Z", CultureInfo.InvariantCulture);
 
         var view = RateLimitSnapshotParser.Parse(rows: rows, observedAtUtc: observedAt);
 
@@ -161,7 +162,7 @@ public class RateLimitSnapshotParserTests
     [InlineData("1h2m3s", 3600 + 120 + 3)]
     public void Parse_OpenAiResetHeader_ParsesCompoundGoDurations(string durationText, double expectedSeconds)
     {
-        var observedAt = DateTimeOffset.Parse("2026-03-01T00:00:00Z");
+        var observedAt = DateTimeOffset.Parse("2026-03-01T00:00:00Z", CultureInfo.InvariantCulture);
         var rows = new[] { new RateLimitHeaderRow(HeaderName: "x-ratelimit-reset-tokens", HeaderValue: durationText) };
 
         var view = RateLimitSnapshotParser.Parse(rows: rows, observedAtUtc: observedAt);

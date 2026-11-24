@@ -1,12 +1,13 @@
 using TotallyHot.ArcRouter.PriceCatalog;
+using System.Globalization;
 
 namespace TotallyHot.ArcRouter.Tests.PriceCatalog;
 
 /// <summary>Covers <see cref="RateLimitProjection.Project"/>.</summary>
 public class RateLimitProjectionTests
 {
-    private static readonly DateTimeOffset Earlier = DateTimeOffset.Parse("2026-03-01T12:00:00Z");
-    private static readonly DateTimeOffset Later = DateTimeOffset.Parse("2026-03-01T12:10:00Z");
+    private static readonly DateTimeOffset Earlier = DateTimeOffset.Parse("2026-03-01T12:00:00Z", CultureInfo.InvariantCulture);
+    private static readonly DateTimeOffset Later = DateTimeOffset.Parse("2026-03-01T12:10:00Z", CultureInfo.InvariantCulture);
 
     [Fact]
     public void Project_NormalDepletion_ReturnsProjection()
