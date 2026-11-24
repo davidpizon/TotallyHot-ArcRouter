@@ -584,4 +584,20 @@ public sealed class ProtectedSecretStoreTests
             CleanUp(path);
         }
     }
+
+    /// <summary>
+    /// Parallel grader worlds each pass their own <c>secrets.dat</c>. The Unix ring has to follow that
+    /// file. Sharing <c>&lt;data-dir&gt;/keys</c> let one world's create-then-chmod observe the other's
+    /// directory at mode 0755 (#354).
+    /// </summary>
+    [Fact]
+    public void KeyRingDirectory_FollowsTheStoreFile()
+    {
+        var first = ProtectedSecretStore.KeyRingDirectory(Path.Combine("world-a", "secrets.dat"));
+        var second = ProtectedSecretStore.KeyRingDirectory(Path.Combine("world-b", "secrets.dat"));
+
+        Assert.Equal(Path.Combine(Path.GetFullPath("world-a"), "keys"), first);
+        Assert.Equal(Path.Combine(Path.GetFullPath("world-b"), "keys"), second);
+        Assert.NotEqual(first, second);
+    }
 }

@@ -94,8 +94,11 @@ public interface ISecretWriter
 /// <see cref="PlatformNotSupportedException"/> and every read returned "not found" - callers fell through
 /// to their environment-variable path, honestly degraded rather than silently writing plaintext. That
 /// platform gap is what this phase closes: off Windows, the store now uses ASP.NET Core's Data Protection
-/// stack with a file-system key ring under <c>&lt;data-dir&gt;/keys</c> (mode <c>0700</c>, refused rather
-/// than used if an existing key directory is more permissive - see <see cref="EnsureKeyDirectorySecure"/>),
+/// stack with a file-system key ring in a <c>keys</c> directory beside the store file (mode <c>0700</c>,
+/// refused rather than used if that directory is more permissive - see <see cref="EnsureKeyDirectorySecure"/>).
+/// The default store file is <c>secrets.dat</c> in the machine-shared data directory, so that ring is still
+/// <c>&lt;data-dir&gt;/keys</c>. An explicit path keeps its own ring, which is what keeps parallel tests
+/// from sharing one directory.
 /// and every value written this way carries a one-byte format version ahead of the ciphertext (a format
 /// with nothing to be backward-compatible with, since <see cref="Write"/> could never previously succeed
 /// there). "Protected" now means DPAPI-strength, user-account-bound secrecy on Windows, and
@@ -119,6 +122,11 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
     // compiled into the binary - but it stops another process running as the same Windows user from
     // calling ProtectedData.Unprotect on this file without also carrying this exact byte sequence.
     private static readonly byte[] Entropy = "TotallyHotArcRouter.ProtectedSecretStore.v1"u8.ToArray();
+
+    // Create-then-chmod is not atomic. Two callers that share a ring must not observe mode 0755 between
+    // Directory.CreateDirectory and SetUnixFileMode. The lock is process-local; a second process can still
+    // lose that race, and the refusal below is unchanged when it does.
+    private static readonly Lock KeyDirectoryGate = new();
 
     private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = false };
 
@@ -478,15 +486,33 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
     }
 
     /// <summary>
+    /// The Unix key ring for <paramref name="storePath"/>. It is a <c>keys</c> directory beside the store
+    /// file. The default store lives in the machine-shared data directory, so that ring is still
+    /// <c>&lt;data-dir&gt;/keys</c>. Two explicit paths do not share a ring.
+    /// </summary>
+    /// <param name="storePath">The <c>secrets.dat</c> path this store opens.</param>
+    /// <returns>The key-ring directory for that file.</returns>
+    /// <exception cref="ArgumentException"><paramref name="storePath"/> has no directory.</exception>
+    internal static string KeyRingDirectory(string storePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(storePath);
+        var parent = Path.GetDirectoryName(Path.GetFullPath(storePath));
+        if (string.IsNullOrEmpty(parent))
+            throw new ArgumentException("The store path has no directory.", nameof(storePath));
+
+        return Path.Combine(parent, KeyRingDirectoryName);
+    }
+
+    /// <summary>
     /// Builds the Data Protection protector this store's non-Windows format uses: a file-system key ring
-    /// under <c>&lt;data-dir&gt;/keys</c> (see <see cref="EnsureKeyDirectorySecure"/>), with a fixed
-    /// application name so the purpose string below is the only thing distinguishing this store's keys
-    /// from any other Data Protection consumer that might someday share the same directory.
+    /// beside this store's file (see <see cref="KeyRingDirectory"/> and <see cref="EnsureKeyDirectorySecure"/>),
+    /// with a fixed application name so the purpose string below is the only thing distinguishing this
+    /// store's keys from any other Data Protection consumer that might someday share the same directory.
     /// </summary>
     [UnsupportedOSPlatform("windows")]
-    private static IDataProtector CreateUnixProtector()
+    private IDataProtector CreateUnixProtector()
     {
-        var keyDirectory = Path.Combine(AppDataPaths.ResolveMachineSharedDirectory(), KeyRingDirectoryName);
+        var keyDirectory = KeyRingDirectory(_path);
         EnsureKeyDirectorySecure(keyDirectory);
 
         var provider = DataProtectionProvider.Create(
@@ -499,7 +525,9 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
     /// Creates <paramref name="keyDirectory"/> at mode <c>0700</c> if it doesn't exist yet. If it already
     /// exists with broader permissions, refuses rather than silently trusting (or silently tightening) a
     /// directory whose laxity might mean something else already depends on the wider access, or that the
-    /// environment is misconfigured in a way worth surfacing rather than papering over.
+    /// environment is misconfigured in a way worth surfacing rather than papering over. The check and the
+    /// create run under <see cref="KeyDirectoryGate"/> so a second thread in this process cannot read the
+    /// directory in the gap before <c>0700</c> is set. The mode policy is unchanged.
     /// </summary>
     /// <exception cref="UnauthorizedAccessException">
     /// <paramref name="keyDirectory"/> already exists with permissions broader than the owner alone.
@@ -509,17 +537,20 @@ public sealed class ProtectedSecretStore : ISecretReader, ISecretWriter
     {
         const UnixFileMode ownerOnly = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
 
-        if (!Directory.Exists(keyDirectory))
+        lock (KeyDirectoryGate)
         {
-            Directory.CreateDirectory(keyDirectory);
-            File.SetUnixFileMode(path: keyDirectory, mode: ownerOnly);
-            return;
-        }
+            if (!Directory.Exists(keyDirectory))
+            {
+                Directory.CreateDirectory(keyDirectory);
+                File.SetUnixFileMode(path: keyDirectory, mode: ownerOnly);
+                return;
+            }
 
-        var mode = File.GetUnixFileMode(keyDirectory);
-        if ((mode & ~ownerOnly) != 0)
-            throw new UnauthorizedAccessException(
-                $"Refusing to use the secret-protection key directory '{keyDirectory}': its permissions ({mode}) grant access beyond the owner. Fix its mode to 0700, or delete it to have it recreated, before retrying.");
+            var mode = File.GetUnixFileMode(keyDirectory);
+            if ((mode & ~ownerOnly) != 0)
+                throw new UnauthorizedAccessException(
+                    $"Refusing to use the secret-protection key directory '{keyDirectory}': its permissions ({mode}) grant access beyond the owner. Fix its mode to 0700, or delete it to have it recreated, before retrying.");
+        }
     }
 
     /// <summary>

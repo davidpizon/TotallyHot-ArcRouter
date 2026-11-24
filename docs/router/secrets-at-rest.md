@@ -57,11 +57,14 @@ originally described a DPAPI-only, Windows-required implementation that has sinc
   to `LocalSystem`, the local administrators group, and the writing account, and nothing to
   `BUILTIN\Users`. A local administrator can therefore decrypt the store without being the account that
   wrote it; a non-administrator cannot read the bytes at all.
-- **Elsewhere**: ASP.NET Core Data Protection, with its own key ring persisted to a `keys/` subdirectory
-  of the same machine-shared directory (`PersistKeysToFileSystem`, a fixed application name and purpose
-  string so the same key ring is found again across restarts). That directory is created at mode `0700`
-  if missing, and a write **refuses outright** (rather than proceeding insecurely) if it already exists
-  with broader permissions - see `ProtectedSecretStore.EnsureKeyDirectorySecure`.
+- **Elsewhere**: ASP.NET Core Data Protection, with its own key ring persisted to a `keys/` directory
+  beside the store file (`PersistKeysToFileSystem`, a fixed application name and purpose string so the
+  same key ring is found again across restarts). The default store is `secrets.dat` in the machine-shared
+  directory, so that ring is still `<data-dir>/keys`. An explicit path, which tests use, gets its own
+  ring and does not share that directory. The ring is created at mode `0700` if missing, and a write
+  **refuses outright** (rather than proceeding insecurely) if it already exists with broader permissions
+  - see `ProtectedSecretStore.EnsureKeyDirectorySecure`. Create and the mode check share a process lock
+  so one thread cannot observe the directory before `0700` is set.
 
 Implementation: [`ProtectedSecretStore.cs`](../../src/TotallyHotArcRouter/Proxy/Management/ProtectedSecretStore.cs),
 split into `ISecretReader` (the router's own resolution paths only) and `ISecretWriter` (what
