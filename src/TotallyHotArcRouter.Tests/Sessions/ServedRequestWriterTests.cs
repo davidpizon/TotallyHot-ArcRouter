@@ -6,7 +6,6 @@ using Microsoft.Extensions.Options;
 using Moq;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy;
-using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Sessions;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Transcripts;
