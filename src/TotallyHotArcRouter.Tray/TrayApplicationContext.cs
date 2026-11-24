@@ -27,6 +27,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private const string ServiceName = "TotallyHotArcRouter";
     private static readonly TimeSpan ServiceStatusPollInterval = TimeSpan.FromSeconds(3);
 
+    private readonly SynchronizationContext? _uiContext = SynchronizationContext.Current;
     private readonly NotifyIcon _notifyIcon;
     private readonly ToolStripMenuItem _routingToggleItem;
     private readonly ToolStripMenuItem _statusCaptionItem;
@@ -153,8 +154,20 @@ public sealed class TrayApplicationContext : ApplicationContext
     private void OnReconnected()
     {
         if (_supervisor.Monitor is { } monitor) monitor.BecameUnusable += OnRoutingGateBecameUnusable;
+        if (_supervisor.ApplyMonitor is { } apply) apply.InstallLaunched += OnInstallLaunched;
 
         RefreshMenuState();
+    }
+
+    /// <summary>
+    /// Leaves the process after the installer has been launched. Posted off the monitor's poll thread:
+    /// <see cref="ExitApplication"/> disposes that monitor, and doing so on the poll thread would wait
+    /// for the poll task that is still inside the event.
+    /// </summary>
+    private void OnInstallLaunched()
+    {
+        if (_uiContext is { } ui) ui.Post(d: _ => ExitApplication(), state: null);
+        else ThreadPool.QueueUserWorkItem(_ => ExitApplication());
     }
 
     /// <summary>

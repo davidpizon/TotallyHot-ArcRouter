@@ -19,7 +19,7 @@ public sealed class RouterConnectionSupervisorTests
     {
         var connector = new FakeConnector();
         await using var supervisor = new RouterConnectionSupervisor(connector, "https://localhost:5004",
-            retryInterval: FastRetry, monitorFactory: FakeMonitor);
+            retryInterval: FastRetry, monitorFactory: FakeMonitor, applyMonitorFactory: NoApplyMonitor);
 
         await WaitUntilAsync(() => supervisor.Monitor is not null, WaitTimeout);
 
@@ -31,7 +31,7 @@ public sealed class RouterConnectionSupervisorTests
     {
         var connector = new FakeConnector { FailNextConnects = 2 };
         await using var supervisor = new RouterConnectionSupervisor(connector, "https://localhost:5004",
-            retryInterval: FastRetry, monitorFactory: FakeMonitor);
+            retryInterval: FastRetry, monitorFactory: FakeMonitor, applyMonitorFactory: NoApplyMonitor);
 
         await WaitUntilAsync(() => supervisor.Monitor is not null, WaitTimeout);
 
@@ -51,7 +51,7 @@ public sealed class RouterConnectionSupervisorTests
         // of the BeSameAs assertion below with no code change between runs.
         var connector = new FakeConnector();
         await using var supervisor = new RouterConnectionSupervisor(connector, "https://localhost:5004",
-            retryInterval: FastRetry, monitorFactory: FakeMonitor);
+            retryInterval: FastRetry, monitorFactory: FakeMonitor, applyMonitorFactory: NoApplyMonitor);
         await WaitUntilAsync(() => supervisor.Monitor is not null, WaitTimeout);
         var firstMonitor = supervisor.Monitor;
 
@@ -68,7 +68,7 @@ public sealed class RouterConnectionSupervisorTests
     {
         var connector = new FakeConnector();
         await using var supervisor = new RouterConnectionSupervisor(connector, "https://localhost:5004",
-            retryInterval: FastRetry, monitorFactory: FakeMonitor);
+            retryInterval: FastRetry, monitorFactory: FakeMonitor, applyMonitorFactory: NoApplyMonitor);
         await WaitUntilAsync(() => supervisor.Monitor is not null, WaitTimeout);
         var firstMonitor = supervisor.Monitor;
 
@@ -99,6 +99,11 @@ public sealed class RouterConnectionSupervisorTests
             "a reconnect replaces the monitor as well as announcing itself");
         reconnected.Task.IsCompletedSuccessfully.Should().BeTrue(
             "the supervisor announces every reconnect it performs");
+    }
+
+    private static UpdateApplyMonitor? NoApplyMonitor(IRouterChannelProvider provider)
+    {
+        return null;
     }
 
     private static RoutingGateMonitor FakeMonitor(IRouterChannelProvider provider)

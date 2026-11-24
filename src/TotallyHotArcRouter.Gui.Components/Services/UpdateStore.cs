@@ -21,8 +21,11 @@ public sealed class UpdateStore : AdminStoreBase<IUpdateAdminClient>
     /// </summary>
     public const string ReleasesUrl = "https://github.com/davidpizon/TotallyHot-ArcRouter/releases/latest";
 
+    private static readonly TimeSpan DefaultTrayClaimGrace = TimeSpan.FromSeconds(8);
+
     private readonly IMsiUpdateApplier _applier;
     private readonly Action _exitApplication;
+    private readonly TimeSpan _trayClaimGrace;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="UpdateStore"/> class, over the shared
@@ -46,6 +49,7 @@ public sealed class UpdateStore : AdminStoreBase<IUpdateAdminClient>
         _applier = new MsiUpdateApplier(httpClient: httpClient, logger: NullLogger<MsiUpdateApplier>.Instance);
 
         _exitApplication = () => Environment.Exit(0);
+        _trayClaimGrace = DefaultTrayClaimGrace;
         SupportsApply = supportsApply;
     }
 
@@ -64,13 +68,19 @@ public sealed class UpdateStore : AdminStoreBase<IUpdateAdminClient>
     /// </param>
     /// <param name="supportsApply">See <see cref="SupportsApply"/>. Defaults to <see langword="true"/>.</param>
     /// <param name="logger">Optional logger.</param>
+    /// <param name="trayClaimGrace">
+    /// How long <see cref="RequestHeaderApplyAsync"/> waits for the tray to claim the install before
+    /// the header says the tray app has to be open. Defaults to eight seconds. Tests pass a few
+    /// milliseconds.
+    /// </param>
     public UpdateStore(IUpdateAdminClient client, IMsiUpdateApplier applier, Action? exitApplication = null,
-        bool supportsApply = true, ILogger<UpdateStore>? logger = null)
+        bool supportsApply = true, ILogger<UpdateStore>? logger = null, TimeSpan? trayClaimGrace = null)
         : base(client: client, logger: logger)
     {
         ArgumentNullException.ThrowIfNull(applier);
         _applier = applier;
         _exitApplication = exitApplication ?? (() => { });
+        _trayClaimGrace = trayClaimGrace ?? DefaultTrayClaimGrace;
         SupportsApply = supportsApply;
     }
 
@@ -95,6 +105,20 @@ public sealed class UpdateStore : AdminStoreBase<IUpdateAdminClient>
 
     /// <summary>The outcome of the most recent apply attempt, or <see langword="null"/> before one has run.</summary>
     public MsiApplyResult? LastApplyOutcome { get; private set; }
+
+    /// <summary>
+    /// Whether the header should read "Updating…" and stay disabled. True from the click until the tray
+    /// claims the install. Cleared when the install is still waiting after <see cref="RequestHeaderApplyAsync"/>'s
+    /// grace, so the operator can see that the tray has to be open.
+    /// </summary>
+    public bool InstallInProgress { get; private set; }
+
+    /// <summary>
+    /// Whether the pending install was still unclaimed after the grace period. The header then says the
+    /// tray app has to be open to finish the install. The install stays recorded, so a tray that starts
+    /// later can still claim it.
+    /// </summary>
+    public bool TrayMustBeOpen { get; private set; }
 
     /// <summary>
     /// Loads the last-known update status. Failures are swallowed and surfaced via
@@ -151,6 +175,46 @@ public sealed class UpdateStore : AdminStoreBase<IUpdateAdminClient>
             LastApplyOutcome = await _applier.ApplyAsync(assetDownloadUrl: assetDownloadUrl, assetSha256: assetSha256,
                 latestVersion: status.LatestVersion, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (LastApplyOutcome.Succeeded) _exitApplication();
+        }
+        finally
+        {
+            IsBusy = false;
+            NotifyChanged();
+        }
+    }
+
+    /// <summary>
+    /// Asks the router to remember one pending install for the tray. Does not download or launch anything
+    /// in this process — the dashboard cannot. After a short wait, if the tray has not claimed the
+    /// install, <see cref="TrayMustBeOpen"/> becomes true.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the request and the wait.</param>
+    public async Task RequestHeaderApplyAsync(CancellationToken cancellationToken = default)
+    {
+        InstallInProgress = true;
+        TrayMustBeOpen = false;
+        IsBusy = true;
+        NotifyChanged();
+
+        try
+        {
+            await Client.RequestApplyAsync(cancellationToken).ConfigureAwait(false);
+            Status = await Client.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+            await Task.Delay(delay: _trayClaimGrace, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var status = await Client.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+            Status = status;
+            if (status.ApplyPending)
+            {
+                InstallInProgress = false;
+                TrayMustBeOpen = true;
+            }
+        }
+        catch (GrpcAdminException ex)
+        {
+            InstallInProgress = false;
+            TrayMustBeOpen = false;
+            LastApplyOutcome = MsiApplyResult.Failure(ex.Message);
+            Logger?.LogWarning(exception: ex, message: "Could not ask the tray to install the update.");
         }
         finally
         {

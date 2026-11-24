@@ -153,10 +153,9 @@ public static class ServiceCollectionExtensions
         // only - it never downloads, verifies, or applies an update itself. GitHubReleaseCheckClient
         // is registered as a typed HttpClient (rather than the IHttpClientFactory-named-client
         // pattern OnnxEmbeddingClient uses) since it has exactly one HTTP concern and no reason to
-        // create more than one named client per use. Applying is entirely the GUI's responsibility
-        // (TotallyHot.ArcRouter.Gui.Telemetry.MsiUpdateApplier), reached from an explicit operator
-        // click; this service only records that it is about to happen, via
-        // UpdateAdminGrpcService.NotifyApplyStarting.
+        // create more than one named client per use. Applying stays out of this process: an explicit
+        // operator click records one pending install (ADR-0028), and the logged-on tray claims it and
+        // runs TotallyHot.ArcRouter.Gui.Telemetry.MsiUpdateApplier. This service never starts msiexec.
         services.AddOptions<UpdateOptions>()
             .Configure<IConfiguration>((options, configuration) =>
                 configuration.GetSection(UpdateOptions.SectionName).Bind(options))

@@ -24,7 +24,7 @@ measured by cumulative regret against a per-task oracle.
 | Q0–Q4 — quality rescan, keyed graders, portfolio, CLI reliability report | [`quality-verifier-architecture.md`](../docs/router/quality-verifier-architecture.md), [`grader-reliability-plan.md`](../docs/router/grader-reliability-plan.md) |
 | G1–G2 — shadow judge and the calibration check. G3 is not in the tree: the embedding-memory flag now matches `TranscriptScoreObserver` (`JudgeScore.HasValue`, issue #319). That flag does not complete the rest of G3 | [`geval-shadow-scoring-plan.md`](../docs/router/geval-shadow-scoring-plan.md) |
 | Sessions tab persisted transcripts | [`../docs/gui/dashboard.md`](../docs/gui/dashboard.md) |
-| Auto-update detect (apply is manual: the dashboard links to the release) | [`packaging-and-distribution.md`](../docs/router/packaging-and-distribution.md), [`version-compatibility.md`](../docs/router/version-compatibility.md) |
+| Auto-update detect (apply is manual: the header asks the tray to launch the MSI; Settings still links to the release) | [`packaging-and-distribution.md`](../docs/router/packaging-and-distribution.md), [ADR-0028](../docs/adr/0028-tray-launches-the-installer-the-dashboard-requests.md) |
 
 The Verifier is static analysis + the G-Eval judge; **code execution was removed** (no sandbox, no
 `Process` in `TotallyHotArcRouter.Quality`). Roslyn (C#) and Acornima (JS/TS) give authoritative

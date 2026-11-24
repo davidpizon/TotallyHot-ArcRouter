@@ -85,9 +85,10 @@ public sealed record MsiApplyResult(bool Succeeded, string Message)
 /// (docs/router/packaging-and-distribution.md): the GUI downloads, verifies, and launches
 /// <c>msiexec /i &lt;path&gt; /qn REBOOT=ReallySuppress /l*v &lt;logpath&gt;</c> via
 /// <see cref="IElevatedProcessLauncher"/>, which is what triggers the single UAC elevation prompt. The
-/// caller (<c>TotallyHot.ArcRouter.Gui.Services.UpdateStore</c>) must exit the GUI process immediately
-/// after a successful <see cref="ApplyAsync"/> - this process cannot hold its own files locked while the
-/// MSI tries to replace <c>...\Gui\</c>. This class only launches; it never observes or waits for that
+/// caller must exit its own process immediately after a successful <see cref="ApplyAsync"/>. The
+/// dashboard asks the tray to do that (ADR-0028); a host that launches the installer itself exits from
+/// <c>UpdateStore</c>. This process cannot hold its own files locked while the MSI replaces its files.
+/// This class only launches; it never observes or waits for that
 /// exit, matching the Windows Installer transaction being opaque to this process once started.
 /// </remarks>
 public sealed class MsiUpdateApplier : IMsiUpdateApplier

@@ -9,6 +9,7 @@ public sealed class UpdateStateStore : IUpdateStateStore
 {
     private readonly Lock _gate = new();
     private UpdateStateSnapshot _current = new(null, null);
+    private PendingUpdateApply? _pending;
 
     /// <inheritdoc/>
     public UpdateStateSnapshot Current
@@ -29,7 +30,49 @@ public sealed class UpdateStateStore : IUpdateStateStore
 
         lock (_gate)
         {
-            _current = new UpdateStateSnapshot(Result: result, CheckedAtUtc: DateTimeOffset.UtcNow);
+            if (result is not { IsUpdateAvailable: true }) _pending = null;
+
+            _current = new UpdateStateSnapshot(
+                Result: result,
+                CheckedAtUtc: DateTimeOffset.UtcNow,
+                ApplyPending: _pending is not null);
+        }
+    }
+
+    /// <inheritdoc/>
+    public (bool Created, PendingUpdateApply Pending) TryRequestApply()
+    {
+        lock (_gate)
+        {
+            if (_pending is { } existing) return (Created: false, Pending: existing);
+
+            if (_current.Result is not
+                {
+                    IsUpdateAvailable: true,
+                    AssetDownloadUrl: { } url,
+                    AssetSha256: { } sha,
+                    LatestVersion: { } version
+                })
+            {
+                throw new InvalidOperationException("No verified update is available to install.");
+            }
+
+            _pending = new PendingUpdateApply(LatestVersion: version, AssetDownloadUrl: url, AssetSha256: sha);
+            _current = _current with { ApplyPending = true };
+            return (Created: true, Pending: _pending);
+        }
+    }
+
+    /// <inheritdoc/>
+    public PendingUpdateApply? TryClaimApply()
+    {
+        lock (_gate)
+        {
+            var pending = _pending;
+            _pending = null;
+            if (pending is not null) _current = _current with { ApplyPending = false };
+
+            return pending;
         }
     }
 }

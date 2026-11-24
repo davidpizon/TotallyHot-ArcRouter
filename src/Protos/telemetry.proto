@@ -1303,35 +1303,41 @@ message QualitySignalEvent {
   optional string grade_status = 19;
 }
 
-// The GUI's System Settings window's "Software Update" section (docs/router/auto-update-plan.md
-// Phase 2, superseded 2026-08-26 by the MSI packaging decision - see
-// docs/router/packaging-and-distribution.md): reads the Router's last-known self-update check outcome,
-// forces an immediate re-check, and receives the GUI's audit notification that an apply is starting.
-// Same shape as the other admin services (unary reads/mutations). Unlike the optional feature groups (LlmRouterModelAdmin, ClusterModelAdmin, etc.), this
-// service is mapped unconditionally, the same way RoutingModeAdminService is - update status is core
-// operational state, not an optional add-on.
+// The dashboard's Software Update status, plus the header Update button (ADR-0028). Same shape as the
+// other admin services (unary reads/mutations). Unlike the optional feature groups (LlmRouterModelAdmin,
+// ClusterModelAdmin, etc.), this service is mapped unconditionally, the same way RoutingModeAdminService
+// is - update status is core operational state, not an optional add-on. The calls inherit that
+// endpoint's existing admin authentication; they do not add a second scheme.
 //
-// The Router no longer applies updates itself (that design - a detached TotallyHotArcRouter.Updater.exe
-// helper - was superseded by shipping one signed MSI, per the packaging decision). The GUI is the one
-// that downloads the MSI, verifies its checksum, and launches an elevated `msiexec` - all with
-// information it already has from GetUpdateStatus/CheckForUpdatesNow's asset_download_url/asset_sha256.
-// NotifyApplyStarting exists purely so the Router's own audit log records the apply before the Windows
-// Installer transaction stops this very service.
+// The Router does not download an installer and does not start a process. A detached
+// TotallyHotArcRouter.Updater.exe was superseded by one signed MSI (docs/router/packaging-and-distribution.md).
+// RequestApply only remembers one pending install. The logged-on tray claims it and is the process that
+// downloads, checksum-verifies, and launches elevated msiexec, because a browser page cannot start a
+// process and a Windows service in session 0 cannot show the administrator prompt.
+// NotifyApplyStarting remains the audit line for a host that launches the installer itself.
 service UpdateAdminService {
   // Returns the last-known check outcome from IUpdateStateStore - never null after the background
   // poller's first tick, and "no check has run yet" (every field at its proto3 zero value, unavailable
-  // reason UNSPECIFIED, checked_at_utc unset) beforehand.
+  // reason UNSPECIFIED, checked_at_utc unset) beforehand. apply_pending is true while a RequestApply
+  // is still waiting for the tray to claim it.
   rpc GetUpdateStatus (GetUpdateStatusRequest) returns (UpdateStatusResponse);
 
   // Forces an immediate IReleaseCheckClient.CheckAsync call, records the outcome into IUpdateStateStore,
   // and returns the fresh status - the GUI's "Check Now" button.
   rpc CheckForUpdatesNow (CheckForUpdatesNowRequest) returns (UpdateStatusResponse);
 
-  // Audit-only: logs that the GUI is about to download/launch the installer for the named version,
-  // before the MSI transaction stops the Router's Windows Service. Always acknowledges - this RPC
-  // authorizes nothing and blocks nothing; the GUI decides whether to apply from its own cached
-  // GetUpdateStatus/CheckForUpdatesNow result and proceeds even if this call fails to reach the Router.
+  // Audit-only: logs that a host is about to download/launch the installer for the named version.
+  // Always acknowledges - this RPC authorizes nothing and blocks nothing.
   rpc NotifyApplyStarting (NotifyApplyStartingRequest) returns (NotifyApplyStartingResponse);
+
+  // Records one pending install from the current check. Does not download or start a process.
+  // FAILED_PRECONDITION when no verified update is available. A second call while one install is
+  // still unclaimed leaves that install in place and reports already_pending.
+  rpc RequestApply (RequestApplyRequest) returns (RequestApplyResponse);
+
+  // The tray's poll. Returns the one pending install and clears it, so a second claim is empty.
+  // The router still does not start a process.
+  rpc ClaimPendingApply (ClaimPendingApplyRequest) returns (ClaimPendingApplyResponse);
 }
 
 message GetUpdateStatusRequest {}
@@ -1345,6 +1351,25 @@ message NotifyApplyStartingRequest {
 
 message NotifyApplyStartingResponse {
   bool acknowledged = 1;
+}
+
+message RequestApplyRequest {}
+
+message RequestApplyResponse {
+  bool accepted = 1;
+  // True when this call found an install already waiting and did not record another one.
+  bool already_pending = 2;
+  string latest_version = 3;
+}
+
+message ClaimPendingApplyRequest {}
+
+message ClaimPendingApplyResponse {
+  // False when nothing was waiting. The asset fields are then empty.
+  bool claimed = 1;
+  string latest_version = 2;
+  string asset_download_url = 3;
+  string asset_sha256 = 4;
 }
 
 // Mirrors TotallyHot.ArcRouter.Update.ReleaseCheckUnavailableReason.
@@ -1366,11 +1391,13 @@ message UpdateStatusResponse {
   google.protobuf.Timestamp checked_at_utc = 4;
   UpdateUnavailableReason unavailable_reason = 5;
   optional string unavailable_detail = 6;
-  // The installer MSI's direct download URL, set only when update_available is true. The GUI downloads
-  // this itself - the Router never does.
+  // The installer MSI's direct download URL, set only when update_available is true. The tray
+  // downloads this after ClaimPendingApply. The Router never does.
   optional string asset_download_url = 7;
   // The MSI's published SHA256 (lowercase hex), set only when update_available is true.
   optional string asset_sha256 = 8;
+  // True while a RequestApply is waiting for the tray to claim it.
+  bool apply_pending = 9;
 }
 
 // System Settings' Cost Reconciliation section: read each configured provider's reconciliation

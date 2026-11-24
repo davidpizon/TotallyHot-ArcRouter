@@ -47,6 +47,9 @@ public enum UpdateUnavailableReasonInfo
 /// The MSI's published SHA256 (lowercase hex), set only when <paramref name="UpdateAvailable"/>
 /// is <see langword="true"/>.
 /// </param>
+/// <param name="ApplyPending">
+/// Whether a dashboard apply request is waiting for the tray to claim it.
+/// </param>
 public sealed record UpdateStatusInfo(
     string CurrentVersion,
     string LatestVersion,
@@ -55,7 +58,25 @@ public sealed record UpdateStatusInfo(
     UpdateUnavailableReasonInfo UnavailableReason,
     string? UnavailableDetail,
     string? AssetDownloadUrl = null,
-    string? AssetSha256 = null);
+    string? AssetSha256 = null,
+    bool ApplyPending = false);
+
+/// <summary>The outcome of asking the router to remember one installer for the tray.</summary>
+/// <param name="Accepted">Whether an install is now waiting, including one that was already waiting.</param>
+/// <param name="AlreadyPending">Whether this call left an earlier install in place instead of recording another.</param>
+/// <param name="LatestVersion">The version of the install that is waiting.</param>
+public sealed record RequestApplyInfo(bool Accepted, bool AlreadyPending, string LatestVersion);
+
+/// <summary>The install the tray claimed, or an empty claim when nothing was waiting.</summary>
+/// <param name="Claimed">Whether an install was waiting and is now this caller's to launch.</param>
+/// <param name="LatestVersion">The release version, empty when <paramref name="Claimed"/> is false.</param>
+/// <param name="AssetDownloadUrl">The MSI URL, or <see langword="null"/> when nothing was claimed.</param>
+/// <param name="AssetSha256">The published SHA256, or <see langword="null"/> when nothing was claimed.</param>
+public sealed record ClaimedUpdateApply(
+    bool Claimed,
+    string LatestVersion,
+    string? AssetDownloadUrl,
+    string? AssetSha256);
 
 /// <summary>The outcome of a "notify the Router an apply is starting" audit call.</summary>
 /// <param name="Acknowledged">
@@ -89,6 +110,22 @@ public interface IUpdateAdminClient
     /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
     Task<NotifyApplyStartingInfo> NotifyApplyStartingAsync(string version,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Asks the router to remember one pending install for the tray. The router does not download or
+    /// start a process. A second call while one install is unclaimed does not record another.
+    /// </summary>
+    /// <exception cref="GrpcAdminException">
+    /// The call failed, no verified update is available, or the router is unreachable.
+    /// </exception>
+    Task<RequestApplyInfo> RequestApplyAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Claims the one pending install, if any. The first claim clears it; a later claim is empty, so
+    /// the tray launches the installer once.
+    /// </summary>
+    /// <exception cref="GrpcAdminException">The call failed or the router is unreachable.</exception>
+    Task<ClaimedUpdateApply> ClaimPendingApplyAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -177,6 +214,46 @@ public sealed class UpdateAdminClient
         }
     }
 
+    /// <inheritdoc/>
+    public async Task<RequestApplyInfo> RequestApplyAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await Client
+                .RequestApplyAsync(request: new Contract.RequestApplyRequest(), cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            return new RequestApplyInfo(
+                Accepted: response.Accepted,
+                AlreadyPending: response.AlreadyPending,
+                LatestVersion: response.LatestVersion);
+        }
+        catch (RpcException ex)
+        {
+            throw Wrap(ex: ex, action: "Could not request the update");
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<ClaimedUpdateApply> ClaimPendingApplyAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await Client
+                .ClaimPendingApplyAsync(request: new Contract.ClaimPendingApplyRequest(),
+                    cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            return new ClaimedUpdateApply(
+                Claimed: response.Claimed,
+                LatestVersion: response.LatestVersion,
+                AssetDownloadUrl: string.IsNullOrEmpty(response.AssetDownloadUrl) ? null : response.AssetDownloadUrl,
+                AssetSha256: string.IsNullOrEmpty(response.AssetSha256) ? null : response.AssetSha256);
+        }
+        catch (RpcException ex)
+        {
+            throw Wrap(ex: ex, action: "Could not claim the pending update");
+        }
+    }
+
     /// <summary>Converts a gRPC-contract status response into the client's <see cref="UpdateStatusInfo"/>.</summary>
     private static UpdateStatusInfo MapStatus(Contract.UpdateStatusResponse response)
     {
@@ -188,7 +265,8 @@ public sealed class UpdateAdminClient
             UnavailableReason: MapReason(response.UnavailableReason),
             UnavailableDetail: response.HasUnavailableDetail ? response.UnavailableDetail : null,
             AssetDownloadUrl: response.HasAssetDownloadUrl ? response.AssetDownloadUrl : null,
-            AssetSha256: response.HasAssetSha256 ? response.AssetSha256 : null);
+            AssetSha256: response.HasAssetSha256 ? response.AssetSha256 : null,
+            ApplyPending: response.ApplyPending);
     }
 
     /// <summary>Maps the wire reason enum onto the client's enum.</summary>

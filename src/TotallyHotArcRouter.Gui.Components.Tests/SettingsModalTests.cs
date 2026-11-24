@@ -803,6 +803,16 @@ public sealed class SettingsModalTests
         {
             return Task.FromResult(new NotifyApplyStartingInfo(true));
         }
+
+        public Task<RequestApplyInfo> RequestApplyAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new RequestApplyInfo(Accepted: false, AlreadyPending: false, LatestVersion: Status.LatestVersion));
+        }
+
+        public Task<ClaimedUpdateApply> ClaimPendingApplyAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new ClaimedUpdateApply(Claimed: false, LatestVersion: string.Empty, null, null));
+        }
     }
 
     /// <summary>A minimal <see cref="IMsiUpdateApplier"/> double; none of these tests trigger an apply.</summary>
