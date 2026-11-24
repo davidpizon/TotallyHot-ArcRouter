@@ -37,6 +37,7 @@ public sealed class BenchmarkSyncService
     private readonly ILogger<BenchmarkSyncService> _logger;
     private readonly ProbingPriorMatrixCache? _matrixCache;
     private readonly BenchmarkChecksumProbe _probe;
+    private readonly Func<string, DirectoryInfo> _createTempDirectory;
 
     /// <summary>Initializes a new instance of the <see cref="BenchmarkSyncService"/> class.</summary>
     /// <param name="httpClientFactory">
@@ -60,6 +61,12 @@ public sealed class BenchmarkSyncService
     /// than left for whichever reader's next request happens to notice the corpus changed first. Optional
     /// so a caller that doesn't route any live traffic (a one-shot CLI sync) needn't supply one.
     /// </param>
+    /// <param name="createTempDirectory">
+    /// Builds the per-run download directory from a prefix. Production uses
+    /// <see cref="Directory.CreateTempSubdirectory(string)"/>. Tests pass a factory that creates a directory
+    /// they can name, so cleanup is checked on that directory rather than on every
+    /// <c>arcrouter-bench-*</c> folder in the shared temp root.
+    /// </param>
     public BenchmarkSyncService(
         IHttpClientFactory httpClientFactory,
         BenchmarkChecksumProbe probe,
@@ -67,7 +74,8 @@ public sealed class BenchmarkSyncService
         BenchmarkFileLedger ledger,
         ILogger<BenchmarkSyncService> logger,
         IReadOnlyList<BenchmarkFileSpec>? fileSpecs = null,
-        ProbingPriorMatrixCache? matrixCache = null)
+        ProbingPriorMatrixCache? matrixCache = null,
+        Func<string, DirectoryInfo>? createTempDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(probe);
@@ -77,6 +85,7 @@ public sealed class BenchmarkSyncService
 
         _httpClientFactory = httpClientFactory;
         _probe = probe;
+        _createTempDirectory = createTempDirectory ?? Directory.CreateTempSubdirectory;
         _database = database;
         _ledger = ledger;
         _logger = logger;
@@ -154,7 +163,7 @@ public sealed class BenchmarkSyncService
             .ToList();
         planProgress?.Report(new BenchmarkSyncPlan(Files: planFiles, TotalBytes: planFiles.Sum(f => f.SizeBytes)));
 
-        var tempDirectory = Directory.CreateTempSubdirectory("arcrouter-bench-");
+        var tempDirectory = _createTempDirectory("arcrouter-bench-");
         try
         {
             foreach (var spec in staleSpecs)

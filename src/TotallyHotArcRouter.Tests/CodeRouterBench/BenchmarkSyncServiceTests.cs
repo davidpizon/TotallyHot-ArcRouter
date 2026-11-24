@@ -200,19 +200,27 @@ public class BenchmarkSyncServiceTests
     public async Task SyncAsync_ChecksumMismatch_LeavesNoFileInTheTempDirectory()
     {
         using var temp = new TempBenchmarkDatabase();
-        var tempRoot = Path.GetTempPath();
-        var before = Directory.GetDirectories(path: tempRoot, searchPattern: "arcrouter-bench-*");
-        var servedBodies = new Dictionary<string, string>(Fixtures)
+        var root = Directory.CreateTempSubdirectory("arcrouter-bench-test-");
+        try
         {
-            ["models.json"] = """{ "tampered-after-checksum-was-published": {} }"""
-        };
-        var service = CreateService(temp: temp, servedBodies: servedBodies, repoCommit: "commit123",
-            publishedFixtures: Fixtures);
+            string? created = null;
+            var servedBodies = new Dictionary<string, string>(Fixtures)
+            {
+                ["models.json"] = """{ "tampered-after-checksum-was-published": {} }"""
+            };
+            var service = CreateService(temp: temp, servedBodies: servedBodies, repoCommit: "commit123",
+                publishedFixtures: Fixtures,
+                createTempDirectory: prefix => CreateNamedTemp(root, prefix, path => created = path));
 
-        await service.SyncAsync(datasetRef: "main", null, cancellationToken: TestContext.Current.CancellationToken);
+            await service.SyncAsync(datasetRef: "main", null, cancellationToken: TestContext.Current.CancellationToken);
 
-        var after = Directory.GetDirectories(path: tempRoot, searchPattern: "arcrouter-bench-*");
-        Assert.Equal(expected: before.Length, actual: after.Length);
+            Assert.NotNull(created);
+            Assert.False(Directory.Exists(created));
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+        }
     }
 
     [Fact]
@@ -240,14 +248,22 @@ public class BenchmarkSyncServiceTests
     public async Task SyncAsync_Completes_DeletesItsTempDirectory()
     {
         using var temp = new TempBenchmarkDatabase();
-        var tempRoot = Path.GetTempPath();
-        var before = Directory.GetDirectories(path: tempRoot, searchPattern: "arcrouter-bench-*");
-        var service = CreateService(temp: temp, servedBodies: Fixtures, repoCommit: "commit123");
+        var root = Directory.CreateTempSubdirectory("arcrouter-bench-test-");
+        try
+        {
+            string? created = null;
+            var service = CreateService(temp: temp, servedBodies: Fixtures, repoCommit: "commit123",
+                createTempDirectory: prefix => CreateNamedTemp(root, prefix, path => created = path));
 
-        await service.SyncAsync(datasetRef: "main", null, cancellationToken: TestContext.Current.CancellationToken);
+            await service.SyncAsync(datasetRef: "main", null, cancellationToken: TestContext.Current.CancellationToken);
 
-        var after = Directory.GetDirectories(path: tempRoot, searchPattern: "arcrouter-bench-*");
-        Assert.Equal(expected: before.Length, actual: after.Length);
+            Assert.NotNull(created);
+            Assert.False(Directory.Exists(created));
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+        }
     }
 
     private static BenchmarkSyncService CreateService(
@@ -258,7 +274,8 @@ public class BenchmarkSyncServiceTests
         string? omitFromTree = null,
         CancellationTokenSource? cancelDownloadsWith = null,
         Action<string>? onFileRequested = null,
-        IReadOnlySet<string>? lfsFileNames = null)
+        IReadOnlySet<string>? lfsFileNames = null,
+        Func<string, DirectoryInfo>? createTempDirectory = null)
     {
         var oidSourceBodies = publishedFixtures ?? servedBodies;
         var publishedOids = oidSourceBodies.ToDictionary(
@@ -312,7 +329,20 @@ public class BenchmarkSyncServiceTests
         var ledger = temp.CreateLedger();
         return new BenchmarkSyncService(
             httpClientFactory: httpClientFactory, probe: probe, database: temp.Database, ledger: ledger,
-            logger: NullLogger<BenchmarkSyncService>.Instance, fileSpecs: TestFileSpecs);
+            logger: NullLogger<BenchmarkSyncService>.Instance, fileSpecs: TestFileSpecs,
+            createTempDirectory: createTempDirectory);
+    }
+
+    /// <summary>
+    /// Creates the download directory under <paramref name="root"/> and records its path. Sibling tests
+    /// cannot change that path, so the cleanup assert does not count every <c>arcrouter-bench-*</c> folder
+    /// in the process temp root.
+    /// </summary>
+    private static DirectoryInfo CreateNamedTemp(DirectoryInfo root, string prefix, Action<string> created)
+    {
+        var info = Directory.CreateDirectory(Path.Combine(root.FullName, prefix + Guid.NewGuid().ToString("N")));
+        created(info.FullName);
+        return info;
     }
 
     private sealed class SynchronousProgress<T>(Action<T> report) : IProgress<T>
