@@ -1,6 +1,6 @@
 # Plan: #304 phase 9 — grader epoch marks on existing charts
 
-**Status:** Draft. Q1, Q2, Q3, and the unit switch are answered (David, 2026-10-26). This pull request is docs only. It does not change source, tests, project files, or workflows. Implementation waits until David signs off this plan.
+**Status:** Implemented in [#351](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/351). Q1, Q2, Q3, and the unit switch were answered before that merge (David, 2026-10-26). The sentences below that say this pull request is docs only describe the plan pull request, not the tree after #351.
 
 **Goal:** Show each local-grader takeover, each teacher retake, and each teacher, BGE, or feature-schema change as a point-in-time mark on charts that already exist, including a token-efficiency series. Count `Incomplete` receipts by reason. The marks do not say they caused a line to move. Unknown cost stays blank. There is no new grader-epoch chart.
 

@@ -769,7 +769,8 @@ unit suite is sufficient. It has **not** been run. Per ADR-0008 Amendment 1 rule
 close until that smoke is done.
 
 **C2 · `RequestTelemetryPublisher` — Data Clump; Extract Method applied without Introduce Parameter
-Object. Major.** The notes above record this class as decomposed into 6 named private methods. It was —
+Object. Major.** The production call site now enqueues one `ServedRequest` instead of the long
+`PublishAsync` argument list. The notes above record this class as decomposed into 6 named private methods. It was —
 but the parameters travelled with the code:
 
 | Member | Params |

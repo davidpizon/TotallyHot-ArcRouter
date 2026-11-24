@@ -417,9 +417,10 @@ public sealed class SessionCaptureWriterTests : IDisposable
         var writer = provider.GetRequiredService<SessionCaptureWriter>();
 
         foreach (var service in hosted) await service.StartAsync(CancellationToken.None);
+        await writer.StartAsync(CancellationToken.None);
 
         Assert.Contains(hosted, h => h is SessionStoreStartupService);
-        Assert.Contains(hosted, h => ReferenceEquals(h, writer));
+        Assert.DoesNotContain(hosted, h => h is SessionCaptureWriter);
         Assert.False(File.Exists(Path.Combine(data, "transcripts.db")));
 
         Assert.True(await writer.EnqueueAsync(new SessionCaptureItem("client-9", Turn(spool: null))));
@@ -428,6 +429,7 @@ public sealed class SessionCaptureWriterTests : IDisposable
         var store = provider.GetRequiredService<SessionStore>();
         var frames = store.ReadBodies(store.ResolveArchiveSessionId("client-9"));
         Assert.Equal(["request", "response"], frames.Select(f => Encoding.UTF8.GetString(f.Plaintext!)));
+        await writer.StopAsync(CancellationToken.None);
         foreach (var service in hosted.AsEnumerable().Reverse()) await service.StopAsync(CancellationToken.None);
     }
 

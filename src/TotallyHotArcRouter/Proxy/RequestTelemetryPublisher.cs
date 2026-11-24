@@ -9,6 +9,7 @@ using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Quality.Ingress;
 using TotallyHot.ArcRouter.Router.Classification;
 using TotallyHot.ArcRouter.Router.Embeddings;
+using TotallyHot.ArcRouter.Sessions;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Transcripts;
 
@@ -129,20 +130,11 @@ internal sealed class RequestTelemetryPublisher
     }
 
     /// <summary>
-    /// Resolves session/turn identity, extracts usage and cost, and publishes the resulting
-    /// <see cref="RoutingTelemetryEvent"/> together with every other telemetry side-effect for one served
-    /// request. Best-effort throughout, matching the original inlined method: a failure in any one
-    /// side-effect (transcript capture excepted, which self-guards) is not expected to surface as a
-    /// request failure, since the response has already been fully sent to the client by this point.
+    /// Computes one served request's telemetry facts without writing SQLite. The request thread calls this,
+    /// then either <see cref="ApplyInlineAsync"/> or the background writer.
     /// </summary>
-    /// <returns>
-    /// The identity, usage, cost and text extracts this method computed, so session capture can snapshot them
-    /// (#165) without this publisher depending on session storage. The turn is returned even when a telemetry side
-    /// effect throws (including when the request was aborted and the publisher honours its token): the failure
-    /// is carried on <see cref="PublishedTurn.TelemetryFailure"/> for the caller to log, so a broken sink can
-    /// never stop a turn that was served and relayed from being stored.
-    /// </returns>
-    public async Task<PublishedTurn> PublishAsync(
+    /// <returns>The facts the writer or the inline path applies.</returns>
+    internal QueuedTelemetryWork BuildQueuedWork(
         HttpContext context,
         ResolvedModelRoute route,
         string requestedModelName,
@@ -155,7 +147,6 @@ internal sealed class RequestTelemetryPublisher
         long latencyToHeadersMs,
         long totalDurationMs,
         int statusCode,
-        CancellationToken cancellationToken,
         HttpResponseHeaders? upstreamHeaders = null,
         IncrementalUsageScanner? tailScanner = null,
         float[]? taskEmbedding = null,
@@ -251,79 +242,287 @@ internal sealed class RequestTelemetryPublisher
             NewestUserMessage: newestUserMessage,
             ResponseText: responseText);
 
-        // The side effects below are best-effort: the response has already reached the client, and a publisher is
-        // allowed to throw (or to observe a cancelled request token once the client has gone). Whatever they do,
-        // the turn computed above is still returned, so session capture stores it; the failure travels with it.
+        return new QueuedTelemetryWork(
+            Turn: published,
+            Route: route,
+            RequestedModelName: requestedModelName,
+            TaskText: taskText,
+            HasToolCalls: hasToolCalls,
+            FollowsToolResults: followsToolResults,
+            DimBestModel: dimBestModel,
+            UntrainedBaselineModel: untrainedBaselineModel,
+            UntrainedBaselinePredictedScore: untrainedBaselinePredictedScore,
+            UsageExtracted: usageExtracted,
+            RouterTokens: routerTokens,
+            RequestSummary: requestSummary,
+            ResponseSummary: responseSummary,
+            UpstreamRequestId: ExtractUpstreamRequestId(upstreamHeaders),
+            ResolveArchive: resolveArchive);
+    }
+
+    /// <summary>
+    /// Resolves session/turn identity, extracts usage and cost, and publishes the resulting
+    /// <see cref="RoutingTelemetryEvent"/> together with every other telemetry side-effect for one served
+    /// request. Best-effort throughout: a failure in any one side-effect is carried on
+    /// <see cref="PublishedTurn.TelemetryFailure"/> so a broken sink cannot stop a served turn from being stored.
+    /// Tests and the no-writer fallback call this. The production path uses <see cref="BuildQueuedWork"/> and
+    /// <see cref="ApplyQueuedAsync"/> on the background writer, which does not observe
+    /// <see cref="HttpContext.RequestAborted"/>.
+    /// </summary>
+    /// <returns>The turn, with <see cref="PublishedTurn.TelemetryFailure"/> set when a side effect threw.</returns>
+    public async Task<PublishedTurn> PublishAsync(
+        HttpContext context,
+        ResolvedModelRoute route,
+        string requestedModelName,
+        bool isFallback,
+        string telemetryShapeProvider,
+        byte[] rewrittenRequestBody,
+        byte[] capturedResponseBytes,
+        byte[]? nativeResponseBytes,
+        bool isStreaming,
+        long latencyToHeadersMs,
+        long totalDurationMs,
+        int statusCode,
+        CancellationToken cancellationToken,
+        HttpResponseHeaders? upstreamHeaders = null,
+        IncrementalUsageScanner? tailScanner = null,
+        float[]? taskEmbedding = null,
+        int routerTokens = 0,
+        RoutingSubstitutionReason resolutionReason = RoutingSubstitutionReason.None,
+        bool isExploratory = false,
+        double propensity = 1.0,
+        RequestClassification? classification = null,
+        string? taskText = null,
+        string? dimBestModel = null,
+        string? untrainedBaselineModel = null,
+        double? untrainedBaselinePredictedScore = null,
+        Func<string, ArchiveBinding>? resolveArchive = null)
+    {
+        var work = BuildQueuedWork(
+            context: context, route: route, requestedModelName: requestedModelName, isFallback: isFallback,
+            telemetryShapeProvider: telemetryShapeProvider, rewrittenRequestBody: rewrittenRequestBody,
+            capturedResponseBytes: capturedResponseBytes, nativeResponseBytes: nativeResponseBytes,
+            isStreaming: isStreaming, latencyToHeadersMs: latencyToHeadersMs, totalDurationMs: totalDurationMs,
+            statusCode: statusCode, upstreamHeaders: upstreamHeaders, tailScanner: tailScanner,
+            taskEmbedding: taskEmbedding, routerTokens: routerTokens, resolutionReason: resolutionReason,
+            isExploratory: isExploratory, propensity: propensity, classification: classification,
+            taskText: taskText, dimBestModel: dimBestModel, untrainedBaselineModel: untrainedBaselineModel,
+            untrainedBaselinePredictedScore: untrainedBaselinePredictedScore, resolveArchive: resolveArchive);
+        return await ApplyInlineAsync(work, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Builds one <see cref="ServedRequest"/> on the request thread and queues it. Spend and the session file
+    /// run later, on <paramref name="writer"/>. Bind happens before enqueue so a drop can see the archive id.
+    /// </summary>
+    internal async Task EnqueueServedAsync(
+        ServedRequestWriter writer,
+        InFlightRequestGauge? gauge,
+        TurnCapture? capture,
+        bool telemetryCaptureTruncated,
+        HttpContext context,
+        ResolvedModelRoute route,
+        string requestedModelName,
+        bool isFallback,
+        string telemetryShapeProvider,
+        byte[] rewrittenRequestBody,
+        byte[] capturedResponseBytes,
+        byte[]? nativeResponseBytes,
+        bool isStreaming,
+        long latencyToHeadersMs,
+        long totalDurationMs,
+        int statusCode,
+        HttpResponseHeaders? upstreamHeaders,
+        IncrementalUsageScanner? tailScanner,
+        float[]? taskEmbedding,
+        int routerTokens,
+        RoutingSubstitutionReason resolutionReason,
+        bool isExploratory,
+        double propensity,
+        RequestClassification? classification,
+        string? taskText,
+        string? dimBestModel,
+        string? untrainedBaselineModel,
+        double? untrainedBaselinePredictedScore)
+    {
+        var work = BuildQueuedWork(
+            context: context, route: route, requestedModelName: requestedModelName, isFallback: isFallback,
+            telemetryShapeProvider: telemetryShapeProvider, rewrittenRequestBody: rewrittenRequestBody,
+            capturedResponseBytes: capturedResponseBytes, nativeResponseBytes: nativeResponseBytes,
+            isStreaming: isStreaming, latencyToHeadersMs: latencyToHeadersMs, totalDurationMs: totalDurationMs,
+            statusCode: statusCode, upstreamHeaders: upstreamHeaders, tailScanner: tailScanner,
+            taskEmbedding: taskEmbedding, routerTokens: routerTokens, resolutionReason: resolutionReason,
+            isExploratory: isExploratory, propensity: propensity, classification: classification,
+            taskText: taskText, dimBestModel: dimBestModel, untrainedBaselineModel: untrainedBaselineModel,
+            untrainedBaselinePredictedScore: untrainedBaselinePredictedScore,
+            resolveArchive: capture is null ? null : capture.BindArchive);
+
+        if (capture is not null) capture.BindArchive(work.Turn.SessionId);
+
+        var item = capture is null
+            ? null
+            : await capture.FinishAsync(work.Turn, context, telemetryCaptureTruncated).ConfigureAwait(false);
+
+        var served = new ServedRequest(
+            work: work,
+            capture: item,
+            onDropped: capture is null ? null : capture.NotifyDroppedOnce,
+            startEpoch: item?.Epoch ?? 0);
+        if (!await writer.EnqueueAsync(served, gauge).ConfigureAwait(false))
+        {
+            _logger.LogDebug("A served request was refused by the writer; the forwarded response was unaffected.");
+        }
+    }
+
+    /// <summary>
+    /// Writes spend, then the transcript index, then the live event, on the caller's thread. A throw skips
+    /// the rest of that sequence and comes back on the turn.
+    /// </summary>
+    /// <param name="work">Facts already computed.</param>
+    /// <param name="cancellationToken">The request token. The live event observes it; spend and the index do not.</param>
+    /// <returns>The turn, with a failure when a side effect threw.</returns>
+    internal async Task<PublishedTurn> ApplyInlineAsync(QueuedTelemetryWork work, CancellationToken cancellationToken)
+    {
         try
         {
-            await RecordSpendAndBudgetAsync(
-                route: route,
-                requestedModel: requestedModel,
-                promptTokens: promptTokens,
-                completionTokens: completionTokens,
-                cacheCreationTokens: cacheCreationTokens,
-                cacheReadTokens: cacheReadTokens,
-                estimatedCostUsd: estimatedCostUsd,
-                costConfidence: costConfidence,
-                usageExtracted: usageExtracted,
-                sessionId: sessionId,
-                turnNumber: turnNumber,
-                upstreamHeaders: upstreamHeaders).ConfigureAwait(false);
-
-            await PersistTranscriptAsync(
-                correlationId: correlationId,
-                requestedModelName: requestedModelName,
-                route: route,
-                classification: classification,
-                taskText: taskText,
-                responseText: responseText,
-                hasToolCalls: hasToolCalls,
-                estimatedCostUsd: estimatedCostUsd,
-                isExploratory: isExploratory,
-                propensity: propensity,
-                promptTokens: promptTokens,
-                completionTokens: completionTokens,
-                dimBestModel: dimBestModel,
-                untrainedBaselineModel: untrainedBaselineModel,
-                untrainedBaselinePredictedScore: untrainedBaselinePredictedScore,
-                sessionId: sessionId,
-                resolveArchive: resolveArchive).ConfigureAwait(false);
-
-            await PublishTelemetryEventAsync(
-                sessionId: sessionId,
-                turnNumber: turnNumber,
-                isSynthesized: isSynthesized,
-                requestedModel: requestedModel,
-                route: route,
-                isFallback: isFallback,
-                promptTokens: promptTokens,
-                completionTokens: completionTokens,
-                estimatedCostUsd: estimatedCostUsd,
-                isStreaming: isStreaming,
-                latencyToHeadersMs: latencyToHeadersMs,
-                totalDurationMs: totalDurationMs,
-                statusCode: statusCode,
-                cacheCreationTokens: cacheCreationTokens,
-                cacheReadTokens: cacheReadTokens,
-                costConfidence: costConfidence,
-                requestSummary: requestSummary,
-                responseSummary: responseSummary,
-                correlationId: correlationId,
-                routerTokens: routerTokens,
-                substitutionReason: substitutionReason,
-                cancellationToken: cancellationToken,
-                responseText: responseText,
-                newestUserMessage: newestUserMessage,
-                subagentSignal: classification?.Subagent?.ToLabel(),
-                hasToolCalls: hasToolCalls,
-                followsToolResults: followsToolResults).ConfigureAwait(false);
+            await ApplyMoneyAndIndexAsync(work: work, cancellationToken: cancellationToken, onIndexFailed: null,
+                indexBeforeMoney: false).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            return published with { TelemetryFailure = ex };
+            return work.Turn with { TelemetryFailure = ex };
         }
 
-        return published;
+        return work.Turn;
+    }
+
+    /// <summary>
+    /// Writes the transcript index, then spend, then the live event, on the background writer.
+    /// The writes use <see cref="CancellationToken.None"/>: a streaming client aborts
+    /// <see cref="HttpContext.RequestAborted"/> as the response finishes, which would drop the dashboard
+    /// event for a request that completed. A spend failure does not undo a session file already flushed, and
+    /// it skips the live event. An index failure after a flush runs <paramref name="onIndexFailed"/> and does
+    /// not append the file again.
+    /// </summary>
+    /// <param name="work">Facts already computed on the request thread.</param>
+    /// <param name="appendedFile">Whether the session file was flushed before this call.</param>
+    /// <param name="onIndexFailed">Marks the transcript row terminal when the index insert fails after a flush.</param>
+    /// <returns>The turn, with a failure when spend or the live event threw.</returns>
+    internal async Task<PublishedTurn> ApplyQueuedAsync(QueuedTelemetryWork work, bool appendedFile,
+        Action? onIndexFailed = null)
+    {
+        try
+        {
+            await ApplyMoneyAndIndexAsync(
+                work: work,
+                cancellationToken: CancellationToken.None,
+                onIndexFailed: appendedFile ? onIndexFailed : null,
+                indexBeforeMoney: true).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(exception: ex,
+                message: "Failed to publish routing telemetry; the forwarded response was unaffected.");
+            return work.Turn with { TelemetryFailure = ex };
+        }
+
+        return work.Turn;
+    }
+
+    /// <summary>
+    /// Runs the index insert and the money sequence. <paramref name="indexBeforeMoney"/> is the writer order
+    /// (file already flushed, then index, then spend). The inline path spends first, matching the historical
+    /// try, so a spend exception still skips the index.
+    /// </summary>
+    private async Task ApplyMoneyAndIndexAsync(QueuedTelemetryWork work, CancellationToken cancellationToken,
+        Action? onIndexFailed, bool indexBeforeMoney)
+    {
+        var turn = work.Turn;
+
+        async Task IndexAsync()
+        {
+            await PersistTranscriptAsync(
+                correlationId: turn.CorrelationId,
+                requestedModelName: work.RequestedModelName,
+                route: work.Route,
+                classification: turn.Classification,
+                taskText: work.TaskText,
+                responseText: turn.ResponseText,
+                hasToolCalls: work.HasToolCalls,
+                estimatedCostUsd: turn.EstimatedCostUsd,
+                isExploratory: turn.IsExploratory,
+                propensity: turn.Propensity,
+                promptTokens: turn.PromptTokens,
+                completionTokens: turn.CompletionTokens,
+                dimBestModel: work.DimBestModel,
+                untrainedBaselineModel: work.UntrainedBaselineModel,
+                untrainedBaselinePredictedScore: work.UntrainedBaselinePredictedScore,
+                sessionId: turn.SessionId,
+                resolveArchive: work.ResolveArchive,
+                onIndexFailed: onIndexFailed is null ? null : _ => onIndexFailed()).ConfigureAwait(false);
+        }
+
+        async Task SpendAsync()
+        {
+            await RecordSpendAndBudgetAsync(
+                route: work.Route,
+                requestedModel: turn.RequestedModel,
+                promptTokens: turn.PromptTokens,
+                completionTokens: turn.CompletionTokens,
+                cacheCreationTokens: turn.CacheCreationTokens,
+                cacheReadTokens: turn.CacheReadTokens,
+                estimatedCostUsd: turn.EstimatedCostUsd,
+                costConfidence: turn.CostConfidence,
+                usageExtracted: work.UsageExtracted,
+                sessionId: turn.SessionId,
+                turnNumber: turn.TurnNumber,
+                upstreamRequestId: work.UpstreamRequestId).ConfigureAwait(false);
+        }
+
+        async Task EventAsync()
+        {
+            await PublishTelemetryEventAsync(
+                sessionId: turn.SessionId,
+                turnNumber: turn.TurnNumber,
+                isSynthesized: turn.IsSessionSynthesized,
+                requestedModel: turn.RequestedModel,
+                route: work.Route,
+                isFallback: turn.IsFallback,
+                promptTokens: turn.PromptTokens,
+                completionTokens: turn.CompletionTokens,
+                estimatedCostUsd: turn.EstimatedCostUsd,
+                isStreaming: turn.IsStreaming,
+                latencyToHeadersMs: turn.LatencyToHeadersMs,
+                totalDurationMs: turn.TotalDurationMs,
+                statusCode: turn.StatusCode,
+                cacheCreationTokens: turn.CacheCreationTokens,
+                cacheReadTokens: turn.CacheReadTokens,
+                costConfidence: turn.CostConfidence,
+                requestSummary: work.RequestSummary,
+                responseSummary: work.ResponseSummary,
+                correlationId: turn.CorrelationId,
+                routerTokens: work.RouterTokens,
+                substitutionReason: turn.SubstitutionReason,
+                cancellationToken: cancellationToken,
+                responseText: turn.ResponseText,
+                newestUserMessage: turn.NewestUserMessage,
+                subagentSignal: turn.Classification?.Subagent?.ToLabel(),
+                hasToolCalls: work.HasToolCalls,
+                followsToolResults: work.FollowsToolResults).ConfigureAwait(false);
+        }
+
+        if (indexBeforeMoney)
+        {
+            await IndexAsync().ConfigureAwait(false);
+            await SpendAsync().ConfigureAwait(false);
+            await EventAsync().ConfigureAwait(false);
+        }
+        else
+        {
+            await SpendAsync().ConfigureAwait(false);
+            await IndexAsync().ConfigureAwait(false);
+            await EventAsync().ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -583,7 +782,7 @@ internal sealed class RequestTelemetryPublisher
         bool usageExtracted,
         string sessionId,
         int turnNumber,
-        HttpResponseHeaders? upstreamHeaders)
+        string? upstreamRequestId)
     {
         // Best-effort, like every other telemetry side-effect on this path - see SpendTracker's own
         // internal try/catch around its file write. Recorded even when usage/cost couldn't be
@@ -640,7 +839,7 @@ internal sealed class RequestTelemetryPublisher
                 EstimatedCostUsd: estimatedCostUsd,
                 CostConfidence: costConfidence,
                 OccurredAtUtc: DateTimeOffset.UtcNow,
-                RequestId: ExtractUpstreamRequestId(upstreamHeaders));
+                RequestId: upstreamRequestId);
             await _usageLedger.RecordAsync(entry: ledgerEntry, cancellationToken: CancellationToken.None)
                 .ConfigureAwait(false);
         }
@@ -791,7 +990,8 @@ internal sealed class RequestTelemetryPublisher
         string? untrainedBaselineModel,
         double? untrainedBaselinePredictedScore,
         string sessionId,
-        Func<string, ArchiveBinding>? resolveArchive)
+        Func<string, ArchiveBinding>? resolveArchive,
+        Action<Guid>? onIndexFailed = null)
     {
         // The transcript row is metadata only (#165 phase 2). Text lives in the session file. The insert
         // follows TranscriptOptions.Enabled inside the store, the same toggle as capture, and no longer
@@ -799,11 +999,13 @@ internal sealed class RequestTelemetryPublisher
         // bind one) still writes the row when the store is enabled; its text columns stay null.
         _ = _routingOptionsMonitor;
         if (_transcriptStore is not null)
+        {
+            ArchiveBinding? archive = null;
             try
             {
                 // Resolved here, inside the try, so a session store that cannot open costs this transcript row and
                 // nothing else: the live telemetry event after this call still publishes.
-                var archive = resolveArchive?.Invoke(sessionId);
+                archive = resolveArchive?.Invoke(sessionId);
                 await _transcriptStore.InsertAsync(
                     record: new TranscriptRecord(
                         0,
@@ -837,7 +1039,9 @@ internal sealed class RequestTelemetryPublisher
                 _logger.LogWarning(exception: ex,
                     message: "Failed to write a transcript row for correlation {CorrelationId}; continuing without it.",
                     correlationId);
+                if (archive is { } bound) onIndexFailed?.Invoke(bound.ArchiveTurnId);
             }
+        }
     }
 
     /// <summary>

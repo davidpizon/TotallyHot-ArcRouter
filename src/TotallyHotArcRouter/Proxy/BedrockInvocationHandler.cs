@@ -5,6 +5,7 @@ using System.Diagnostics;
 using TotallyHot.ArcRouter.Proxy.Bedrock;
 using TotallyHot.ArcRouter.Proxy.Translation;
 using TotallyHot.ArcRouter.Router.Classification;
+using TotallyHot.ArcRouter.Sessions;
 using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Proxy;
@@ -23,6 +24,8 @@ internal sealed class BedrockInvocationHandler
     private readonly ICircuitBreaker _circuitBreaker;
     private readonly ILogger _logger;
     private readonly RequestTelemetryPublisher _requestTelemetryPublisher;
+    private readonly ServedRequestWriter? _servedRequestWriter;
+    private readonly InFlightRequestGauge? _inFlightGauge;
 
     /// <summary>Separates Bedrock event payloads in the stored provider-side response.</summary>
     private static readonly byte[] NewLine = "\n"u8.ToArray();
@@ -40,16 +43,22 @@ internal sealed class BedrockInvocationHandler
     /// success/failure recorded here is visible there too.
     /// </param>
     /// <param name="requestTelemetryPublisher">Telemetry publisher shared with the HTTP forwarding path.</param>
+    /// <param name="servedRequestWriter">Background writer for the row and the session file, when the host registered one.</param>
+    /// <param name="inFlightGauge">Held until the writer finishes the row.</param>
     public BedrockInvocationHandler(
         ILogger logger,
         IBedrockRuntimeClientFactory bedrockClientFactory,
         ICircuitBreaker circuitBreaker,
-        RequestTelemetryPublisher requestTelemetryPublisher)
+        RequestTelemetryPublisher requestTelemetryPublisher,
+        ServedRequestWriter? servedRequestWriter = null,
+        InFlightRequestGauge? inFlightGauge = null)
     {
         _logger = logger;
         _bedrockClientFactory = bedrockClientFactory;
         _circuitBreaker = circuitBreaker;
         _requestTelemetryPublisher = requestTelemetryPublisher;
+        _servedRequestWriter = servedRequestWriter;
+        _inFlightGauge = inFlightGauge;
     }
 
     /// <summary>
@@ -283,6 +292,26 @@ internal sealed class BedrockInvocationHandler
             // its streaming chunks aren't SSE-framed, so the same capture approach doesn't apply. Always
             // null here - telemetry falls back to parsing the translated "openai"-shaped bytes, unchanged
             // from before this plan.
+            if (_servedRequestWriter is not null)
+            {
+                await _requestTelemetryPublisher.EnqueueServedAsync(
+                    writer: _servedRequestWriter, gauge: _inFlightGauge, capture: capture,
+                    telemetryCaptureTruncated: UpstreamResponseWriter.IsTelemetryCaptureTruncated(
+                        clientShapeBytes: capturedResponseBytes, nativeBytes: null, tailScanner: tailScanner),
+                    context: context, route: route, requestedModelName: requestedModelName,
+                    isFallback: isFallback, telemetryShapeProvider: "openai",
+                    rewrittenRequestBody: rewrittenBody, capturedResponseBytes: capturedResponseBytes,
+                    nativeResponseBytes: null, isStreaming: isStreamingRequest,
+                    latencyToHeadersMs: latencyToHeadersMs, totalDurationMs: totalDurationMs,
+                    statusCode: StatusCodes.Status200OK, upstreamHeaders: null, tailScanner: tailScanner,
+                    taskEmbedding: taskEmbedding, routerTokens: routerTokens, resolutionReason: resolutionReason,
+                    isExploratory: isExploratory, propensity: propensity, classification: classification,
+                    taskText: taskText, dimBestModel: dimBestModel,
+                    untrainedBaselineModel: untrainedBaselineModel,
+                    untrainedBaselinePredictedScore: untrainedBaselinePredictedScore);
+            }
+            else
+            {
             var publishedTurn = await _requestTelemetryPublisher.PublishAsync(context: context, route: route,
                 requestedModelName: requestedModelName, isFallback: isFallback, telemetryShapeProvider: "openai",
                 rewrittenRequestBody: rewrittenBody, capturedResponseBytes: capturedResponseBytes, null,
@@ -305,6 +334,7 @@ internal sealed class BedrockInvocationHandler
                     turn: publishedTurn, context: context,
                     telemetryCaptureTruncated: UpstreamResponseWriter.IsTelemetryCaptureTruncated(
                         clientShapeBytes: capturedResponseBytes, nativeBytes: null, tailScanner: tailScanner));
+            }
         }
         catch (Exception ex)
         {
