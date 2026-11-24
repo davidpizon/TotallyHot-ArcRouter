@@ -54,6 +54,8 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<ProviderAdminStore>();
 // Backs the Sessions tab's persisted-history view. See Services/PersistedSessionStore.cs.
 builder.Services.AddSingleton<PersistedSessionStore>();
+builder.Services.AddSingleton(sp => new SessionDetailsStore(
+    new PersistedSessionsClient(sp.GetRequiredService<IRouterChannelProvider>().CallInvoker)));
 // Backs the Governance tab's price-source panel. See Services/PriceSourceStore.cs.
 builder.Services.AddSingleton<PriceSourceStore>();
 // Backs the Governance tab's Benchmark Data panel. See Services/BenchmarkDataStore.cs.

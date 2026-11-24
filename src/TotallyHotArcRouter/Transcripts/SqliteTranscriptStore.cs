@@ -15,7 +15,7 @@ namespace TotallyHot.ArcRouter.Transcripts;
 /// immediately - the same live-gate posture <see cref="Judge.GraderDispatcher"/> takes for
 /// <see cref="Judge.JudgeOptions.Enabled"/>.
 /// </summary>
-public sealed class SqliteTranscriptStore : ITranscriptStore
+public sealed partial class SqliteTranscriptStore : ITranscriptStore
 {
     private readonly TranscriptDatabase _database;
     private readonly Lazy<ISessionExtractReader>? _extracts;

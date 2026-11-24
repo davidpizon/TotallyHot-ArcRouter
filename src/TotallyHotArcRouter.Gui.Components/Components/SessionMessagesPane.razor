@@ -3,6 +3,7 @@
 @implements IAsyncDisposable
 @inject IJSRuntime Js
 @inject SessionsViewState ViewState
+@inject IServiceProvider Services
 
 <div class="ls-chat-pane flex flex-col min-h-0 h-full panel-enter" @key="Conversation.Id">
     <div class="ls-chat-title shrink-0">
@@ -282,7 +283,17 @@
         else _expandedKeys.Remove(key);
     }
 
-    private void ShowEarlier() => _windowTurns += WindowSize;
+    private async Task ShowEarlier()
+    {
+        _windowTurns += WindowSize;
+        var history = Services.GetService<PersistedSessionStore>();
+        var details = Services.GetService<SessionDetailsStore>();
+        if (_windowTurns >= Conversation.Turns.Count)
+        {
+            if (history is not null) await history.LoadEarlierAsync(Conversation.Id);
+            if (details is not null) await details.LoadEarlierAsync();
+        }
+    }
 
     private void ToggleSearch()
     {

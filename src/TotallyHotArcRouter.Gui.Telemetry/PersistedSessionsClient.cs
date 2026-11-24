@@ -41,6 +41,22 @@ public interface IPersistedSessionsClient
     {
         return Task.FromResult<IReadOnlyList<PersistedTurnText>>([]);
     }
+
+    /// <summary>
+    /// Loads one page of persisted turn metadata. The default returns an empty captured page so existing
+    /// fakes keep compiling.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="limit">The page size. Zero asks the router for its default.</param>
+    /// <param name="beforeTranscriptId">The cursor, or null for the newest page.</param>
+    /// <param name="liveFloorTurnNumber">The lowest live turn number, used on the first page only.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    Task<SessionTurnDetailsResult> GetSessionTurnDetailsAsync(
+        string sessionId, int limit, long? beforeTranscriptId, int liveFloorTurnNumber,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(new SessionTurnDetailsResult(true, [], null, null));
+    }
 }
 
 /// <summary>One turn's display preview from <c>GetTurnTexts</c>.</summary>
@@ -139,6 +155,90 @@ public sealed class PersistedSessionsClient
             throw Wrap(ex: ex, action: "Could not read turn text");
         }
     }
+
+    /// <inheritdoc/>
+    public async Task<SessionTurnDetailsResult> GetSessionTurnDetailsAsync(
+        string sessionId, int limit, long? beforeTranscriptId, int liveFloorTurnNumber,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var request = new Contract.GetSessionTurnDetailsRequest
+            {
+                SessionId = sessionId,
+                Limit = limit,
+                LiveFloorTurnNumber = liveFloorTurnNumber,
+            };
+            if (beforeTranscriptId is not null) request.BeforeTranscriptId = beforeTranscriptId.Value;
+            var response = await Client.GetSessionTurnDetailsAsync(request, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            return new SessionTurnDetailsResult(
+                response.TranscriptCaptureEnabled,
+                [.. response.Turns.Select(ToDetail)],
+                response.HasNextBeforeTranscriptId ? response.NextBeforeTranscriptId : null,
+                response.Aggregate is null ? null : ToAggregate(response.Aggregate));
+        }
+        catch (RpcException ex)
+        {
+            throw Wrap(ex: ex, action: "Could not read session turn details");
+        }
+    }
+
+    private static SessionTurnDetailDto ToDetail(Contract.SessionTurnDetail turn) => new(
+        turn.TranscriptId,
+        turn.TurnNumber,
+        turn.CreatedAtUtc.ToDateTimeOffset(),
+        turn.RequestedModel,
+        turn.RoutedModel,
+        turn.HasDimension ? turn.Dimension : null,
+        turn.HasDifficulty ? turn.Difficulty : null,
+        turn.HasLanguage ? turn.Language : null,
+        turn.IsUtility,
+        turn.HasScore ? turn.Score : null,
+        turn.HasCostUsd ? decimal.Parse(turn.CostUsd, CultureInfo.InvariantCulture) : null,
+        turn.IsExploratory,
+        turn.Propensity,
+        turn.HasInputTokens ? turn.InputTokens : null,
+        turn.HasOutputTokens ? turn.OutputTokens : null,
+        turn.HasMemoryEntryId ? turn.MemoryEntryId : null,
+        turn.HasDimBestModel ? turn.DimBestModel : null,
+        turn.HasScorerVersion ? turn.ScorerVersion : null,
+        turn.IsJudgeScored,
+        turn.HasPromptTextLength ? turn.PromptTextLength : null,
+        turn.HasResponseTextLength ? turn.ResponseTextLength : null,
+        turn.HasHasToolCalls ? turn.HasToolCalls : null,
+        turn.Comparison is null ? null : ToComparison(turn.Comparison));
+
+    private static BaselineComparisonDto ToComparison(Contract.BaselineComparison row) => new(
+        row.HasBaselineModel ? row.BaselineModel : null,
+        row.HasActualCostUsd ? decimal.Parse(row.ActualCostUsd, CultureInfo.InvariantCulture) : null,
+        row.HasBaselineEstimatedCostUsd ? decimal.Parse(row.BaselineEstimatedCostUsd, CultureInfo.InvariantCulture) : null,
+        row.HasEstimatedNetSavingsUsd ? decimal.Parse(row.EstimatedNetSavingsUsd, CultureInfo.InvariantCulture) : null,
+        row.HasBaselinePredictedScore ? row.BaselinePredictedScore : null,
+        row.HasEstimatedRegret ? row.EstimatedRegret : null,
+        row.HasBaselineTokenizerRatio ? row.BaselineTokenizerRatio : null,
+        row.HasBaselineInputPricePerMillion ? decimal.Parse(row.BaselineInputPricePerMillion, CultureInfo.InvariantCulture) : null,
+        row.HasBaselineOutputPricePerMillion ? decimal.Parse(row.BaselineOutputPricePerMillion, CultureInfo.InvariantCulture) : null);
+
+    private static SessionAggregateDto ToAggregate(Contract.SessionAggregate row) => new(
+        row.PersistedTurns,
+        row.TrainedTurns,
+        row.ComparedTurns,
+        row.HasTotalEstimatedNetSavingsUsd ? decimal.Parse(row.TotalEstimatedNetSavingsUsd, CultureInfo.InvariantCulture) : null,
+        row.HasTotalBaselineEstimatedCostUsd ? decimal.Parse(row.TotalBaselineEstimatedCostUsd, CultureInfo.InvariantCulture) : null,
+        row.HasTotalCostUsd ? decimal.Parse(row.TotalCostUsd, CultureInfo.InvariantCulture) : null,
+        row.UnpricedTurns,
+        row.TotalInputTokens,
+        row.TotalOutputTokens,
+        row.TokenUnknownTurns,
+        [.. row.Models.Select(model => new SessionModelUsageDto(
+            model.RoutedModel,
+            model.Turns,
+            model.HasCostUsd ? decimal.Parse(model.CostUsd, CultureInfo.InvariantCulture) : null,
+            model.UnpricedTurns))],
+        row.OtherModels,
+        row.OtherModelTurns,
+        row.PersistedTurnNumbersComplete);
 
     /// <summary>
     /// Converts a gRPC-contract <see cref="Contract.PersistedTranscript"/> into the plain

@@ -39,6 +39,28 @@
             </ul>
         }
     </section>
+
+    <section>
+        <div class="ls-stat-label mb-1">Baseline comparison</div>
+        @if (Detail?.Comparison is null)
+        {
+            <p class="text-xs text-slate-500">No baseline comparison for this turn.</p>
+        }
+        else
+        {
+            var comparison = Detail.Comparison;
+            <div class="ls-kv-grid">
+                <span>Baseline model</span><span>@(comparison.BaselineModel ?? "—")</span>
+                <span>Actual cost</span><span class="font-mono">@Money(comparison.ActualCostUsd)</span>
+                <span>Baseline cost</span><span class="font-mono">@Money(comparison.BaselineEstimatedCostUsd)</span>
+                <span>Est. savings</span><span class="font-mono">@Money(comparison.EstimatedNetSavingsUsd)</span>
+                <span>Est. regret</span><span class="font-mono">@(comparison.EstimatedRegret?.ToString("0.###", CultureInfo.InvariantCulture) ?? "—")</span>
+                <span>Tokenizer ratio</span><span class="font-mono">@(comparison.BaselineTokenizerRatio?.ToString("0.###", CultureInfo.InvariantCulture) ?? "—")</span>
+                <span>Input price / M</span><span class="font-mono">@Money(comparison.BaselineInputPricePerMillion)</span>
+                <span>Output price / M</span><span class="font-mono">@Money(comparison.BaselineOutputPricePerMillion)</span>
+            </div>
+        }
+    </section>
 </div>
 
 @code {
@@ -51,6 +73,13 @@
     /// <summary>Total turns in the loaded conversation.</summary>
     [Parameter]
     public int TurnCount { get; set; }
+
+    /// <summary>The persisted metadata for this turn, or null when the details page has not loaded it.</summary>
+    [Parameter]
+    public SessionTurnDetailDto? Detail { get; set; }
+
+    private static string Money(decimal? value) =>
+        value is null ? "—" : "$" + value.Value.ToString("F6", CultureInfo.InvariantCulture);
 
     private string? VisibleSubstitution =>
         string.IsNullOrEmpty(Turn.SubstitutionReason)

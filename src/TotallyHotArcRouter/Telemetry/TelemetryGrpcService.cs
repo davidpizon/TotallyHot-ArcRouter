@@ -224,6 +224,162 @@ public sealed class TelemetryGrpcService : TelemetryService.TelemetryServiceBase
         return response;
     }
 
+    /// <summary>The serialized-page budget for <see cref="GetSessionTurnDetails"/>. The first row always fits.</summary>
+    private const int MaxDetailsResponseBytes = 2 * 1024 * 1024;
+
+    /// <summary>
+    /// One newest-first metadata page for a session, and the retained-history aggregate on the first page.
+    /// An empty session id is rejected. Capture off returns the flag and does not query.
+    /// </summary>
+    /// <param name="request">The session, the page size, and the cursor.</param>
+    /// <param name="context">The call context.</param>
+    /// <returns>The page. No conversation text.</returns>
+    public override async Task<GetSessionTurnDetailsResponse> GetSessionTurnDetails(
+        GetSessionTurnDetailsRequest request, ServerCallContext context)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.SessionId))
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "session_id is required."));
+        }
+
+        var enabled = _transcriptOptions.CurrentValue.Enabled;
+        var response = new GetSessionTurnDetailsResponse { TranscriptCaptureEnabled = enabled };
+        if (!enabled) return response;
+
+        var limit = request.Limit == 0 ? DefaultListLimit : Math.Clamp(request.Limit, 1, 2000);
+        long? before = request.HasBeforeTranscriptId ? request.BeforeTranscriptId : null;
+        var rows = await _transcriptStore.ListSessionTurnMetadataAsync(
+            request.SessionId, limit + 1, before, context.CancellationToken).ConfigureAwait(false);
+
+        var size = 0;
+        foreach (var row in rows.Take(limit))
+        {
+            var detail = ToDetail(row);
+            var rowBytes = 1 + CodedOutputStream.ComputeMessageSize(detail);
+            if (response.Turns.Count > 0 && size + rowBytes > MaxDetailsResponseBytes) break;
+            size += rowBytes;
+            response.Turns.Add(detail);
+        }
+
+        if (rows.Count > response.Turns.Count && response.Turns.Count > 0)
+            response.NextBeforeTranscriptId = response.Turns[^1].TranscriptId;
+
+        if (!request.HasBeforeTranscriptId)
+        {
+            var aggregate = await _transcriptStore.GetSessionAggregateAsync(
+                request.SessionId, request.LiveFloorTurnNumber, context.CancellationToken).ConfigureAwait(false);
+            if (aggregate is not null) response.Aggregate = ToAggregate(aggregate);
+        }
+
+        return response;
+    }
+
+    private static SessionTurnDetail ToDetail(SessionTurnMetadata row)
+    {
+        var detail = new SessionTurnDetail
+        {
+            TranscriptId = row.TranscriptId,
+            TurnNumber = row.TurnNumber,
+            CreatedAtUtc = Timestamp.FromDateTimeOffset(row.CreatedAtUtc),
+            RequestedModel = row.RequestedModel,
+            RoutedModel = row.RoutedModel,
+            IsUtility = row.IsUtility,
+            IsExploratory = row.IsExploratory,
+            Propensity = row.Propensity,
+            IsJudgeScored = row.IsJudgeScored,
+        };
+        if (row.Dimension is not null) detail.Dimension = row.Dimension;
+        if (row.Difficulty is not null) detail.Difficulty = row.Difficulty;
+        if (row.Language is not null) detail.Language = row.Language;
+        if (row.Score is not null) detail.Score = row.Score.Value;
+        if (row.CostUsd is not null) detail.CostUsd = row.CostUsd.Value.ToString(CultureInfo.InvariantCulture);
+        if (row.InputTokens is not null) detail.InputTokens = row.InputTokens.Value;
+        if (row.OutputTokens is not null) detail.OutputTokens = row.OutputTokens.Value;
+        if (row.MemoryEntryId is not null) detail.MemoryEntryId = row.MemoryEntryId.Value;
+        if (row.DimBestModel is not null) detail.DimBestModel = row.DimBestModel;
+        if (row.ScorerVersion is not null) detail.ScorerVersion = row.ScorerVersion;
+        if (row.UntrainedBaselineModel is not null) detail.UntrainedBaselineModel = row.UntrainedBaselineModel;
+        if (row.UntrainedBaselinePredictedScore is not null)
+            detail.UntrainedBaselinePredictedScore = row.UntrainedBaselinePredictedScore.Value;
+        if (row.PromptTextLength is not null) detail.PromptTextLength = row.PromptTextLength.Value;
+        if (row.ResponseTextLength is not null) detail.ResponseTextLength = row.ResponseTextLength.Value;
+        if (row.HasToolCalls is not null) detail.HasToolCalls = row.HasToolCalls.Value;
+        if (row.Comparison is { } comparison) detail.Comparison = ToComparison(comparison);
+        return detail;
+    }
+
+    private static BaselineComparison ToComparison(SessionBaselineComparison row)
+    {
+        var message = new BaselineComparison
+        {
+            ComparedAtUtc = Timestamp.FromDateTimeOffset(row.ComparedAtUtc),
+            ObservedScore = row.ObservedScore,
+            IsClustered = row.IsClustered,
+        };
+        if (row.DimensionPredictedScore is not null) message.DimensionPredictedScore = row.DimensionPredictedScore.Value;
+        if (row.ClusterPredictedScore is not null) message.ClusterPredictedScore = row.ClusterPredictedScore.Value;
+        if (row.DimensionAbsError is not null) message.DimensionAbsError = row.DimensionAbsError.Value;
+        if (row.ClusterAbsError is not null) message.ClusterAbsError = row.ClusterAbsError.Value;
+        if (row.BaselineModel is not null) message.BaselineModel = row.BaselineModel;
+        if (row.ActualCostUsd is not null) message.ActualCostUsd = Money(row.ActualCostUsd.Value);
+        if (row.BaselineEstimatedCostUsd is not null) message.BaselineEstimatedCostUsd = Money(row.BaselineEstimatedCostUsd.Value);
+        if (row.EstimatedNetSavingsUsd is not null) message.EstimatedNetSavingsUsd = Money(row.EstimatedNetSavingsUsd.Value);
+        if (row.BaselinePredictedScore is not null) message.BaselinePredictedScore = row.BaselinePredictedScore.Value;
+        if (row.EstimatedRegret is not null) message.EstimatedRegret = row.EstimatedRegret.Value;
+        if (row.BaselineTokenizerRatio is not null) message.BaselineTokenizerRatio = row.BaselineTokenizerRatio.Value;
+        if (row.BaselineTokenizerRatioMeasured is not null)
+            message.BaselineTokenizerRatioMeasured = row.BaselineTokenizerRatioMeasured.Value;
+        if (row.BaselineInputTokens is not null) message.BaselineInputTokens = row.BaselineInputTokens.Value;
+        if (row.BaselineOutputTokens is not null) message.BaselineOutputTokens = row.BaselineOutputTokens.Value;
+        if (row.BaselineInputPricePerMillion is not null)
+            message.BaselineInputPricePerMillion = Money(row.BaselineInputPricePerMillion.Value);
+        if (row.BaselineOutputPricePerMillion is not null)
+            message.BaselineOutputPricePerMillion = Money(row.BaselineOutputPricePerMillion.Value);
+        return message;
+    }
+
+    private static Contract.SessionAggregate ToAggregate(Transcripts.SessionAggregate row)
+    {
+        var message = new Contract.SessionAggregate
+        {
+            PersistedTurns = row.PersistedTurns,
+            TrainedTurns = row.TrainedTurns,
+            ComparedTurns = row.ComparedTurns,
+            PersistedTurnNumbersComplete = row.PersistedTurnNumbersComplete,
+            UnpricedTurns = row.UnpricedTurns,
+            TotalInputTokens = row.TotalInputTokens,
+            TotalOutputTokens = row.TotalOutputTokens,
+            TokenUnknownTurns = row.TokenUnknownTurns,
+            OtherModels = row.OtherModels,
+            OtherModelTurns = row.OtherModelTurns,
+        };
+        if (row.TotalEstimatedNetSavingsUsd is not null)
+            message.TotalEstimatedNetSavingsUsd = Money(row.TotalEstimatedNetSavingsUsd.Value);
+        if (row.TotalBaselineEstimatedCostUsd is not null)
+            message.TotalBaselineEstimatedCostUsd = Money(row.TotalBaselineEstimatedCostUsd.Value);
+        if (row.FirstTurnUtc is not null) message.FirstTurnUtc = Timestamp.FromDateTimeOffset(row.FirstTurnUtc.Value);
+        if (row.LastTurnUtc is not null) message.LastTurnUtc = Timestamp.FromDateTimeOffset(row.LastTurnUtc.Value);
+        if (row.TotalCostUsd is not null) message.TotalCostUsd = Money(row.TotalCostUsd.Value);
+        message.PersistedTurnNumbersFromFloor.AddRange(row.PersistedTurnNumbersFromFloor);
+        foreach (var model in row.Models)
+        {
+            var usage = new Contract.SessionModelUsage
+            {
+                RoutedModel = model.RoutedModel,
+                Turns = model.Turns,
+                UnpricedTurns = model.UnpricedTurns,
+                LastUsedUtc = Timestamp.FromDateTimeOffset(model.LastUsedUtc),
+            };
+            if (model.CostUsd is not null) usage.CostUsd = Money(model.CostUsd.Value);
+            message.Models.Add(usage);
+        }
+
+        return message;
+    }
+
+    private static string Money(decimal value) => value.ToString(CultureInfo.InvariantCulture);
+
     /// <summary>The most transcript ids one <see cref="GetTurnTexts"/> call accepts.</summary>
     private const int MaxTurnTextIds = 50;
 

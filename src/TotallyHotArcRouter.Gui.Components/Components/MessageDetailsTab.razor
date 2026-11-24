@@ -55,6 +55,16 @@
                 <span>Text length</span><span class="font-mono">@TextLength(Turn.ResponseSummary)</span>
             </div>
         </section>
+        <section>
+            <div class="ls-stat-label mb-1">Persisted</div>
+            <div class="ls-kv-grid">
+                <span>Classification</span><span>@Classification</span>
+                <span>Score</span><span class="font-mono">@(Detail?.Score?.ToString("0.###", CultureInfo.InvariantCulture) ?? "—")</span>
+                <span>Scorer version</span><span>@(Detail?.ScorerVersion ?? "—")</span>
+                <span>Exploration</span><span>@Exploration</span>
+                <span>Text length</span><span class="font-mono">@PersistedLength</span>
+            </div>
+        </section>
     }
 </div>
 
@@ -77,6 +87,39 @@
     /// <summary>Total turns in the loaded conversation (for "Turn n of m").</summary>
     [Parameter]
     public int TurnCount { get; set; }
+
+    /// <summary>The persisted metadata for this turn, or null when the details page has not loaded it.</summary>
+    [Parameter]
+    public SessionTurnDetailDto? Detail { get; set; }
+
+    private string Classification
+    {
+        get
+        {
+            if (Detail is null) return "—";
+            var parts = new[] { Detail.Dimension, Detail.Difficulty, Detail.Language }.Where(part => !string.IsNullOrEmpty(part));
+            var text = string.Join(" · ", parts);
+            return text.Length == 0 ? "—" : text;
+        }
+    }
+
+    private string Exploration => Detail is null ? "—" : Detail.IsExploratory ? "Explored" : "Exploited";
+
+    private string PersistedLength
+    {
+        get
+        {
+            if (Detail is null) return "—";
+            if (IsRequest) return Detail.PromptTextLength is > 0 ? $"{Detail.PromptTextLength} characters" : "—";
+            if (Detail.ResponseTextLength is > 0) return $"{Detail.ResponseTextLength} characters";
+            return Detail.HasToolCalls switch
+            {
+                true => "Tool call (no text)",
+                false => "No text",
+                _ => "—",
+            };
+        }
+    }
 
     private string CorrelationId => $"{SessionId}:{Turn.TurnNumber}";
 

@@ -240,6 +240,34 @@ public interface ITranscriptStore
     }
 
     /// <summary>
+    /// One newest-first page of one session's metadata. No prompt or response text. The default returns an
+    /// empty page so existing fakes keep compiling (#176 phase 2).
+    /// </summary>
+    /// <param name="sessionId">The client session id.</param>
+    /// <param name="limit">How many rows to return. The caller already clamped it.</param>
+    /// <param name="beforeTranscriptId">When set, only rows with a smaller id.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>The page, newest first, one past <paramref name="limit"/> when an older row exists.</returns>
+    Task<IReadOnlyList<SessionTurnMetadata>> ListSessionTurnMetadataAsync(
+        string sessionId, int limit, long? beforeTranscriptId, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult<IReadOnlyList<SessionTurnMetadata>>([]);
+    }
+
+    /// <summary>
+    /// Figures over every retained row of one session. The default returns null so existing fakes compile.
+    /// </summary>
+    /// <param name="sessionId">The client session id.</param>
+    /// <param name="liveFloorTurnNumber">The lowest turn number the GUI holds live. Zero skips the number list.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>The aggregate, or null when capture is off.</returns>
+    Task<SessionAggregate?> GetSessionAggregateAsync(
+        string sessionId, int liveFloorTurnNumber, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult<SessionAggregate?>(null);
+    }
+
+    /// <summary>
     /// Records that a row's prompt cannot be read from its session file (the turn was dropped before it was
     /// written, or the file is unreadable), by zeroing <c>prompt_text_length</c>. That takes the row out of
     /// <see cref="LoadUnembeddedScoredAsync"/>, so unreadable rows cannot fill every backfill batch. The
@@ -415,3 +443,147 @@ public readonly record struct TranscriptLinkDeletion(
     /// <summary>Nothing was deleted.</summary>
     public static TranscriptLinkDeletion Empty { get; } = new([], []);
 }
+
+/// <summary>One persisted turn's metadata for the Sessions details pane. No conversation text.</summary>
+/// <param name="TranscriptId">The <c>request_transcripts</c> id.</param>
+/// <param name="TurnNumber">Parsed from the correlation id, or 1 when the suffix is not a number.</param>
+/// <param name="CreatedAtUtc">When the row was written.</param>
+/// <param name="RequestedModel">The model the client named, already capped.</param>
+/// <param name="RoutedModel">The model that served, already capped.</param>
+/// <param name="Dimension">The classification dimension, or null.</param>
+/// <param name="Difficulty">The classification difficulty, or null.</param>
+/// <param name="Language">The classification language, or null.</param>
+/// <param name="IsUtility">Whether the turn was classified as utility.</param>
+/// <param name="Score">The stored score, or null.</param>
+/// <param name="CostUsd">The stored cost, or null.</param>
+/// <param name="IsExploratory">Whether routing explored.</param>
+/// <param name="Propensity">The probability routing assigned.</param>
+/// <param name="InputTokens">Prompt tokens, or null.</param>
+/// <param name="OutputTokens">Completion tokens, or null.</param>
+/// <param name="MemoryEntryId">The memory row, when this turn trained.</param>
+/// <param name="DimBestModel">The dimension-best model, or null.</param>
+/// <param name="ScorerVersion">The scorer version, or null.</param>
+/// <param name="IsJudgeScored">Whether a judge grade was stored.</param>
+/// <param name="UntrainedBaselineModel">The untrained baseline model, or null.</param>
+/// <param name="UntrainedBaselinePredictedScore">That baseline's predicted score, or null.</param>
+/// <param name="PromptTextLength">The stored prompt length, or null.</param>
+/// <param name="ResponseTextLength">The stored response length, or null.</param>
+/// <param name="HasToolCalls">Whether the reply carried tool calls. Null means unknown.</param>
+/// <param name="Comparison">The taxonomy comparison for this row, or null.</param>
+public sealed record SessionTurnMetadata(
+    long TranscriptId,
+    int TurnNumber,
+    DateTimeOffset CreatedAtUtc,
+    string RequestedModel,
+    string RoutedModel,
+    string? Dimension,
+    string? Difficulty,
+    string? Language,
+    bool IsUtility,
+    double? Score,
+    decimal? CostUsd,
+    bool IsExploratory,
+    double Propensity,
+    int? InputTokens,
+    int? OutputTokens,
+    long? MemoryEntryId,
+    string? DimBestModel,
+    string? ScorerVersion,
+    bool IsJudgeScored,
+    string? UntrainedBaselineModel,
+    double? UntrainedBaselinePredictedScore,
+    int? PromptTextLength,
+    int? ResponseTextLength,
+    bool? HasToolCalls,
+    SessionBaselineComparison? Comparison);
+
+/// <summary>The baseline comparison stored beside one transcript. Decimals stay decimal, not strings.</summary>
+/// <param name="ComparedAtUtc">When the comparison was written.</param>
+/// <param name="ObservedScore">The score that was compared.</param>
+/// <param name="DimensionPredictedScore">The dimension head's prediction, or null.</param>
+/// <param name="ClusterPredictedScore">The cluster head's prediction, or null.</param>
+/// <param name="DimensionAbsError">Absolute error of the dimension head, or null.</param>
+/// <param name="ClusterAbsError">Absolute error of the cluster head, or null.</param>
+/// <param name="IsClustered">Whether a cluster was used.</param>
+/// <param name="BaselineModel">The baseline model, already capped, or null.</param>
+/// <param name="ActualCostUsd">The turn's cost, or null.</param>
+/// <param name="BaselineEstimatedCostUsd">The baseline cost, or null.</param>
+/// <param name="EstimatedNetSavingsUsd">Actual minus baseline, or null.</param>
+/// <param name="BaselinePredictedScore">The baseline's predicted score, or null.</param>
+/// <param name="EstimatedRegret">The estimated regret, or null.</param>
+/// <param name="BaselineTokenizerRatio">The tokenizer ratio, or null.</param>
+/// <param name="BaselineTokenizerRatioMeasured">Whether that ratio was measured, or null.</param>
+/// <param name="BaselineInputTokens">Frozen input-token ingredient, or null.</param>
+/// <param name="BaselineOutputTokens">Frozen output-token ingredient, or null.</param>
+/// <param name="BaselineInputPricePerMillion">Frozen input price, or null.</param>
+/// <param name="BaselineOutputPricePerMillion">Frozen output price, or null.</param>
+public sealed record SessionBaselineComparison(
+    DateTimeOffset ComparedAtUtc,
+    double ObservedScore,
+    double? DimensionPredictedScore,
+    double? ClusterPredictedScore,
+    double? DimensionAbsError,
+    double? ClusterAbsError,
+    bool IsClustered,
+    string? BaselineModel,
+    decimal? ActualCostUsd,
+    decimal? BaselineEstimatedCostUsd,
+    decimal? EstimatedNetSavingsUsd,
+    double? BaselinePredictedScore,
+    double? EstimatedRegret,
+    double? BaselineTokenizerRatio,
+    bool? BaselineTokenizerRatioMeasured,
+    double? BaselineInputTokens,
+    double? BaselineOutputTokens,
+    decimal? BaselineInputPricePerMillion,
+    decimal? BaselineOutputPricePerMillion);
+
+/// <summary>Retained-history figures for one session.</summary>
+/// <param name="PersistedTurns">How many rows the session still has.</param>
+/// <param name="TrainedTurns">Rows with a memory entry.</param>
+/// <param name="ComparedTurns">Rows with both a savings figure and a positive baseline cost.</param>
+/// <param name="TotalEstimatedNetSavingsUsd">Sum of savings over compared turns, or null when none.</param>
+/// <param name="TotalBaselineEstimatedCostUsd">Sum of baseline cost over those turns, or null.</param>
+/// <param name="FirstTurnUtc">The oldest retained turn, or null when the session has none.</param>
+/// <param name="LastTurnUtc">The newest retained turn, or null when the session has none.</param>
+/// <param name="PersistedTurnNumbersFromFloor">Persisted turn numbers at or above the live floor, ascending.</param>
+/// <param name="PersistedTurnNumbersComplete">False when more than 2,000 numbers sat at or above the floor.</param>
+/// <param name="TotalCostUsd">Sum of known costs, or null when every row is unpriced.</param>
+/// <param name="UnpricedTurns">Rows with no cost.</param>
+/// <param name="TotalInputTokens">Sum of reported input tokens.</param>
+/// <param name="TotalOutputTokens">Sum of reported output tokens.</param>
+/// <param name="TokenUnknownTurns">Rows missing either token count.</param>
+/// <param name="Models">The 20 most recently used routed models.</param>
+/// <param name="OtherModels">Distinct routed models beyond those 20.</param>
+/// <param name="OtherModelTurns">Turns served by those omitted models.</param>
+public sealed record SessionAggregate(
+    int PersistedTurns,
+    int TrainedTurns,
+    int ComparedTurns,
+    decimal? TotalEstimatedNetSavingsUsd,
+    decimal? TotalBaselineEstimatedCostUsd,
+    DateTimeOffset? FirstTurnUtc,
+    DateTimeOffset? LastTurnUtc,
+    IReadOnlyList<int> PersistedTurnNumbersFromFloor,
+    bool PersistedTurnNumbersComplete,
+    decimal? TotalCostUsd,
+    int UnpricedTurns,
+    long TotalInputTokens,
+    long TotalOutputTokens,
+    int TokenUnknownTurns,
+    IReadOnlyList<SessionModelUsage> Models,
+    int OtherModels,
+    int OtherModelTurns);
+
+/// <summary>One routed model's share of a session's retained turns.</summary>
+/// <param name="RoutedModel">The model name, already capped.</param>
+/// <param name="Turns">How many retained turns it served.</param>
+/// <param name="CostUsd">Sum of its priced turns, or null when none were priced.</param>
+/// <param name="UnpricedTurns">Its turns with no cost.</param>
+/// <param name="LastUsedUtc">When it last served a retained turn.</param>
+public sealed record SessionModelUsage(
+    string RoutedModel,
+    int Turns,
+    decimal? CostUsd,
+    int UnpricedTurns,
+    DateTimeOffset LastUsedUtc);

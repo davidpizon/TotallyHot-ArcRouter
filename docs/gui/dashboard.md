@@ -129,6 +129,10 @@ flowchart TD
        `.ls-history-notice`): a failed load, whether the router is unreachable or the read was rejected,
        shows "Persisted history couldn't be loaded: …" instead of silently showing live sessions only. A load
        that left older turns out shows "Showing the newest N persisted turns."
+     - **Turn details** (`GetSessionTurnDetails`, ADR-0025): the Message, Routing, and Session tabs read a
+       metadata page for the open session. The refresh control reloads it. "Show earlier turns" asks for the
+       next older page once the loaded window is exhausted. `GetTurnTexts` is unchanged: passkey-gated,
+       2,000-character previews.
    - **Session rail** (`SessionRail.razor` / `SessionRailItem.razor`): newest-first listbox with status
      dots (live active / live idle at 5 minutes / history only), title, ⚠ fallback and 🎓 training
      badges, and a meta line (last-active time · turns · cost). Footer shows transcript capture on/off,
