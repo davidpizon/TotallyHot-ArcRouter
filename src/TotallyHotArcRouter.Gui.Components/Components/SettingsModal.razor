@@ -218,8 +218,8 @@
             }
             else
             {
-                @* This host (the WASM dashboard) cannot launch the MSI itself - see UpdateStore.SupportsApply's
-                               remarks. Windows users are pointed at the tray's own Install update instead. *@
+                @* This host cannot launch the MSI. The header Update button asks the tray to install it.
+                   This link stays as the fallback when the tray is not running. *@
                 <a href="@UpdateStore.ReleasesUrl" target="_blank" rel="noopener noreferrer"
                    class="flex-1 btn btn-ghost-warning text-center">
                     Get the update

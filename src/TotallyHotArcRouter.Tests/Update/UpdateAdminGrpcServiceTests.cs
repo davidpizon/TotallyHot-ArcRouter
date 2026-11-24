@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Grpc.Core;
 using Grpc.Core.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -7,8 +8,8 @@ using Contract = TotallyHot.ArcRouter.Telemetry.Contract;
 namespace TotallyHot.ArcRouter.Tests.Update;
 
 /// <summary>
-/// Covers <see cref="UpdateAdminGrpcService"/>'s three RPCs against fakes - no real Windows service, no
-/// real installer process ever spawned (that all lives in the GUI now).
+/// Covers <see cref="UpdateAdminGrpcService"/> against fakes. Requesting an apply only stores one
+/// pending install. The service never starts an installer process; the tray does that.
 /// </summary>
 public sealed class UpdateAdminGrpcServiceTests
 {
@@ -123,6 +124,63 @@ public sealed class UpdateAdminGrpcServiceTests
             new UpdateAdminGrpcService(stateStore: stateStore, releaseCheckClient: null!, logger: logger));
         Assert.Throws<ArgumentNullException>(() =>
             new UpdateAdminGrpcService(stateStore: stateStore, releaseCheckClient: releaseClient, logger: null!));
+    }
+
+    [Fact]
+    public async Task RequestApply_StoresOnePendingInstall_AndDoesNotStartAProcess()
+    {
+        var stateStore = new UpdateStateStore();
+        stateStore.Record(ReleaseCheckResult.Resolved(currentVersion: "1.0.0", latestVersion: "2.0.0", true,
+            assetDownloadUrl: "https://example.test/a.msi", assetSha256: "abc"));
+        var service = new UpdateAdminGrpcService(stateStore: stateStore,
+            releaseCheckClient: new FakeReleaseCheckClient(), logger: NullLogger<UpdateAdminGrpcService>.Instance);
+        var installersBefore = CountProcesses("msiexec");
+
+        var first = await service.RequestApply(request: new Contract.RequestApplyRequest(), context: CreateContext());
+        var second = await service.RequestApply(request: new Contract.RequestApplyRequest(), context: CreateContext());
+        var status = await service.GetUpdateStatus(request: new Contract.GetUpdateStatusRequest(), context: CreateContext());
+        var claimed = await service.ClaimPendingApply(request: new Contract.ClaimPendingApplyRequest(),
+            context: CreateContext());
+        var claimedAgain = await service.ClaimPendingApply(request: new Contract.ClaimPendingApplyRequest(),
+            context: CreateContext());
+
+        Assert.True(first.Accepted);
+        Assert.False(first.AlreadyPending);
+        Assert.True(second.Accepted);
+        Assert.True(second.AlreadyPending);
+        Assert.Equal(expected: "2.0.0", actual: second.LatestVersion);
+        Assert.True(status.ApplyPending);
+        Assert.True(claimed.Claimed);
+        Assert.Equal(expected: "https://example.test/a.msi", actual: claimed.AssetDownloadUrl);
+        Assert.Equal(expected: "abc", actual: claimed.AssetSha256);
+        Assert.False(claimedAgain.Claimed);
+        Assert.False(stateStore.Current.ApplyPending);
+        Assert.Equal(expected: installersBefore, actual: CountProcesses("msiexec"));
+    }
+
+    [Fact]
+    public async Task RequestApply_WithoutAVerifiedUpdate_IsFailedPrecondition()
+    {
+        var service = new UpdateAdminGrpcService(stateStore: new UpdateStateStore(),
+            releaseCheckClient: new FakeReleaseCheckClient(), logger: NullLogger<UpdateAdminGrpcService>.Instance);
+
+        var ex = await Assert.ThrowsAsync<RpcException>(() =>
+            service.RequestApply(request: new Contract.RequestApplyRequest(), context: CreateContext()));
+
+        Assert.Equal(expected: StatusCode.FailedPrecondition, actual: ex.StatusCode);
+    }
+
+    private static int CountProcesses(string processName)
+    {
+        var processes = Process.GetProcessesByName(processName);
+        try
+        {
+            return processes.Length;
+        }
+        finally
+        {
+            foreach (var process in processes) process.Dispose();
+        }
     }
 
     private sealed class FakeReleaseCheckClient : IReleaseCheckClient

@@ -30,6 +30,7 @@ public sealed class RouterConnectionSupervisor : IAsyncDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly ILogger<RouterConnectionSupervisor>? _logger;
     private readonly Task _loopTask;
+    private readonly Func<IRouterChannelProvider, UpdateApplyMonitor?> _applyMonitorFactory;
     private readonly Func<IRouterChannelProvider, RoutingGateMonitor> _monitorFactory;
     private readonly TimeSpan _retryInterval;
     private readonly string _serverAddress;
@@ -50,9 +51,15 @@ public sealed class RouterConnectionSupervisor : IAsyncDisposable
     /// monitor built over a fake <c>IRoutingGateAdminClient</c> instead of a real gRPC call invoker, since
     /// a fake <see cref="IRouterChannelProvider.CallInvoker"/> alone can't stand in for a live channel.
     /// </param>
+    /// <param name="applyMonitorFactory">
+    /// Builds the <see cref="UpdateApplyMonitor"/> for that same connection. Defaults to one that claims
+    /// a pending install and launches it. Tests that connect with a fake invoker pass a factory that
+    /// returns <see langword="null"/> so the reconnect loop does not touch that invoker.
+    /// </param>
     public RouterConnectionSupervisor(ISessionRouterConnector connector, string serverAddress,
         TimeSpan? retryInterval = null, ILogger<RouterConnectionSupervisor>? logger = null,
-        Func<IRouterChannelProvider, RoutingGateMonitor>? monitorFactory = null)
+        Func<IRouterChannelProvider, RoutingGateMonitor>? monitorFactory = null,
+        Func<IRouterChannelProvider, UpdateApplyMonitor?>? applyMonitorFactory = null)
     {
         ArgumentNullException.ThrowIfNull(connector);
         ArgumentNullException.ThrowIfNull(serverAddress);
@@ -62,6 +69,7 @@ public sealed class RouterConnectionSupervisor : IAsyncDisposable
         _retryInterval = retryInterval ?? DefaultRetryInterval;
         _logger = logger;
         _monitorFactory = monitorFactory ?? (provider => new RoutingGateMonitor(provider));
+        _applyMonitorFactory = applyMonitorFactory ?? (provider => new UpdateApplyMonitor(provider));
         _loopTask = SuperviseAsync(_cts.Token);
     }
 
@@ -71,6 +79,19 @@ public sealed class RouterConnectionSupervisor : IAsyncDisposable
     /// time, so re-read this property rather than holding a reference across an await.
     /// </summary>
     public RoutingGateMonitor? Monitor { get; private set; }
+
+    /// <summary>
+    /// The current update-apply monitor, or <see langword="null"/> before the first successful connection
+    /// (and when a test factory declines to build one). Replaced on the same reconnect that replaces
+    /// <see cref="Monitor"/>.
+    /// </summary>
+    /// <remarks>
+    /// Stays public. <c>TrayApplicationContext</c> subscribes to <see cref="UpdateApplyMonitor.InstallLaunched"/>
+    /// from the WinForms tray project, which is a different assembly from this library. A scan of this
+    /// project alone does not see that caller.
+    /// </remarks>
+    // ReSharper disable once MemberCanBePrivate.Global
+    public UpdateApplyMonitor? ApplyMonitor { get; private set; }
 
     /// <summary>
     /// Raised after <see cref="Monitor"/> is replaced by a fresh connection - the tray shell re-subscribes
@@ -94,6 +115,7 @@ public sealed class RouterConnectionSupervisor : IAsyncDisposable
         _cts.Dispose();
 
         if (Monitor is not null) await Monitor.DisposeAsync().ConfigureAwait(false);
+        if (ApplyMonitor is not null) await ApplyMonitor.DisposeAsync().ConfigureAwait(false);
         (_currentProvider as IDisposable)?.Dispose();
     }
 
@@ -142,13 +164,17 @@ public sealed class RouterConnectionSupervisor : IAsyncDisposable
         }
 
         var newMonitor = _monitorFactory(provider);
+        var newApplyMonitor = _applyMonitorFactory(provider);
 
         var oldMonitor = Monitor;
+        var oldApplyMonitor = ApplyMonitor;
         var oldProvider = _currentProvider;
         Monitor = newMonitor;
+        ApplyMonitor = newApplyMonitor;
         _currentProvider = provider;
 
         if (oldMonitor is not null) await oldMonitor.DisposeAsync().ConfigureAwait(false);
+        if (oldApplyMonitor is not null) await oldApplyMonitor.DisposeAsync().ConfigureAwait(false);
         (oldProvider as IDisposable)?.Dispose();
 
         Reconnected?.Invoke();

@@ -19,7 +19,8 @@ public sealed class DashboardTests
         FakePasskeyAdminClient? passkeyClient = null,
         FakeWebAuthnCeremony? ceremony = null,
         ContentGrantStore? contentGrant = null,
-        LiveDataStore? liveDataStore = null)
+        LiveDataStore? liveDataStore = null,
+        UpdateStore? updateStore = null)
     {
         var ctx = new BunitContext();
         ctx.JSInterop.Mode = JSRuntimeMode.Loose;
@@ -36,7 +37,7 @@ public sealed class DashboardTests
         ctx.Services.AddSingleton(new ProviderAdminStore(channelProvider: unreachable));
         ctx.Services.AddSingleton(new UsageStore(channelProvider: unreachable));
         ctx.Services.AddSingleton(new RouterSettingsAdminStore(channelProvider: unreachable));
-        ctx.Services.AddSingleton(new UpdateStore(channelProvider: unreachable));
+        ctx.Services.AddSingleton(updateStore ?? new UpdateStore(channelProvider: unreachable));
         ctx.Services.AddSingleton(new CostReconciliationStore(channelProvider: unreachable));
         ctx.Services.AddSingleton(new ManagementTokenAdminStore(channelProvider: unreachable));
         ctx.Services.AddSingleton(new ConversationExportStore(new FakeConversationAdminClient()));
@@ -59,6 +60,79 @@ public sealed class DashboardTests
         cut.Markup.Should().NotContain("Router Optimization Engine");
         cut.Markup.Should().Contain("No conversations yet.");
         cut.Markup.Should().Contain(OpenAiCompatibleDropIn.BaseUrl);
+    }
+
+    [Fact]
+    public void Header_hides_update_when_there_is_no_newer_release()
+    {
+        var client = new ScriptedUpdateClient
+        {
+            Status = new UpdateStatusInfo(
+                CurrentVersion: "1.0.0",
+                LatestVersion: "1.0.0",
+                UpdateAvailable: false,
+                CheckedAtUtc: DateTimeOffset.UtcNow,
+                UnavailableReason: UpdateUnavailableReasonInfo.None,
+                UnavailableDetail: null)
+        };
+        using var ctx = NewContext(updateStore: HeaderUpdateStore(client));
+
+        var cut = ctx.Render<Dashboard>();
+
+        cut.WaitForAssertion(() => cut.FindAll("[data-testid='header-update']").Should().BeEmpty());
+        cut.Markup.Should().NotContain("The tray app has to be open");
+    }
+
+    [Fact]
+    public void Header_shows_update_and_a_confirmed_click_requests_the_install()
+    {
+        var client = new ScriptedUpdateClient { Status = AvailableUpdate() };
+        using var ctx = NewContext(updateStore: HeaderUpdateStore(client));
+        var cut = ctx.Render<Dashboard>();
+
+        cut.WaitForAssertion(() => cut.Find("[data-testid='header-update']"));
+        cut.Find("[data-testid='header-update']").Click();
+        cut.Find("[data-testid='header-update-confirm']").Click();
+
+        cut.WaitForAssertion(() => client.RequestApplyCalls.Should().Be(1));
+    }
+
+    [Fact]
+    public void Header_says_the_tray_must_be_open_when_the_install_stays_pending()
+    {
+        var client = new ScriptedUpdateClient { Status = AvailableUpdate(), StayPending = true };
+        using var ctx = NewContext(updateStore: HeaderUpdateStore(client));
+        var cut = ctx.Render<Dashboard>();
+
+        cut.WaitForAssertion(() => cut.Find("[data-testid='header-update']"));
+        cut.Find("[data-testid='header-update']").Click();
+        cut.Find("[data-testid='header-update-confirm']").Click();
+
+        cut.WaitForAssertion(() =>
+            cut.Find("[data-testid='header-update-tray']").TextContent
+                .Should().Contain("The tray app has to be open to finish the install."));
+    }
+
+    private static UpdateStatusInfo AvailableUpdate()
+    {
+        return new UpdateStatusInfo(
+            CurrentVersion: "1.0.0",
+            LatestVersion: "2.0.0",
+            UpdateAvailable: true,
+            CheckedAtUtc: DateTimeOffset.UtcNow,
+            UnavailableReason: UpdateUnavailableReasonInfo.None,
+            UnavailableDetail: null,
+            AssetDownloadUrl: "https://example.test/a.msi",
+            AssetSha256: "abc");
+    }
+
+    private static UpdateStore HeaderUpdateStore(ScriptedUpdateClient client)
+    {
+        return new UpdateStore(
+            client: client,
+            applier: new UnusedApplier(),
+            supportsApply: false,
+            trayClaimGrace: TimeSpan.FromMilliseconds(30));
     }
 
     [Fact]
@@ -470,6 +544,51 @@ public sealed class DashboardTests
             IReadOnlyList<long> transcriptIds, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(Texts);
+        }
+    }
+
+    private sealed class ScriptedUpdateClient : IUpdateAdminClient
+    {
+        public int RequestApplyCalls { get; private set; }
+
+        public bool StayPending { get; init; }
+
+        public required UpdateStatusInfo Status { get; init; }
+
+        public Task<UpdateStatusInfo> GetStatusAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(Status with { ApplyPending = StayPending && RequestApplyCalls > 0 });
+        }
+
+        public Task<UpdateStatusInfo> CheckNowAsync(CancellationToken cancellationToken = default)
+        {
+            return GetStatusAsync(cancellationToken);
+        }
+
+        public Task<NotifyApplyStartingInfo> NotifyApplyStartingAsync(string version,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new NotifyApplyStartingInfo(true));
+        }
+
+        public Task<RequestApplyInfo> RequestApplyAsync(CancellationToken cancellationToken = default)
+        {
+            RequestApplyCalls++;
+            return Task.FromResult(new RequestApplyInfo(Accepted: true, AlreadyPending: false, LatestVersion: Status.LatestVersion));
+        }
+
+        public Task<ClaimedUpdateApply> ClaimPendingApplyAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new ClaimedUpdateApply(Claimed: false, LatestVersion: string.Empty, null, null));
+        }
+    }
+
+    private sealed class UnusedApplier : IMsiUpdateApplier
+    {
+        public Task<MsiApplyResult> ApplyAsync(string assetDownloadUrl, string assetSha256, string latestVersion,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(MsiApplyResult.Failure("the dashboard does not launch the installer"));
         }
     }
 }

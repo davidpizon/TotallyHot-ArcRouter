@@ -14,10 +14,11 @@ namespace TotallyHot.ArcRouter.Update;
 /// status is core operational state, the same way <c>RoutingModeAdminService</c> is always mapped.
 /// </summary>
 /// <remarks>
-/// The Router does not download, verify, or launch anything for an update - that logic moved to the GUI
-/// (<c>TotallyHot.ArcRouter.Gui.Telemetry.MsiUpdateApplier</c>), which downloads and checksum-verifies
-/// the release's MSI and launches an elevated <c>msiexec</c>. This service only detects updates and
-/// records that an apply is about to happen, for the audit log.
+/// The Router does not download, verify, or launch anything for an update. <c>RequestApply</c> only
+/// remembers one pending install (ADR-0028). The logged-on tray claims it and runs
+/// <c>TotallyHot.ArcRouter.Gui.Telemetry.MsiUpdateApplier</c>, which downloads, checksum-verifies, and
+/// launches an elevated <c>msiexec</c>. A browser page cannot start that process, and this service
+/// runs where a Windows service cannot show the administrator prompt.
 /// </remarks>
 public sealed class UpdateAdminGrpcService : Contract.UpdateAdminService.UpdateAdminServiceBase
 {
@@ -79,6 +80,55 @@ public sealed class UpdateAdminGrpcService : Contract.UpdateAdminService.UpdateA
         return Task.FromResult(new Contract.NotifyApplyStartingResponse { Acknowledged = true });
     }
 
+    /// <inheritdoc/>
+    public override Task<Contract.RequestApplyResponse> RequestApply(
+        Contract.RequestApplyRequest request,
+        ServerCallContext context)
+    {
+        (bool created, PendingUpdateApply pending) requested;
+        try
+        {
+            requested = _stateStore.TryRequestApply();
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new RpcException(new Status(statusCode: StatusCode.FailedPrecondition, detail: ex.Message));
+        }
+
+        _logger.LogInformation(
+            message: "Update apply requested for version {Version}; the tray will launch the installer. AlreadyPending={AlreadyPending}",
+            requested.pending.LatestVersion,
+            !requested.created);
+
+        return Task.FromResult(new Contract.RequestApplyResponse
+        {
+            Accepted = true,
+            AlreadyPending = !requested.created,
+            LatestVersion = requested.pending.LatestVersion
+        });
+    }
+
+    /// <inheritdoc/>
+    public override Task<Contract.ClaimPendingApplyResponse> ClaimPendingApply(
+        Contract.ClaimPendingApplyRequest request,
+        ServerCallContext context)
+    {
+        var claimed = _stateStore.TryClaimApply();
+        if (claimed is null) return Task.FromResult(new Contract.ClaimPendingApplyResponse { Claimed = false });
+
+        _logger.LogInformation(
+            message: "Tray claimed the pending update to version {Version}.",
+            claimed.LatestVersion);
+
+        return Task.FromResult(new Contract.ClaimPendingApplyResponse
+        {
+            Claimed = true,
+            LatestVersion = claimed.LatestVersion,
+            AssetDownloadUrl = claimed.AssetDownloadUrl,
+            AssetSha256 = claimed.AssetSha256
+        });
+    }
+
     /// <summary>Converts an <see cref="UpdateStateSnapshot"/> into the wire response.</summary>
     private static Contract.UpdateStatusResponse MapSnapshot(UpdateStateSnapshot snapshot)
     {
@@ -87,6 +137,7 @@ public sealed class UpdateAdminGrpcService : Contract.UpdateAdminService.UpdateA
             CurrentVersion = snapshot.Result?.CurrentVersion ?? string.Empty,
             LatestVersion = snapshot.Result?.LatestVersion ?? string.Empty,
             UpdateAvailable = snapshot.Result?.IsUpdateAvailable ?? false,
+            ApplyPending = snapshot.ApplyPending,
             // Distinct from ReleaseCheckUnavailableReason.None (a check that ran and resolved cleanly):
             // no check has ever completed yet, so nothing is known - the wire enum's zero value.
             UnavailableReason = snapshot.Result is null

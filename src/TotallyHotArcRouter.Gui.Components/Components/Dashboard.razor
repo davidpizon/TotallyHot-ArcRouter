@@ -8,6 +8,7 @@
 @inject ContentGrantStore ContentGrant
 @inject ToastService Toasts
 @inject NavigationManager Navigation
+@inject UpdateStore UpdateStore
 
 <div class="flex flex-col h-screen overflow-hidden ds-surface-base">
     @* ── HEADER ── *@
@@ -24,6 +25,22 @@
 
             @* Actions *@
             <div class="flex items-center gap-2">
+                @if (UpdateStore.Status?.UpdateAvailable == true)
+                {
+                    <button type="button"
+                            data-testid="header-update"
+                            class="btn btn-warning"
+                            disabled="@(UpdateStore.InstallInProgress || UpdateStore.IsBusy)"
+                            @onclick="AskToUpdate">
+                        @(UpdateStore.InstallInProgress ? "Updating…" : "Update")
+                    </button>
+                }
+                @if (UpdateStore.TrayMustBeOpen)
+                {
+                    <span data-testid="header-update-tray" class="text-xs text-amber-400">
+                        The tray app has to be open to finish the install.
+                    </span>
+                }
                 <button @onclick="() => OpenApprovals(null)"
                         data-testid="open-approvals"
                         class="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium border border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200 transition-colors">
@@ -156,6 +173,24 @@
         <SettingsModal OnClose="() => _showSettings = false"/>
     }
 
+    @if (_confirmHeaderUpdate)
+    {
+        <DialogShell Title="Update" CloseAriaLabel="Close update confirmation" OnClose="CancelHeaderUpdate" EnableEscapeToClose="true">
+            <p class="text-xs text-slate-400 leading-5">
+                This will download and install the update, which requires administrator approval
+                and will restart the application. Continue?
+            </p>
+            <div class="flex gap-2">
+                <button type="button" data-testid="header-update-cancel" @onclick="CancelHeaderUpdate" class="flex-1 btn btn-ghost">
+                    Cancel
+                </button>
+                <button type="button" data-testid="header-update-confirm" @onclick="ConfirmHeaderUpdateAsync" class="flex-1 btn btn-warning">
+                    Update
+                </button>
+            </div>
+        </DialogShell>
+    }
+
     @* ── EXPORT (#165 phase 3) ── *@
     @if (_showExport)
     {
@@ -214,6 +249,7 @@
         await PersistedSessionStore.LoadTurnTextsAsync(id);
     }
     private bool _showSettings;
+    private bool _confirmHeaderUpdate;
     private bool _showExport;
     private bool _showApprovals;
     private string? _focusApprovalId;
@@ -238,6 +274,7 @@
         ProviderStore.Changed += HandleProvidersChanged;
         PasskeyStore.Changed += HandlePasskeyGateChanged;
         ContentGrant.Changed += HandlePasskeyGateChanged;
+        UpdateStore.Changed += HandleUpdateChanged;
 
         // The link `--export-conversations` prints ends in ?approval=<id>: open the approval view on that request.
         if (TryReadApprovalId(Navigation.Uri) is { } approvalId) OpenApprovals(approvalId);
@@ -260,6 +297,9 @@
         RecomputeBudgetAlerts();
 
         // Same best-effort shape: a failed/unavailable load just leaves the ticker's placeholder in place.
+        // Best-effort: the header Update button stays hidden until a check says a newer release exists.
+        await UpdateStore.LoadAsync();
+
         await UsageStore.LoadSummaryAsync("all");
         if (UsageStore is { IsReachable: true, Summary: { } summary })
         {
@@ -394,6 +434,32 @@
         ProviderStore.Changed -= HandleProvidersChanged;
         PasskeyStore.Changed -= HandlePasskeyGateChanged;
         ContentGrant.Changed -= HandlePasskeyGateChanged;
+        UpdateStore.Changed -= HandleUpdateChanged;
+    }
+
+    /// <summary>Re-renders when the update status or the header install state changes.</summary>
+    private void HandleUpdateChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Opens the same confirmation the Settings apply action uses.</summary>
+    private void AskToUpdate()
+    {
+        _confirmHeaderUpdate = true;
+    }
+
+    /// <summary>Closes the update confirmation without requesting an install.</summary>
+    private void CancelHeaderUpdate()
+    {
+        _confirmHeaderUpdate = false;
+    }
+
+    /// <summary>Records one pending install for the tray and closes the confirmation.</summary>
+    private async Task ConfirmHeaderUpdateAsync()
+    {
+        _confirmHeaderUpdate = false;
+        await UpdateStore.RequestHeaderApplyAsync();
     }
 
     // ContentGrantStore raises Changed from the thread that set or cleared the grant - for the expiry timer, a
