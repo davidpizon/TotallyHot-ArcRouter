@@ -100,7 +100,7 @@ public sealed class StreamingSecretObscurerTests
     [Fact]
     public void Stream_InvalidUtf8AndSplitCharacters_PassThroughUnchanged()
     {
-        var body = new List<byte>();
+        List<byte> body = [];
         body.AddRange("ok é 🙂 "u8.ToArray());
         body.AddRange([0xFF, 0xC3]);
         body.AddRange(Encoding.UTF8.GetBytes($" {AnthropicKey} "));

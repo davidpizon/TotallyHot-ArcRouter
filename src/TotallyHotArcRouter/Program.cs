@@ -676,7 +676,7 @@ public static class Program
             }
             catch (InvalidOperationException ex)
             {
-                await Console.Error.WriteLineAsync(ex.Message);
+                await Console.Error.WriteLineAsync(ex.Message, cancellationToken);
                 return exitNotElevated;
             }
 

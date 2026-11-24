@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
@@ -160,7 +161,8 @@ internal static class ConversationZipReader
                 !sequenceElement.TryGetInt32(out var turnSequence) ||
                 !root.TryGetProperty("created_at_utc", out var createdElement) ||
                 createdElement.ValueKind != JsonValueKind.String ||
-                !DateTimeOffset.TryParse(createdElement.GetString(), out var createdAtUtc))
+                !DateTimeOffset.TryParse(createdElement.GetString(), CultureInfo.InvariantCulture,
+                    DateTimeStyles.None, out var createdAtUtc))
             {
                 throw new ConversationZipException(
                     $"turns.jsonl line {lineNumber} is missing a required identity field.");

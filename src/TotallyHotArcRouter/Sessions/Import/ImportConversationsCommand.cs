@@ -242,14 +242,17 @@ internal static class ImportConversationsCommand
             var staged = await router.StageAsync(options.SourcePath, cancellationToken).ConfigureAwait(false);
             var ticket = await router.CreateApprovalRequestAsync(staged.StagedId, options.Options, cancellationToken)
                 .ConfigureAwait(false);
-            await stdout.WriteLineAsync("Approve this import in your browser:").ConfigureAwait(false);
-            await stdout.WriteLineAsync($"  {ticket.DashboardUrl}").ConfigureAwait(false);
-            await stdout.WriteLineAsync($"Source: {options.SourcePath}").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Approve this import in your browser:", cancellationToken)
+                .ConfigureAwait(false);
+            await stdout.WriteLineAsync($"  {ticket.DashboardUrl}", cancellationToken).ConfigureAwait(false);
+            await stdout.WriteLineAsync($"Source: {options.SourcePath}", cancellationToken).ConfigureAwait(false);
             await stdout.WriteLineAsync(string.Create(
                 CultureInfo.InvariantCulture,
-                $"Staged copy: {staged.SizeBytes} bytes, SHA-256 {staged.Sha256Hex}")).ConfigureAwait(false);
+                $"Staged copy: {staged.SizeBytes} bytes, SHA-256 {staged.Sha256Hex}"),
+                cancellationToken).ConfigureAwait(false);
             await stdout.WriteLineAsync(
-                $"Waiting for approval; the request expires at {ticket.ExpiresAtUtc:u}.").ConfigureAwait(false);
+                $"Waiting for approval; the request expires at {ticket.ExpiresAtUtc:u}.",
+                cancellationToken).ConfigureAwait(false);
 
             var approval = await WaitAsync(
                 router, ticket.ApprovalId, approvalTimeout ?? PendingApprovalTable.RequestTtl + TimeSpan.FromSeconds(30),
@@ -257,7 +260,8 @@ internal static class ImportConversationsCommand
             switch (approval.Outcome)
             {
                 case PendingApprovalOutcome.Denied:
-                    await stderr.WriteLineAsync("The import was denied in the dashboard. Nothing was imported.")
+                    await stderr.WriteLineAsync(
+                            "The import was denied in the dashboard. Nothing was imported.", cancellationToken)
                         .ConfigureAwait(false);
                     return ExitDenied;
                 case PendingApprovalOutcome.Expired:
@@ -278,7 +282,9 @@ internal static class ImportConversationsCommand
         }
         catch (OperationCanceledException)
         {
-            await stderr.WriteLineAsync("The import was cancelled.").ConfigureAwait(false);
+            // The token is already cancelled; None still writes the acknowledgement.
+            await stderr.WriteLineAsync("The import was cancelled.", CancellationToken.None)
+                .ConfigureAwait(false);
             return ExitFailed;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -286,7 +292,8 @@ internal static class ImportConversationsCommand
             // Top level of a one-shot command: anything else (a malformed response, an I/O error on the console)
             // becomes an exit code instead of a crash dump.
             logger?.LogError(ex, "The conversation import command failed unexpectedly.");
-            await stderr.WriteLineAsync($"The import failed unexpectedly: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"The import failed unexpectedly: {ex.Message}", CancellationToken.None)
+                .ConfigureAwait(false);
             return ExitFailed;
         }
     }
@@ -338,7 +345,7 @@ internal static class ImportConversationsCommand
         TimeProvider time,
         CancellationToken cancellationToken)
     {
-        await stdout.WriteLineAsync("Approved. Importing...").ConfigureAwait(false);
+        await stdout.WriteLineAsync("Approved. Importing...", cancellationToken).ConfigureAwait(false);
 
         var lastProgress = time.GetTimestamp();
         ConversationImportResult? result = null;
@@ -356,35 +363,40 @@ internal static class ImportConversationsCommand
             lastProgress = time.GetTimestamp();
             await stdout.WriteLineAsync(string.Create(
                 CultureInfo.InvariantCulture,
-                $"  {progress.TurnsProcessed} turns examined, {progress.TurnsStored} stored")).ConfigureAwait(false);
+                $"  {progress.TurnsProcessed} turns examined, {progress.TurnsStored} stored"),
+                cancellationToken).ConfigureAwait(false);
         }
 
         if (result is null)
         {
             await stderr.WriteLineAsync(
-                "The router ended the import without a result; run it again, which only adds what is missing.")
-                .ConfigureAwait(false);
+                "The router ended the import without a result; run it again, which only adds what is missing.",
+                cancellationToken).ConfigureAwait(false);
             return ExitFailed;
         }
 
         await stdout.WriteLineAsync(string.Create(
             CultureInfo.InvariantCulture,
-            $"Imported {result.TurnsAdded} turns into {result.SessionsAdded} new conversations; {result.TurnsAlreadyPresent} turns were already present, {result.TurnsConflictKept} kept the local copy, {result.SessionsSkipped} conversations matched exactly and were skipped.")).ConfigureAwait(false);
+            $"Imported {result.TurnsAdded} turns into {result.SessionsAdded} new conversations; {result.TurnsAlreadyPresent} turns were already present, {result.TurnsConflictKept} kept the local copy, {result.SessionsSkipped} conversations matched exactly and were skipped."),
+            cancellationToken).ConfigureAwait(false);
         await stdout.WriteLineAsync(string.Create(
             CultureInfo.InvariantCulture,
-            $"{result.TurnsToGrade} imported turns arrived without a score and will be graded like any other unscored turn.")).ConfigureAwait(false);
+            $"{result.TurnsToGrade} imported turns arrived without a score and will be graded like any other unscored turn."),
+            cancellationToken).ConfigureAwait(false);
         if (result.TurnsDueForRetention > 0)
         {
             await stdout.WriteLineAsync(string.Create(
                 CultureInfo.InvariantCulture,
-                $"The next retention pass will delete {result.TurnsDueForRetention} turns. Imports with --timestamps import-time are kept by making them the newest history.")).ConfigureAwait(false);
+                $"The next retention pass will delete {result.TurnsDueForRetention} turns. Imports with --timestamps import-time are kept by making them the newest history."),
+                cancellationToken).ConfigureAwait(false);
         }
 
         if (result.TurnsRejected > 0)
         {
             await stderr.WriteLineAsync(string.Create(
                 CultureInfo.InvariantCulture,
-                $"Warning: {result.TurnsRejected} turns failed validation and were left out.")).ConfigureAwait(false);
+                $"Warning: {result.TurnsRejected} turns failed validation and were left out."),
+                cancellationToken).ConfigureAwait(false);
         }
 
         return ExitSuccess;

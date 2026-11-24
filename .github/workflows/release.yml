@@ -108,7 +108,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: "10.0.x"
+          dotnet-version: "11.0.x"
 
       - name: Restore
         run: |
@@ -200,7 +200,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: "10.0.x"
+          dotnet-version: "11.0.x"
 
       # Cross-published from an ubuntu-latest runner for every RID, including osx-arm64: a self-contained
       # publish only needs that RID's runtime pack restored from NuGet, not a matching host OS/arch -

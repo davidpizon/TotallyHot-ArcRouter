@@ -207,7 +207,8 @@ public sealed class SqliteMemoryEntryStore : IMemoryEntryStore
         var score = reader.GetDouble(3);
         var cost = reader.IsDBNull(4) ? (double?)null : reader.GetDouble(4);
         var verifierTrace = reader.IsDBNull(5) ? null : reader.GetString(5);
-        var createdAtUtc = DateTimeOffset.Parse(input: reader.GetString(6), null, styles: DateTimeStyles.RoundtripKind);
+        var createdAtUtc = DateTimeOffset.Parse(input: reader.GetString(6),
+            formatProvider: CultureInfo.InvariantCulture, styles: DateTimeStyles.RoundtripKind);
         var isExploratory = reader.GetInt64(7) != 0;
         var propensity = reader.GetDouble(8);
         var dimension = reader.IsDBNull(9) ? null : reader.GetString(9);

@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace TotallyHot.ArcRouter.Gui.Admin.Tests;
 
 /// <summary>
@@ -15,7 +17,7 @@ public sealed class ModelCapabilityBadgesTests
 
     private static ModelCapabilitiesAdminView Record(params CapabilityGroupAdminView[] groups)
     {
-        return new ModelCapabilitiesAdminView(ScannedAtUtc: DateTimeOffset.Parse("2026-10-02T12:00:00Z"), Groups: groups);
+        return new ModelCapabilitiesAdminView(ScannedAtUtc: DateTimeOffset.Parse("2026-10-02T12:00:00Z", CultureInfo.InvariantCulture), Groups: groups);
     }
 
     private static ModelCapabilitiesAdminView Haiku45()

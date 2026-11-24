@@ -214,7 +214,9 @@
     /// <summary>Formats a bucket's local start time for the histogram's x-axis: "HH:mm" for hourly buckets, "MM/dd" otherwise.</summary>
     private static string FormatSlot(DateTimeOffset bucketStartUtc, string width)
     {
-        return width == "hour" ? bucketStartUtc.ToLocalTime().ToString("HH:mm") : bucketStartUtc.ToLocalTime().ToString("MM/dd");
+        return width == "hour"
+            ? bucketStartUtc.ToLocalTime().ToString(format: "HH:mm", formatProvider: CultureInfo.InvariantCulture)
+            : bucketStartUtc.ToLocalTime().ToString(format: "MM/dd", formatProvider: CultureInfo.InvariantCulture);
     }
 
 }

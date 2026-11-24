@@ -441,6 +441,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
         // claimed-then-abandoned probe would otherwise strand that target forever. Gates (1)-(3) have no
         // such ordering constraint among themselves but are kept in their historical order to avoid a
         // behavior-neutral but unnecessary diff.
+        nextCandidate:
         for (var i = 0; i < candidates.Count; i++)
         {
             var route = candidates[i].Route;
@@ -452,16 +453,12 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             // exact order.
             var circuitTarget = CircuitBreakerTargetKey.FromRoute(route);
 
-            var candidateGateBlocked = false;
             foreach (var gate in CandidateGates)
                 if (gate.Predicate(arg1: this, arg2: route, arg3: circuitTarget))
                 {
                     gate.LogBlocked(arg1: this, arg2: route);
-                    candidateGateBlocked = true;
-                    break;
+                    continue nextCandidate;
                 }
-
-            if (candidateGateBlocked) continue;
 
             var rewrittenBody = candidates[i].RewrittenBody;
             var featureStrip = candidates[i].FeatureStrip;

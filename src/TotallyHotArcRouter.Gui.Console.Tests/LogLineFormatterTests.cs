@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace TotallyHot.ArcRouter.Gui.Console.Tests;
 
 /// <summary>Covers <see cref="LogLineFormatter"/>: the shared viewport/copy text formatting.</summary>
@@ -18,7 +20,7 @@ public class LogLineFormatterTests
         var formatted = LogLineFormatter.Format(line);
 
         Assert.Equal(
-            expected: $"[{timestamp.ToLocalTime():yyyy-MM-dd HH:mm:ss}] [WARN ]  API latency spike detected.",
+            expected: $"[{timestamp.ToLocalTime().ToString(format: "yyyy-MM-dd HH:mm:ss", formatProvider: CultureInfo.InvariantCulture)}] [WARN ]  API latency spike detected.",
             actual: formatted);
     }
 

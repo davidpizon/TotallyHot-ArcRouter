@@ -15,7 +15,7 @@ name: Nightly audit
 # issue filing does not require it. This workflow does not upload SARIF, so it does
 # not need code scanning enabled and does not take security-events permission.
 #
-# TotallyHotArcRouter.Tray (net10.0-windows) is not restored on the Linux runner.
+# TotallyHotArcRouter.Tray (net11.0-windows) is not restored on the Linux runner.
 # The committed baseline is not updated here. Refreshing it stays a deliberate
 # commit, as code_quality.yml describes. A smell that is already in the baseline is
 # not filed. A fingerprint that already has an issue is not filed again.
@@ -56,7 +56,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: "10.0.x"
+          dotnet-version: "11.0.x"
 
       - name: List vulnerable NuGet packages
         run: bash .github/scripts/collect-vulnerable-packages.sh "${RUNNER_TEMP}/nuget-audit"

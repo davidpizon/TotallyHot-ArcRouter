@@ -15,7 +15,10 @@
         <div class="flex items-center justify-between px-4 py-2.5">
             @* Brand *@
             <div class="flex items-center gap-2">
+                @* The logo is a static file of the web host (Gui.Web/wwwroot/img/logo.svg), served from the site root. This component's folder has no img directory, so the path check cannot see it. *@
+                @* ReSharper disable Html.PathError *@
                 <img src="img/logo.svg" alt="" width="36" height="36"/>
+                @* ReSharper restore Html.PathError *@
                 <span class="text-sm font-bold tracking-tight text-slate-100">TotallyHot Arc Router</span>
             </div>
 

@@ -506,7 +506,7 @@ public sealed class SessionFileTests
         {
             var path = Path.Combine(dir, "session.bin");
             var sessionId = SessionArchiveIds.NewArchiveSessionId();
-            var header = new List<byte>("THSESS01"u8.ToArray());
+            List<byte> header = [.."THSESS01"u8];
             header.AddRange(sessionId.ToByteArray());
             header.AddRange([1, 0]);
             File.WriteAllBytes(path, header.ToArray());

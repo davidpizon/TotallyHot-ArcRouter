@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace TotallyHot.ArcRouter.Gui.Console;
 
 /// <summary>
@@ -14,7 +16,7 @@ public static class LogLineFormatter
         ArgumentNullException.ThrowIfNull(line);
 
         return
-            $"[{line.TimestampUtc.ToLocalTime().ToString(TimestampFormat)}] [{line.Level.PadRight(5)}]  {line.Message}";
+            $"[{line.TimestampUtc.ToLocalTime().ToString(format: TimestampFormat, formatProvider: CultureInfo.InvariantCulture)}] [{line.Level.PadRight(5)}]  {line.Message}";
     }
 
     /// <summary>Formats every line, oldest first, one per line, joined with <see cref="Environment.NewLine"/>.</summary>

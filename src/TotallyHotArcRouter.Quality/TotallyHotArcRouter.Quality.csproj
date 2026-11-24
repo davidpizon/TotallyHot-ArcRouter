@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <RootNamespace>TotallyHot.ArcRouter.Quality</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -23,9 +23,6 @@
   <ItemGroup>
     <PackageReference Include="Acornima" Version="1.9.2" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.12.0" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="11.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="11.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="11.0.0" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="11.0.0" />
   </ItemGroup>
 

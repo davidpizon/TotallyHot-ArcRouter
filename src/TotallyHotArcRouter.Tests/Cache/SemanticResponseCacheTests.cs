@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using TotallyHot.ArcRouter.Cache;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Embeddings;
+using System.Globalization;
 
 namespace TotallyHot.ArcRouter.Tests.Cache;
 
@@ -73,7 +74,7 @@ public class SemanticResponseCacheTests
     [Fact]
     public void Lookup_ExpiredEntry_Misses()
     {
-        var clock = new ManualTimeProvider { UtcNow = DateTimeOffset.Parse("2026-09-28T00:00:00Z") };
+        var clock = new ManualTimeProvider { UtcNow = DateTimeOffset.Parse("2026-09-28T00:00:00Z", CultureInfo.InvariantCulture) };
         var cache = CreateCache(threshold: 0.92, timeToLive: TimeSpan.FromMinutes(30), time: clock);
         var scope = ScopeFor(temperature: 0.2);
         cache.Remember(probe: Probe(embedding: [1f, 0f], scope: scope), statusCode: 200, responseBody: Answer,

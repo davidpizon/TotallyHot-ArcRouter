@@ -1,3 +1,4 @@
+using System.Globalization;
 using TotallyHot.ArcRouter.Gui.Models;
 using TotallyHot.ArcRouter.Gui.Services;
 
@@ -351,7 +352,7 @@ public sealed class SessionMergerTests
             0m,
             0,
             0m,
-            Timestamp: utc.ToString("HH:mm:ss"),
+            Timestamp: utc.ToString(format: "HH:mm:ss", formatProvider: CultureInfo.InvariantCulture),
             RoutingSteps: [],
             RequestSummary: request,
             ResponseSummary: response,

@@ -51,11 +51,11 @@ public static class LiveConversationMapper
     /// not surface a warning step (docs/router/orchestrator-live-path-plan.md §M3.1): a request naming
     /// no concrete model was never denied anything.
     /// </summary>
-    private static readonly HashSet<string> SilentSubstitutionReasons = new(StringComparer.Ordinal)
-    {
+    private static readonly HashSet<string> SilentSubstitutionReasons =
+    [
         "None",
         "AutoSelect"
-    };
+    ];
 
     /// <summary>
     /// Maps one <see cref="LiveConversation"/> (and its turns) onto the dashboard's <see cref="Conversation"/> view
