@@ -85,6 +85,12 @@ public sealed class RouterConnectionSupervisor : IAsyncDisposable
     /// (and when a test factory declines to build one). Replaced on the same reconnect that replaces
     /// <see cref="Monitor"/>.
     /// </summary>
+    /// <remarks>
+    /// Stays public. <c>TrayApplicationContext</c> subscribes to <see cref="UpdateApplyMonitor.InstallLaunched"/>
+    /// from the WinForms tray project, which is a different assembly from this library. A scan of this
+    /// project alone does not see that caller.
+    /// </remarks>
+    // ReSharper disable once MemberCanBePrivate.Global
     public UpdateApplyMonitor? ApplyMonitor { get; private set; }
 
     /// <summary>
