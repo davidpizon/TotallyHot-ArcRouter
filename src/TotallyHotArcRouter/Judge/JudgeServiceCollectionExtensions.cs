@@ -1,5 +1,9 @@
 using Microsoft.Extensions.Options;
+using TotallyHot.ArcRouter.Models;
+using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Quality.Grading;
+using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Sessions;
 
 namespace TotallyHot.ArcRouter.Judge;
 
@@ -71,7 +75,13 @@ internal static class JudgeServiceCollectionExtensions
                 configuration.GetSection(GraderEpochOptions.SectionName).Bind(options))
             .ValidateDataAnnotations();
         services.AddSingleton<GraderEpochArtifactStore>();
-        services.AddSingleton<GraderEpochLabelQuery>();
+        services.AddSingleton(sp => new GraderEpochLabelQuery(
+            sp.GetRequiredService<RouterMemoryDatabase>(),
+            sp.GetRequiredService<ResponseVectorKeyHolder>(),
+            sp.GetRequiredService<IOptionsMonitor<JudgeOptions>>(),
+            sp.GetRequiredService<IOptionsMonitor<QualityOptions>>(),
+            sp.GetRequiredService<IOptionsMonitor<EmbeddingOptions>>(),
+            sp.GetService<ISessionMasterKeyStore>()));
         services.AddSingleton<IGraderEpochEventStore, SqliteGraderEpochEventStore>();
         services.AddSingleton<ShadowLocalScoreObserver>();
         services.AddSingleton<ILocalGradeTakeover, LocalGradeTakeover>();

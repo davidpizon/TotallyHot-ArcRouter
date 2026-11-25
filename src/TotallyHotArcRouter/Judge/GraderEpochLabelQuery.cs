@@ -1,9 +1,11 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.Quality;
 using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Sessions;
 
 namespace TotallyHot.ArcRouter.Judge;
 
@@ -47,7 +49,8 @@ public sealed class GraderEpochLabelQuery
                                                 WHERE g.correlation_id = r.correlation_id AND g.grader_key = $analysisKey
                                                 LIMIT 1),
                                             m.embedding_model,
-                                            m.embedding
+                                            m.embedding,
+                                            m.id
                                         FROM grade_receipts r
                                         LEFT JOIN response_vectors v ON v.correlation_id = r.correlation_id
                                         LEFT JOIN memory_entries m ON m.id = (
@@ -63,6 +66,7 @@ public sealed class GraderEpochLabelQuery
     private readonly IOptionsMonitor<EmbeddingOptions> _embedding;
     private readonly IOptionsMonitor<JudgeOptions> _judge;
     private readonly ResponseVectorKeyHolder _keys;
+    private readonly ISessionMasterKeyStore? _masterKeys;
     private readonly IOptionsMonitor<QualityOptions> _quality;
 
     /// <summary>Initializes a new instance of the <see cref="GraderEpochLabelQuery"/> class.</summary>
@@ -71,12 +75,17 @@ public sealed class GraderEpochLabelQuery
     /// <param name="judge">The current teacher model and prompt version.</param>
     /// <param name="quality">The current code <c>weights_version</c>.</param>
     /// <param name="embedding">The current BGE identity and the only legal vector length.</param>
+    /// <param name="masterKeys">
+    /// The session master key that opens sealed question vectors. Null leaves a sealed blob unread
+    /// and still decodes a raw float32 blob written before ADR-0029.
+    /// </param>
     public GraderEpochLabelQuery(
         RouterMemoryDatabase database,
         ResponseVectorKeyHolder keys,
         IOptionsMonitor<JudgeOptions> judge,
         IOptionsMonitor<QualityOptions> quality,
-        IOptionsMonitor<EmbeddingOptions> embedding)
+        IOptionsMonitor<EmbeddingOptions> embedding,
+        ISessionMasterKeyStore? masterKeys = null)
     {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(keys);
@@ -88,6 +97,7 @@ public sealed class GraderEpochLabelQuery
         _judge = judge;
         _quality = quality;
         _embedding = embedding;
+        _masterKeys = masterKeys;
     }
 
     /// <summary>
@@ -108,6 +118,7 @@ public sealed class GraderEpochLabelQuery
         var dimension = embedding.EmbeddingDimension;
         var weights = GraderEpochKinds.WeightsForKind(kind: kind, codeWeightsVersion: _quality.CurrentValue.WeightsVersion);
         var key = _keys.GetOrCreate();
+        var questionKey = _masterKeys?.TryGetCurrent();
 
         _database.EnsureCreated();
         using var connection = _database.OpenConnection();
@@ -119,12 +130,20 @@ public sealed class GraderEpochLabelQuery
         command.Parameters.AddWithValue("$weights", weights);
 
         var labels = new List<GraderEpochLabel>();
-        using var reader = command.ExecuteReader();
-        while (reader.Read())
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var label = TryReadLabel(reader: reader, judge: judge, bge: bge, dimension: dimension, key: key);
-            if (label is not null) labels.Add(label);
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var label = TryReadLabel(reader: reader, judge: judge, bge: bge, dimension: dimension, key: key,
+                    questionKey: questionKey);
+                if (label is not null) labels.Add(label);
+            }
+        }
+        finally
+        {
+            if (questionKey is not null) CryptographicOperations.ZeroMemory(questionKey);
         }
 
         return Task.FromResult<IReadOnlyList<GraderEpochLabel>>(labels);
@@ -148,7 +167,7 @@ public sealed class GraderEpochLabelQuery
         using var connection = _database.OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = """
-                              SELECT embedding_model, embedding FROM memory_entries
+                              SELECT embedding_model, embedding, id FROM memory_entries
                               WHERE correlation_id = $correlationId
                               ORDER BY CASE WHEN embedding_model = $bge THEN 0 ELSE 1 END,
                                        created_at_utc DESC, id DESC
@@ -160,11 +179,20 @@ public sealed class GraderEpochLabelQuery
         if (!reader.Read()) return;
 
         modelId = reader.IsDBNull(0) ? null : reader.GetString(0);
-        vector = DecodeFloats(ReadBlob(reader, 1));
+        var questionKey = _masterKeys?.TryGetCurrent();
+        try
+        {
+            vector = QuestionVectorSeal.Read(blob: ReadBlob(reader, 1), key: questionKey, id: reader.GetInt64(2),
+                embeddingModel: modelId);
+        }
+        finally
+        {
+            if (questionKey is not null) CryptographicOperations.ZeroMemory(questionKey);
+        }
     }
 
     private static GraderEpochLabel? TryReadLabel(SqliteDataReader reader, JudgeOptions judge, string bge,
-        int dimension, byte[] key)
+        int dimension, byte[] key, byte[]? questionKey)
     {
         if (!string.Equals(reader.GetString(10), nameof(GradeStatus.Complete), StringComparison.Ordinal))
             return null;
@@ -205,7 +233,10 @@ public sealed class GraderEpochLabelQuery
             CreatedAt = created,
             SessionId = session,
             QuestionVectorMissing = reader.IsDBNull(5) ? null : reader.GetInt64(5) != 0,
-            QuestionVector = DecodeFloats(ReadBlob(reader, 19)),
+            QuestionVector = reader.IsDBNull(20)
+                ? null
+                : QuestionVectorSeal.Read(blob: ReadBlob(reader, 19), key: questionKey, id: reader.GetInt64(20),
+                    embeddingModel: reader.IsDBNull(18) ? null : reader.GetString(18)),
             QuestionModel = reader.IsDBNull(18) ? null : reader.GetString(18),
             AnalysisCount = (int)reader.GetInt64(16),
             AnalysisScore = reader.IsDBNull(17) ? null : reader.GetDouble(17),
@@ -279,13 +310,4 @@ public sealed class GraderEpochLabelQuery
 
     private static byte[]? ReadBlob(SqliteDataReader reader, int ordinal) =>
         reader.IsDBNull(ordinal) ? null : (byte[])reader.GetValue(ordinal);
-
-    private static float[]? DecodeFloats(byte[]? bytes)
-    {
-        if (bytes is null || bytes.Length == 0 || bytes.Length % sizeof(float) != 0) return null;
-
-        var vector = new float[bytes.Length / sizeof(float)];
-        Buffer.BlockCopy(src: bytes, srcOffset: 0, dst: vector, dstOffset: 0, count: bytes.Length);
-        return vector;
-    }
 }

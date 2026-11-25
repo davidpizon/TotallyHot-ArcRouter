@@ -4,6 +4,7 @@ using TotallyHot.ArcRouter.CodeRouterBench.Evaluation;
 using TotallyHot.ArcRouter.Models;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Router.Embeddings;
+using TotallyHot.ArcRouter.Sessions;
 using TotallyHot.ArcRouter.Router.Orchestrator;
 using TotallyHot.ArcRouter.Router.TextGeneration;
 
@@ -73,7 +74,12 @@ internal static class RouterServiceCollectionExtensions
         services.AddSingleton<IEmbeddingClient, OnnxEmbeddingClient>();
         services.AddSingleton<EmbeddingWarmupState>();
         services.AddSingleton<RouterMemoryDatabase>();
-        services.AddSingleton<IMemoryEntryStore, SqliteMemoryEntryStore>();
+        services.AddSingleton(sp => new SqliteMemoryEntryStore(
+            sp.GetRequiredService<RouterMemoryDatabase>(),
+            sp.GetRequiredService<ILogger<SqliteMemoryEntryStore>>(),
+            sp.GetService<ISessionMasterKeyStore>()));
+        services.AddSingleton<IMemoryEntryStore>(sp => sp.GetRequiredService<SqliteMemoryEntryStore>());
+        services.AddSingleton<IQuestionVectorRewrap>(sp => sp.GetRequiredService<SqliteMemoryEntryStore>());
         services.AddSingleton<EmbeddingMemory>();
 
         // llm_router voter's local ONNX GenAI text-generation model (PLAN.md Phase L) - same

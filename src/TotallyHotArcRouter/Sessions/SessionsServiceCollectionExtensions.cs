@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.Proxy;
+using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Sessions.Export;
 using TotallyHot.ArcRouter.Sessions.Import;
 using TotallyHot.ArcRouter.Proxy.Management;
@@ -123,7 +124,8 @@ internal static class SessionsServiceCollectionExtensions
             index,
             services.GetRequiredService<ISessionMasterKeyStore>(),
             SessionStore.FolderBeside(services.GetRequiredService<TranscriptDatabase>().DatabasePath),
-            logger);
+            logger,
+            services.GetService<IQuestionVectorRewrap>());
 
         var result = store.RecoverOnStartup();
         logger.LogInformation(
