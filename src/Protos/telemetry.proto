@@ -38,6 +38,10 @@ service TelemetryService {
   // The list itself no longer carries prompt or response text. Requires a content grant when a passkey
   // gate is enrolled (ADR-0020). Each side is a display preview, not the raw HTTP body.
   rpc GetTurnTexts (GetTurnTextsRequest) returns (GetTurnTextsResponse);
+
+  // One newest-first page of one session's persisted rows, plus a first-page aggregate. Metadata only:
+  // no prompt or response text (#176 phase 2, ADR-0025).
+  rpc GetSessionTurnDetails (GetSessionTurnDetailsRequest) returns (GetSessionTurnDetailsResponse);
 }
 
 message StreamEventsRequest {}
@@ -117,6 +121,99 @@ message TurnText {
   bool response_truncated = 6;
   optional int32 prompt_text_length = 7;
   optional int32 response_text_length = 8;
+}
+
+// One newest-first page. limit 0 means 500, and the server clamps every limit to [1, 2000].
+message GetSessionTurnDetailsRequest {
+  string session_id = 1;
+  int32 limit = 2;
+  optional int64 before_transcript_id = 3;
+  int32 live_floor_turn_number = 4;
+}
+
+message GetSessionTurnDetailsResponse {
+  bool transcript_capture_enabled = 1;
+  repeated SessionTurnDetail turns = 2;
+  optional int64 next_before_transcript_id = 3;
+  optional SessionAggregate aggregate = 4;
+}
+
+message SessionAggregate {
+  int32 persisted_turns = 1;
+  int32 trained_turns = 2;
+  int32 compared_turns = 3;
+  optional string total_estimated_net_savings_usd = 4;
+  optional string total_baseline_estimated_cost_usd = 5;
+  google.protobuf.Timestamp first_turn_utc = 6;
+  google.protobuf.Timestamp last_turn_utc = 7;
+  repeated int32 persisted_turn_numbers_from_floor = 8;
+  optional string total_cost_usd = 9;
+  int32 unpriced_turns = 10;
+  int64 total_input_tokens = 11;
+  int64 total_output_tokens = 12;
+  int32 token_unknown_turns = 13;
+  repeated SessionModelUsage models = 14;
+  int32 other_models = 15;
+  int32 other_model_turns = 16;
+  bool persisted_turn_numbers_complete = 17;
+}
+
+message SessionModelUsage {
+  string routed_model = 1;
+  int32 turns = 2;
+  optional string cost_usd = 3;
+  int32 unpriced_turns = 4;
+  google.protobuf.Timestamp last_used_utc = 5;
+}
+
+message SessionTurnDetail {
+  int64 transcript_id = 1;
+  int32 turn_number = 2;
+  google.protobuf.Timestamp created_at_utc = 3;
+  string requested_model = 4;
+  string routed_model = 5;
+  optional string dimension = 6;
+  optional string difficulty = 7;
+  optional string language = 8;
+  bool is_utility = 9;
+  optional double score = 10;
+  optional string cost_usd = 11;
+  bool is_exploratory = 12;
+  double propensity = 13;
+  optional int32 input_tokens = 14;
+  optional int32 output_tokens = 15;
+  optional int64 memory_entry_id = 16;
+  optional string dim_best_model = 17;
+  optional string scorer_version = 18;
+  bool is_judge_scored = 19;
+  optional string untrained_baseline_model = 20;
+  optional double untrained_baseline_predicted_score = 21;
+  optional BaselineComparison comparison = 22;
+  optional int32 prompt_text_length = 23;
+  optional int32 response_text_length = 24;
+  optional bool has_tool_calls = 25;
+}
+
+message BaselineComparison {
+  google.protobuf.Timestamp compared_at_utc = 1;
+  double observed_score = 2;
+  optional double dimension_predicted_score = 3;
+  optional double cluster_predicted_score = 4;
+  optional double dimension_abs_error = 5;
+  optional double cluster_abs_error = 6;
+  bool is_clustered = 7;
+  optional string baseline_model = 8;
+  optional string actual_cost_usd = 9;
+  optional string baseline_estimated_cost_usd = 10;
+  optional string estimated_net_savings_usd = 11;
+  optional double baseline_predicted_score = 12;
+  optional double estimated_regret = 13;
+  optional double baseline_tokenizer_ratio = 14;
+  optional bool baseline_tokenizer_ratio_measured = 15;
+  optional double baseline_input_tokens = 16;
+  optional double baseline_output_tokens = 17;
+  optional string baseline_input_price_per_million = 18;
+  optional string baseline_output_price_per_million = 19;
 }
 
 // The Governance > Price Sources panel's management plane: read the price feeds' status, switch one on or

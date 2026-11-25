@@ -3,6 +3,26 @@
 @inject TimeProvider Time
 
 <div class="space-y-3">
+    @if (Notice is not null)
+    {
+        <p class="text-xs text-slate-500">@Notice</p>
+    }
+    @if (Aggregate is not null)
+    {
+        <section>
+            <div class="ls-stat-label mb-1">Retained history</div>
+            <div class="ls-kv-grid">
+                <span>Turns</span><span class="font-mono">@Aggregate.PersistedTurns</span>
+                <span>Cost</span><span class="font-mono">@RetainedMoney(Aggregate.TotalCostUsd)</span>
+                <span>Tokens</span><span class="font-mono">@Aggregate.TotalInputTokens.ToString("N0", CultureInfo.InvariantCulture) in / @Aggregate.TotalOutputTokens.ToString("N0", CultureInfo.InvariantCulture) out</span>
+                <span>Models</span><span>@string.Join(", ", Aggregate.Models.Select(model => model.RoutedModel))@(Aggregate.OtherModels > 0 ? $" +{Aggregate.OtherModels}" : "")</span>
+                <span>Used for training</span><span>@(Aggregate.TrainedTurns > 0 ? "Yes" : "Not in the retained history")</span>
+                <span>Est. savings</span><span class="font-mono">@RetainedMoney(Aggregate.TotalEstimatedNetSavingsUsd)</span>
+                <span>Est. ROI</span><span class="font-mono">@Roi</span>
+            </div>
+            <p class="text-xs text-slate-500 mt-1">@Aggregate.ComparedTurns of @Aggregate.PersistedTurns turns compared</p>
+        </section>
+    }
     <section>
         <div class="ls-stat-label mb-1">Identity</div>
         <div class="ls-kv-grid">
@@ -83,6 +103,14 @@
     [Parameter]
     [EditorRequired]
     public Conversation Conversation { get; set; } = null!;
+
+    /// <summary>Retained-history figures, or null when the details page has not loaded.</summary>
+    [Parameter]
+    public SessionAggregateDto? Aggregate { get; set; }
+
+    /// <summary>Capture-off or load-failure text, or null.</summary>
+    [Parameter]
+    public string? Notice { get; set; }
 
     private const double SparklineWidth = 48;
     private const double SparklineHeight = 16;
@@ -174,6 +202,20 @@
         return new MarkupString(
             $"≥ {sum.ToString("N0", CultureInfo.InvariantCulture)} <span class=\"text-slate-500\" tabindex=\"0\" aria-describedby=\"ls-tooltip\" data-tip=\"{tip}\">({missing} without counts)</span>");
     }
+
+    private string Roi
+    {
+        get
+        {
+            decimal? baseline = Aggregate?.TotalBaselineEstimatedCostUsd;
+            decimal? savings = Aggregate?.TotalEstimatedNetSavingsUsd;
+            if (baseline is null or <= 0 || savings is null) return "—";
+            return (savings.Value / baseline.Value * 100m).ToString("F1", CultureInfo.InvariantCulture) + "%";
+        }
+    }
+
+    private static string RetainedMoney(decimal? value) =>
+        value is null ? "—" : "$" + value.Value.ToString("F6", CultureInfo.InvariantCulture);
 
     private async Task CopyIdAsync() => await Clipboard.SetTextAsync(Conversation.Id);
 

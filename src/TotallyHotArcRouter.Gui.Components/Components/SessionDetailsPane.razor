@@ -2,6 +2,7 @@
 @* Right pane of the Sessions three-pane layout: Message / Routing / Session tabs (#176 §4.4 / §7). *@
 @inject SessionsViewState ViewState
 @inject IJSRuntime Js
+@inject IServiceProvider Services
 
 <div class="ls-details-pane flex flex-col min-h-0 h-full panel-enter" @key="Conversation?.Id">
     <div role="tablist" aria-label="Session details" class="ls-details-tabs shrink-0 flex">
@@ -21,6 +22,9 @@
                 <span>@tab.Label</span>
             </button>
         }
+        <button type="button" class="ml-auto shrink-0 text-slate-400 hover:text-slate-200" aria-label="Refresh persisted details" @onclick="RefreshAsync">
+            <Icon Name="refresh" Size="16"/>
+        </button>
     </div>
 
     <div class="flex-1 min-h-0 overflow-y-auto p-3"
@@ -33,7 +37,7 @@
         }
         else if (ViewState.DetailsTab == SessionsDetailsTab.Session)
         {
-            <SessionOverviewTab Conversation="Conversation"/>
+            <SessionOverviewTab Conversation="Conversation" Aggregate="_details?.SessionId == Conversation.Id ? _details.Aggregate : null" Notice="@Notice"/>
         }
         else if (SelectedTurn is null)
         {
@@ -44,11 +48,12 @@
             <MessageDetailsTab Turn="SelectedTurn"
                                SessionId="Conversation.Id"
                                IsRequest="SelectedSide == MessageSide.Request"
-                               TurnCount="Conversation.Turns.Count"/>
+                               TurnCount="Conversation.Turns.Count"
+                               Detail="DetailFor(SelectedTurn)"/>
         }
         else
         {
-            <RoutingDetailsTab Turn="SelectedTurn" TurnCount="Conversation.Turns.Count"/>
+            <RoutingDetailsTab Turn="SelectedTurn" TurnCount="Conversation.Turns.Count" Detail="DetailFor(SelectedTurn)"/>
         }
     </div>
 </div>
@@ -74,6 +79,45 @@
     ];
 
     private SessionsDetailsTab? _focusTab;
+    private SessionDetailsStore? _details;
+    private string? _loadedFor;
+
+    /// <inheritdoc/>
+    protected override void OnInitialized() => _details = Services.GetService<SessionDetailsStore>();
+
+    /// <inheritdoc/>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_details is null || Conversation is null || Conversation.Id == _loadedFor) return;
+        _loadedFor = Conversation.Id;
+        var floor = Conversation.Turns.Count == 0 ? 0 : Conversation.Turns.Min(turn => turn.TurnNumber);
+        await _details.LoadAsync(Conversation.Id, floor);
+    }
+
+    private SessionTurnDetailDto? DetailFor(ConversationTurn turn)
+    {
+        var details = _details;
+        return details is not null && details.SessionId == Conversation?.Id ? details.DetailFor(turn.TurnNumber) : null;
+    }
+
+    private string? Notice
+    {
+        get
+        {
+            var details = _details;
+            if (details is null || details.SessionId != Conversation?.Id) return null;
+            return details.CaptureOff
+                ? "Transcript capture is off, so retained details are not available."
+                : details.Error;
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        if (_details is null || Conversation is null) return;
+        _loadedFor = null;
+        await OnParametersSetAsync();
+    }
 
     private ConversationTurn? SelectedTurn
     {

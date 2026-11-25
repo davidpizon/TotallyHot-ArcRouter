@@ -1249,6 +1249,38 @@ public class SqliteTranscriptStoreTests : IDisposable
         Assert.Equal(0, actual: deleted);
     }
 
+    [Fact]
+    public async Task ListSessionTurnMetadata_PagesWithoutGapOrDuplicate()
+    {
+        var (_, store) = CreateEnabledStore();
+        for (var turn = 1; turn <= 5; turn++)
+        {
+            await store.InsertAsync(MakeRecord($"page-session:{turn}"), TestContext.Current.CancellationToken);
+        }
+
+        await store.InsertAsync(MakeRecord("not-a-number"), TestContext.Current.CancellationToken);
+
+        var first = await store.ListSessionTurnMetadataAsync("page-session", 2, null, TestContext.Current.CancellationToken);
+        Assert.Equal([5, 4], first.Select(row => row.TurnNumber).ToArray());
+        Assert.Equal("bug_fixing", first[0].Dimension);
+        Assert.DoesNotContain("prompt_text", first[0].RequestedModel, StringComparison.Ordinal);
+
+        var second = await store.ListSessionTurnMetadataAsync(
+            "page-session", 2, first[^1].TranscriptId, TestContext.Current.CancellationToken);
+        Assert.Equal([3, 2], second.Select(row => row.TurnNumber).ToArray());
+        var third = await store.ListSessionTurnMetadataAsync(
+            "page-session", 2, second[^1].TranscriptId, TestContext.Current.CancellationToken);
+        Assert.Equal([1], third.Select(row => row.TurnNumber).ToArray());
+
+        var odd = await store.ListSessionTurnMetadataAsync("not-a-number", 10, null, TestContext.Current.CancellationToken);
+        Assert.Equal(1, Assert.Single(odd).TurnNumber);
+
+        var aggregate = await store.GetSessionAggregateAsync("page-session", 0, TestContext.Current.CancellationToken);
+        Assert.NotNull(aggregate);
+        Assert.Equal(5, aggregate.PersistedTurns);
+        Assert.True(aggregate.ComparedTurns <= aggregate.PersistedTurns);
+    }
+
     private (TranscriptDatabase Database, SqliteTranscriptStore Store) CreateEnabledStore()
     {
         var database = CreateDatabase();

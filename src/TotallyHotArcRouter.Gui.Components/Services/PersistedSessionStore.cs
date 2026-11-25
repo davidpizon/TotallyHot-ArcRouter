@@ -259,6 +259,81 @@ public sealed class PersistedSessionStore : AdminStoreBase<IPersistedSessionsCli
         NotifyChanged();
     }
 
+    /// <summary>
+    /// Loads the next older metadata page for <paramref name="sessionId"/> and prepends those turns.
+    /// Does nothing when this session has no transcript id to page from.
+    /// </summary>
+    /// <param name="sessionId">The open session.</param>
+    /// <param name="cancellationToken">Cancels the load.</param>
+    public async Task LoadEarlierAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(sessionId);
+        Conversation? session;
+        lock (_publishGate) session = Sessions.FirstOrDefault(item => item.Id == sessionId);
+        if (session is null) return;
+        var oldest = session.Turns.Where(turn => turn.TranscriptId > 0).Select(turn => turn.TranscriptId).DefaultIfEmpty(0).Min();
+        if (oldest == 0) return;
+
+        SessionTurnDetailsResult page;
+        try
+        {
+            page = await Client.GetSessionTurnDetailsAsync(sessionId, 500, oldest, 0, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (GrpcAdminException ex)
+        {
+            Logger?.LogWarning(ex, "Could not load earlier turns for session {SessionId}.", sessionId);
+            return;
+        }
+
+        var known = session.Turns.Select(turn => turn.TranscriptId).ToHashSet();
+        var older = page.Turns
+            .Where(turn => turn.TranscriptId > 0 && known.Add(turn.TranscriptId))
+            .OrderBy(turn => turn.TurnNumber)
+            .Select(turn => new ConversationTurn(
+                Id: $"{sessionId}-t{turn.TurnNumber}",
+                Agent: turn.RoutedModel,
+                Model: turn.RoutedModel,
+                TurnNumber: turn.TurnNumber,
+                PromptTokens: turn.InputTokens,
+                CompletionTokens: turn.OutputTokens,
+                RoutingRoi: 0,
+                TotalCost: turn.CostUsd,
+                ToolExecutionSteps: 0,
+                CacheHitRate: 0,
+                TimeToFirstTokenMs: 0,
+                ContextBufferPercent: 0,
+                Timestamp: turn.CreatedAtUtc.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture),
+                RoutingSteps: [],
+                TimestampUtc: turn.CreatedAtUtc,
+                RequestedModel: turn.RequestedModel,
+                RoutedModel: turn.RoutedModel,
+                TranscriptId: turn.TranscriptId))
+            .ToList();
+        if (older.Count == 0) return;
+
+        lock (_publishGate)
+        {
+            Sessions =
+            [
+                .. Sessions.Select(item =>
+                {
+                    if (item.Id != sessionId) return item;
+                    var turns = older.Concat(item.Turns).OrderBy(turn => turn.TurnNumber).ToList();
+                    return item with
+                    {
+                        Turns = turns,
+                        TotalCost = turns.Sum(turn => turn.TotalCost ?? 0m),
+                        TotalPromptTokens = turns.Sum(turn => turn.PromptTokens ?? 0),
+                        TotalCompletionTokens = turns.Sum(turn => turn.CompletionTokens ?? 0),
+                    };
+                })
+            ];
+        }
+
+        NotifyChanged();
+    }
+
     /// <inheritdoc/>
     protected override void Dispose(bool disposing)
     {
