@@ -203,11 +203,16 @@
             $"≥ {sum.ToString("N0", CultureInfo.InvariantCulture)} <span class=\"text-slate-500\" tabindex=\"0\" aria-describedby=\"ls-tooltip\" data-tip=\"{tip}\">({missing} without counts)</span>");
     }
 
-    private string Roi =>
-        Aggregate is { TotalBaselineEstimatedCostUsd: decimal baseline, TotalEstimatedNetSavingsUsd: decimal savings }
-            && baseline > 0
-            ? (savings / baseline * 100m).ToString("F1", CultureInfo.InvariantCulture) + "%"
-            : "—";
+    private string Roi
+    {
+        get
+        {
+            decimal? baseline = Aggregate?.TotalBaselineEstimatedCostUsd;
+            decimal? savings = Aggregate?.TotalEstimatedNetSavingsUsd;
+            if (baseline is null or <= 0 || savings is null) return "—";
+            return (savings.Value / baseline.Value * 100m).ToString("F1", CultureInfo.InvariantCulture) + "%";
+        }
+    }
 
     private static string RetainedMoney(decimal? value) =>
         value is null ? "—" : "$" + value.Value.ToString("F6", CultureInfo.InvariantCulture);
