@@ -132,7 +132,7 @@ public sealed partial class SqliteTranscriptStore
 
         decimal? savings = null;
         decimal? baseline = null;
-        var compared = 0;
+        int compared;
         using (var compare = connection.CreateCommand())
         {
             compare.Transaction = transaction;

@@ -33,12 +33,11 @@ public sealed class SessionDetailsStore
     public string? Error { get; private set; }
 
     /// <summary>The cursor for the next older page, or null when the loaded pages are the end.</summary>
-    public long? NextBeforeTranscriptId { get; private set; }
+    private long? NextBeforeTranscriptId { get; set; }
 
     /// <summary>The detail for <paramref name="turnNumber"/>, or null when this page does not have it.</summary>
     /// <param name="turnNumber">The turn inside the open session.</param>
-    public SessionTurnDetailDto? DetailFor(int turnNumber) =>
-        _byTurn.TryGetValue(turnNumber, out var detail) ? detail : null;
+    public SessionTurnDetailDto? DetailFor(int turnNumber) => _byTurn.GetValueOrDefault(turnNumber);
 
     /// <summary>Loads the newest page and replaces whatever this store was showing.</summary>
     /// <param name="sessionId">The session the operator opened.</param>

@@ -204,8 +204,8 @@
     }
 
     private string Roi =>
-        Aggregate?.TotalBaselineEstimatedCostUsd is > 0 && Aggregate.TotalEstimatedNetSavingsUsd is { } savings
-            ? (savings / Aggregate.TotalBaselineEstimatedCostUsd.Value * 100m).ToString("F1", CultureInfo.InvariantCulture) + "%"
+        Aggregate is { TotalBaselineEstimatedCostUsd: > 0 and decimal baseline, TotalEstimatedNetSavingsUsd: { } savings }
+            ? (savings / baseline * 100m).ToString("F1", CultureInfo.InvariantCulture) + "%"
             : "—";
 
     private static string RetainedMoney(decimal? value) =>
