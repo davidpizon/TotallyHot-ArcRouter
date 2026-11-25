@@ -29,7 +29,7 @@
 # target RID's native NuGet assets, not a matching host (release.yml's linux-arm64 tarball is
 # cross-published from an x64 runner the same way), and emulating the whole restore + Blazor WASM build
 # would be many times slower.
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:11.0 AS build
 WORKDIR /src
 
 # No separate `dotnet restore` layer: a standalone "dotnet restore -r linux-x64" on
@@ -63,7 +63,7 @@ RUN case "${TARGETARCH:-amd64}" in \
         -c Release -r "$rid" --self-contained false -o /app/publish \
         ${VERSION:+-p:Version=$VERSION}
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+FROM mcr.microsoft.com/dotnet/aspnet:11.0 AS final
 WORKDIR /app
 
 # Non-root: matches every other install path's posture (packaging/linux and packaging/macos also run
