@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography.X509Certificates;
 
 namespace TotallyHot.ArcRouter.Telemetry;
@@ -34,21 +35,42 @@ public interface ICertificateTrustStore
 /// machine's actual trusted-root list. <see cref="Install"/> requires local Administrator privileges
 /// against <see cref="StoreLocation.LocalMachine"/>; the router's own <c>--install-certificate</c> CLI
 /// flag is meant to be run elevated (interactively, or as the MSI's deferred custom action running as
-/// <c>LocalSystem</c> - Phase P7's still-pending installer wiring), never as a side effect of an
-/// unprivileged process.
+/// <c>LocalSystem</c>), never as a side effect of an unprivileged process.
+/// <para>
+/// After the <see cref="X509Store"/> write, <see cref="Install"/> re-opens the store and confirms the
+/// thumbprint is present. When the store API accepts the add but the certificate is still missing
+/// (Windows can drop an unprompted root add under some enterprise policies), it falls back to
+/// <c>certutil -f -addstore</c> against the same store name and checks again. Either path that leaves
+/// the thumbprint absent throws <see cref="InvalidOperationException"/> so the MSI's
+/// <c>InstallCertificate</c> custom action (<c>Return="check"</c>) fails the install instead of
+/// finishing with a dashboard that still shows "Not secure".
+/// </para>
 /// </remarks>
 public sealed class WindowsCertificateTrustStore : ICertificateTrustStore
 {
     private readonly StoreLocation _location;
     private readonly StoreName _name;
+    private readonly Func<string, bool>? _containsThumbprintOverride;
 
     /// <summary>Initializes a new instance of the <see cref="WindowsCertificateTrustStore"/> class.</summary>
     /// <param name="name">The store to add/remove from; defaults to <see cref="StoreName.Root"/>.</param>
     /// <param name="location">The store location; defaults to <see cref="StoreLocation.LocalMachine"/>.</param>
     public WindowsCertificateTrustStore(StoreName name = StoreName.Root, StoreLocation location = StoreLocation.LocalMachine)
+        : this(name, location, containsThumbprintOverride: null)
+    {
+    }
+
+    /// <summary>
+    /// Test constructor: <paramref name="containsThumbprintOverride"/> replaces the post-add store
+    /// read so a unit test can force the "thumbprint still missing" path without touching
+    /// <see cref="StoreLocation.LocalMachine"/>/<see cref="StoreName.Root"/>.
+    /// </summary>
+    internal WindowsCertificateTrustStore(StoreName name, StoreLocation location,
+        Func<string, bool>? containsThumbprintOverride)
     {
         _name = name;
         _location = location;
+        _containsThumbprintOverride = containsThumbprintOverride;
     }
 
     /// <inheritdoc/>
@@ -56,24 +78,21 @@ public sealed class WindowsCertificateTrustStore : ICertificateTrustStore
     {
         ArgumentNullException.ThrowIfNull(caCertificate);
 
-        using var store = new X509Store(storeName: _name, storeLocation: _location);
-        store.Open(OpenFlags.ReadWrite);
-        try
-        {
-            // Replace-in-place: remove any existing entry for this exact thumbprint first, so a repeat
-            // --install-certificate run (e.g. after a CA rotation) never leaves two copies behind.
-            var existing = store.Certificates.Find(findType: X509FindType.FindByThumbprint,
-                findValue: caCertificate.Thumbprint, validOnly: false);
-            foreach (var certificate in existing.OfType<X509Certificate2>()) store.Remove(certificate);
+        // Public certificate only - never a private key - before any store write or certutil hand-off.
+        using var publicOnly = X509CertificateLoader.LoadCertificate(caCertificate.Export(X509ContentType.Cert));
 
-            // Only the public certificate belongs in an OS trust store - never a private key, which
-            // caCertificate does not need to (and here, does not) carry for this operation.
-            store.Add(caCertificate);
-        }
-        finally
-        {
-            store.Close();
-        }
+        AddViaX509Store(publicOnly);
+        if (ContainsThumbprint(publicOnly.Thumbprint)) return;
+
+        // X509Store.Add can return without leaving a LocalMachine\Root entry when the add needs an
+        // interactive trust confirmation that LocalSystem cannot answer. certutil -f -addstore is the
+        // documented, non-interactive path Windows administrators use for the same store.
+        AddViaCertutil(publicOnly);
+        if (ContainsThumbprint(publicOnly.Thumbprint)) return;
+
+        throw new InvalidOperationException(
+            $"Could not install certificate thumbprint {publicOnly.Thumbprint} into {_location}\\{_name}. " +
+            "Edge and Chrome will keep showing Not secure for https://localhost until this root is trusted.");
     }
 
     /// <inheritdoc/>
@@ -92,6 +111,93 @@ public sealed class WindowsCertificateTrustStore : ICertificateTrustStore
         finally
         {
             store.Close();
+        }
+    }
+
+    /// <summary>
+    /// Replace-in-place write through <see cref="X509Store"/>: remove any existing entry for this
+    /// thumbprint, then add the public certificate.
+    /// </summary>
+    private void AddViaX509Store(X509Certificate2 publicOnly)
+    {
+        using var store = new X509Store(storeName: _name, storeLocation: _location);
+        store.Open(OpenFlags.ReadWrite);
+        try
+        {
+            var existing = store.Certificates.Find(findType: X509FindType.FindByThumbprint,
+                findValue: publicOnly.Thumbprint, validOnly: false);
+            foreach (var certificate in existing.OfType<X509Certificate2>()) store.Remove(certificate);
+
+            store.Add(publicOnly);
+        }
+        finally
+        {
+            store.Close();
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="thumbprint"/> is present in this instance's configured store after a
+    /// fresh open - the post-condition <see cref="Install"/> requires before returning.
+    /// </summary>
+    private bool ContainsThumbprint(string thumbprint)
+    {
+        if (_containsThumbprintOverride is not null) return _containsThumbprintOverride(thumbprint);
+
+        using var store = new X509Store(storeName: _name, storeLocation: _location);
+        store.Open(OpenFlags.ReadOnly);
+        try
+        {
+            var found = store.Certificates.Find(findType: X509FindType.FindByThumbprint,
+                findValue: thumbprint, validOnly: false);
+            return found.Count > 0;
+        }
+        finally
+        {
+            store.Close();
+        }
+    }
+
+    /// <summary>
+    /// Writes the public certificate to a temp file and runs <c>certutil -f -addstore</c> against this
+    /// instance's store name. Only used when <see cref="AddViaX509Store"/> did not leave the thumbprint
+    /// visible - the MSI and elevated CLI both already run as LocalSystem/Administrator.
+    /// </summary>
+    private void AddViaCertutil(X509Certificate2 publicOnly)
+    {
+        // CurrentUser stores are for unit tests only; certutil's LocalMachine/CurrentUser switch must
+        // match, and tests never need the fallback because X509Store.Add against CurrentUser\My sticks.
+        if (_location != StoreLocation.LocalMachine) return;
+
+        var temporaryPath = Path.Combine(Path.GetTempPath(), $"totallyhot-arcrouter-ca-{Guid.NewGuid():N}.cer");
+        try
+        {
+            File.WriteAllBytes(temporaryPath, publicOnly.Export(X509ContentType.Cert));
+
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = "certutil",
+                Arguments = $"-f -addstore \"{_name}\" \"{temporaryPath}\"",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            });
+            if (process is null)
+                throw new InvalidOperationException("Could not start certutil to install the local CA.");
+
+            process.WaitForExit();
+            if (process.ExitCode != 0)
+            {
+                var stdout = process.StandardOutput.ReadToEnd();
+                var stderr = process.StandardError.ReadToEnd();
+                throw new InvalidOperationException(
+                    $"certutil -addstore {_name} exited with {process.ExitCode}. stdout: {stdout} stderr: {stderr}");
+            }
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
         }
     }
 }
