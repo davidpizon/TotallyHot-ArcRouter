@@ -204,7 +204,8 @@
     }
 
     private string Roi =>
-        Aggregate is { TotalBaselineEstimatedCostUsd: > 0 and decimal baseline, TotalEstimatedNetSavingsUsd: { } savings }
+        Aggregate is { TotalBaselineEstimatedCostUsd: decimal baseline, TotalEstimatedNetSavingsUsd: decimal savings }
+            && baseline > 0
             ? (savings / baseline * 100m).ToString("F1", CultureInfo.InvariantCulture) + "%"
             : "—";
 
