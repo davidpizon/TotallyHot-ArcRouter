@@ -3,6 +3,7 @@ using System.Collections.Frozen;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
+using TotallyHot.ArcRouter.Router;
 
 namespace TotallyHot.ArcRouter.Sessions;
 
@@ -115,6 +116,7 @@ public sealed class SessionStore : ISessionExtractReader
     private readonly ConcurrentDictionary<string, Guid> _pendingSessionIds = new();
     private readonly ReaderWriterLockSlim _rotationLock = new();
     private readonly Lock _masterKeyGate = new();
+    private readonly IQuestionVectorRewrap? _questionVectors;
     private byte[]? _cachedMasterKey;
 
     /// <summary>
@@ -124,12 +126,17 @@ public sealed class SessionStore : ISessionExtractReader
     /// <param name="masterKeys">Custody of the key that wraps session keys.</param>
     /// <param name="folder">The session folder, inside the verified data directory.</param>
     /// <param name="logger">Receives recovery and deletion outcomes; optional so a hand-built store in a test needs no logging.</param>
+    /// <param name="questionVectors">
+    /// Rewraps sealed question vectors in the same pass as the master key. Null in tests that do not
+    /// persist embeddings. A rotation that skips this leaves those vectors unreadable.
+    /// </param>
     /// <exception cref="InvalidOperationException">When <paramref name="folder"/> exists as a link or a file.</exception>
     public SessionStore(
         SessionIndex index,
         ISessionMasterKeyStore masterKeys,
         string folder,
-        ILogger<SessionStore>? logger = null)
+        ILogger<SessionStore>? logger = null,
+        IQuestionVectorRewrap? questionVectors = null)
     {
         ArgumentNullException.ThrowIfNull(index);
         ArgumentNullException.ThrowIfNull(masterKeys);
@@ -139,6 +146,7 @@ public sealed class SessionStore : ISessionExtractReader
         _masterKeys = masterKeys;
         _folder = Path.GetFullPath(folder);
         _logger = logger ?? NullLogger<SessionStore>.Instance;
+        _questionVectors = questionVectors;
         PrepareFolder(_folder);
     }
 
@@ -901,6 +909,7 @@ public sealed class SessionStore : ISessionExtractReader
                     CryptographicOperations.ZeroMemory(sessionKey);
                 }
             });
+            _questionVectors?.Rewrap(fromKey: oldKey, toKey: newKey);
             _masterKeys.PromoteNext();
             _masterKeys.ClearRotationRequired();
         }
@@ -1028,15 +1037,27 @@ public sealed class SessionStore : ISessionExtractReader
         try
         {
             var sample = _index.ListSessions().FirstOrDefault();
+            var vectorsMoved = current is not null &&
+                               _questionVectors?.HasBlobOnlyUnder(key: staged, other: current) == true;
             if (sample is null || (current is not null && Opens(current, sample.WrappedKey)))
             {
-                // Nothing was re-wrapped (or there is nothing to re-wrap): the old key is still the right one.
+                // Nothing was re-wrapped (or there is nothing to re-wrap): the old key is still the right one,
+                // unless question vectors already moved to the staged key. Promoting then is what keeps them
+                // readable; discarding would throw the key they were sealed under.
+                if (vectorsMoved && current is not null)
+                {
+                    _questionVectors?.Rewrap(fromKey: current, toKey: staged);
+                    _masterKeys.PromoteNext();
+                    return SessionRotationRecovery.Promoted;
+                }
+
                 _masterKeys.DiscardNext();
                 return SessionRotationRecovery.Discarded;
             }
 
             if (Opens(staged, sample.WrappedKey))
             {
+                if (current is not null) _questionVectors?.Rewrap(fromKey: current, toKey: staged);
                 _masterKeys.PromoteNext();
                 return SessionRotationRecovery.Promoted;
             }

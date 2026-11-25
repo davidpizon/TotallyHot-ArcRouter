@@ -1,8 +1,8 @@
 # 0029. Encrypt question vectors with the session master key
 
-**Status:** proposed
+**Status:** accepted
 **Date:** 2026-11-24
-**Deciders:** David Pizon (proposal; not yet accepted)
+**Deciders:** David Pizon (accepted in Cursor chat, 2026-11-24, while addressing the open issues)
 
 ## Context and Problem Statement
 
@@ -63,6 +63,5 @@ Decrypt inside `EmbeddingMemory.InitializeAsync` and inside the trainers that al
 
 ## More Information
 
-Implementation waits for sign-off. The plan is
+Accepted by David in Cursor chat on 2026-11-24. The plan is
 [docs/plans/issue-306-encrypt-question-vectors.md](../plans/issue-306-encrypt-question-vectors.md).
-This pull request is the ADR and that plan. It does not change the blob.

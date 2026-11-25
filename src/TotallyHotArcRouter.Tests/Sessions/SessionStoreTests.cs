@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using TotallyHot.ArcRouter.PriceCatalog;
 using TotallyHot.ArcRouter.Proxy.Management;
+using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Sessions;
 using TotallyHot.ArcRouter.Storage;
 using TotallyHot.ArcRouter.Transcripts;
@@ -518,6 +519,22 @@ public sealed class SessionStoreTests : IDisposable
         Assert.Null(_masterKeys.TryGetNext());
     }
 
+    /// <summary>A master-key rotation rewraps sealed question vectors before the old key is retired.</summary>
+    [Fact]
+    public void RotateMasterKey_RewrapsQuestionVectorsInTheSamePass()
+    {
+        _masterKeys.GetOrCreateCurrent();
+        var before = _masterKeys.TryGetCurrent();
+        var vectors = new RecordingQuestionVectors();
+        var store = new SessionStore(_index, _masterKeys, _folder, questionVectors: vectors);
+
+        store.RotateMasterKey();
+
+        Assert.NotNull(before);
+        Assert.Equal(before, vectors.From);
+        Assert.Equal(_masterKeys.TryGetCurrent(), vectors.To);
+    }
+
     /// <summary>The session folder path must not be a file.</summary>
     [Fact]
     public void Constructor_RejectsAFileAtTheFolderPath()
@@ -605,5 +622,22 @@ public sealed class SessionStoreTests : IDisposable
         var sessionKey = SessionKeyMaterial.UnwrapSessionKey(_masterKeys.TryGetCurrent()!, row.WrappedKey);
         using var file = SessionFile.Open(Path.Combine(_folder, row.FileName), sessionKey, sessionId);
         file.AppendBody(1, SessionBodyKind.ClientRequest, "lost"u8, SessionArchiveIds.NewArchiveTurnId());
+    }
+
+    private sealed class RecordingQuestionVectors : IQuestionVectorRewrap
+    {
+        public byte[]? From { get; private set; }
+
+        public byte[]? To { get; private set; }
+
+        /// <inheritdoc/>
+        public void Rewrap(byte[] fromKey, byte[] toKey)
+        {
+            From = (byte[])fromKey.Clone();
+            To = (byte[])toKey.Clone();
+        }
+
+        /// <inheritdoc/>
+        public bool HasBlobOnlyUnder(byte[] key, byte[] other) => false;
     }
 }
