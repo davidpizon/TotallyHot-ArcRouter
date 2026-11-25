@@ -21,7 +21,7 @@ internal static class QuestionVectorSeal
     private static ReadOnlySpan<byte> Magic => "THQE"u8;
 
     /// <summary>A blob that is not a vector. An insert uses it until the row id is known and the real seal is written.</summary>
-    internal static byte[] Placeholder => [(byte)'T', (byte)'H', (byte)'Q', (byte)'E'];
+    internal static byte[] Placeholder => "THQE"u8.ToArray();
 
     /// <summary>Whether <paramref name="blob"/> uses this seal rather than raw float32.</summary>
     /// <param name="blob">The <c>embedding</c> column.</param>

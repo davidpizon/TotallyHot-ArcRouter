@@ -155,8 +155,8 @@ public sealed class QuestionVectorEncryptionTests : IDisposable
         var vector = new[] { 0.1f, 0.2f };
         var bytes = new byte[vector.Length * sizeof(float)];
         Buffer.BlockCopy(src: vector, srcOffset: 0, dst: bytes, dstOffset: 0, count: bytes.Length);
-        using (var connection = _database.OpenConnection())
-        using (var command = connection.CreateCommand())
+        await using (var connection = _database.OpenConnection())
+        await using (var command = connection.CreateCommand())
         {
             command.CommandText = """
                                   INSERT INTO memory_entries
