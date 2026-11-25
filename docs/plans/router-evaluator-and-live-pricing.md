@@ -507,6 +507,8 @@ The kNN comparison uses the same \(\varepsilon\) and the same shifted prices. A 
 
 These have a recommended default above. David can override them without rewriting the rest of the plan.
 
+David accepted the recommended defaults in Cursor chat on 2026-11-24, except the two that have no number yet. Questions 6 (minimum graded calls before a new agent's quality head votes) and 7 (nominal conformal alpha) are still open. Feature code for #182, #288, #290, #291, #292, #294, and #313 waits on those two numbers. Question 8 is confirmed from the dataset at implementation time, not before.
+
 1. **Strength of \(\varepsilon_2 = -0.1\) once \(\kappa\) is USD per request.** Keep the number and publish the unit, or pick a different number after the shift table shows how often the cost term changes a decision?
 2. **Budget schedule.** Off by default. Is a curve tied to `ProviderBudgetStore` wanted in the first implementation, or later?
 3. **Learning \(\varepsilon_2\).** Recommended: no. Is there a case where a deployment should fit it under the epoch's significance bar?
