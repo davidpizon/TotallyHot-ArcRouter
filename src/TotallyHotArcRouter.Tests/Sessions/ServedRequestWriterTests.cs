@@ -269,7 +269,7 @@ public sealed class ServedRequestWriterTests : IDisposable
         bound.BindArchive("stale-bound");
         var boundItem = await bound.FinishAsync(Turn("stale-bound", 1), new DefaultHttpContext(), false);
         Assert.NotNull(boundItem);
-        var staleBound = new SessionCaptureItem(boundItem.ClientSessionId, boundItem.Turn, started);
+        var staleBound = boundItem with { Epoch = started };
         await writer.EnqueueAsync(new ServedRequest(
             Work("stale-bound", 1), staleBound, bound.NotifyDroppedOnce, started));
 
@@ -278,7 +278,7 @@ public sealed class ServedRequestWriterTests : IDisposable
             DateTimeOffset.UtcNow, onTurnDropped: drops.Add);
         var unboundItem = await unbound.FinishAsync(Turn("stale-unbound", 1), new DefaultHttpContext(), false);
         Assert.NotNull(unboundItem);
-        var staleUnbound = new SessionCaptureItem(unboundItem.ClientSessionId, unboundItem.Turn, started);
+        var staleUnbound = unboundItem with { Epoch = started };
         await writer.EnqueueAsync(new ServedRequest(Work("stale-unbound", 1), staleUnbound, unbound.NotifyDroppedOnce, started));
 
         ledger.Release.TrySetResult();
@@ -348,16 +348,16 @@ public sealed class ServedRequestWriterTests : IDisposable
         Assert.NotNull(finished);
         Assert.Equal(binding.ArchiveTurnId, finished.Turn.ArchiveTurnId);
 
-        var item = new SessionCaptureItem(
-            finished.ClientSessionId,
-            finished.Turn with
+        var item = finished with
+        {
+            Turn = finished.Turn with
             {
                 Bodies =
                 [
                     new SessionBodyInput(SessionBodyKind.ClientResponse, null, spool),
                 ],
             },
-            finished.Epoch);
+        };
         capture.Dispose();
         Assert.NotEmpty(Directory.EnumerateFiles(_folder, "*" + SessionBodySpool.FileExtension));
 
@@ -519,16 +519,12 @@ public sealed class ServedRequestWriterTests : IDisposable
     }
 
     /// <summary>Records the token each live event was published with.</summary>
-    private sealed class TokenTelemetry : ITelemetryPublisher
+    private sealed class TokenTelemetry(List<CancellationToken>? tokens) : ITelemetryPublisher
     {
-        private readonly List<CancellationToken>? _tokens;
-
-        public TokenTelemetry(List<CancellationToken>? tokens) => _tokens = tokens;
-
         /// <inheritdoc/>
         public Task PublishAsync(RoutingTelemetryEvent telemetryEvent, CancellationToken cancellationToken = default)
         {
-            _tokens?.Add(cancellationToken);
+            tokens?.Add(cancellationToken);
             return Task.CompletedTask;
         }
 

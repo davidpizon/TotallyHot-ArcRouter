@@ -312,28 +312,28 @@ internal sealed class BedrockInvocationHandler
             }
             else
             {
-            var publishedTurn = await _requestTelemetryPublisher.PublishAsync(context: context, route: route,
-                requestedModelName: requestedModelName, isFallback: isFallback, telemetryShapeProvider: "openai",
-                rewrittenRequestBody: rewrittenBody, capturedResponseBytes: capturedResponseBytes, null,
-                isStreaming: isStreamingRequest, latencyToHeadersMs: latencyToHeadersMs,
-                totalDurationMs: totalDurationMs, statusCode: StatusCodes.Status200OK,
-                cancellationToken: context.RequestAborted, tailScanner: tailScanner, taskEmbedding: taskEmbedding,
-                routerTokens: routerTokens, resolutionReason: resolutionReason, isExploratory: isExploratory,
-                propensity: propensity, classification: classification, taskText: taskText, dimBestModel: dimBestModel,
-                untrainedBaselineModel: untrainedBaselineModel,
-                untrainedBaselinePredictedScore: untrainedBaselinePredictedScore,
-                resolveArchive: capture is null ? null : capture.BindArchive);
+                var publishedTurn = await _requestTelemetryPublisher.PublishAsync(context: context, route: route,
+                    requestedModelName: requestedModelName, isFallback: isFallback, telemetryShapeProvider: "openai",
+                    rewrittenRequestBody: rewrittenBody, capturedResponseBytes: capturedResponseBytes, null,
+                    isStreaming: isStreamingRequest, latencyToHeadersMs: latencyToHeadersMs,
+                    totalDurationMs: totalDurationMs, statusCode: StatusCodes.Status200OK,
+                    cancellationToken: context.RequestAborted, tailScanner: tailScanner, taskEmbedding: taskEmbedding,
+                    routerTokens: routerTokens, resolutionReason: resolutionReason, isExploratory: isExploratory,
+                    propensity: propensity, classification: classification, taskText: taskText, dimBestModel: dimBestModel,
+                    untrainedBaselineModel: untrainedBaselineModel,
+                    untrainedBaselinePredictedScore: untrainedBaselinePredictedScore,
+                    resolveArchive: capture is null ? null : capture.BindArchive);
 
-            // Telemetry failures travel with the turn instead of being thrown, so they cannot stop capture.
-            if (publishedTurn.TelemetryFailure is { } telemetryFailure)
-                _logger.LogDebug(exception: telemetryFailure,
-                    message: "Failed to publish routing telemetry; the forwarded response was unaffected.");
+                // Telemetry failures travel with the turn instead of being thrown, so they cannot stop capture.
+                if (publishedTurn.TelemetryFailure is { } telemetryFailure)
+                    _logger.LogDebug(exception: telemetryFailure,
+                        message: "Failed to publish routing telemetry; the forwarded response was unaffected.");
 
-            if (capture is not null)
-                await capture.SubmitAsync(
-                    turn: publishedTurn, context: context,
-                    telemetryCaptureTruncated: UpstreamResponseWriter.IsTelemetryCaptureTruncated(
-                        clientShapeBytes: capturedResponseBytes, nativeBytes: null, tailScanner: tailScanner));
+                if (capture is not null)
+                    await capture.SubmitAsync(
+                        turn: publishedTurn, context: context,
+                        telemetryCaptureTruncated: UpstreamResponseWriter.IsTelemetryCaptureTruncated(
+                            clientShapeBytes: capturedResponseBytes, nativeBytes: null, tailScanner: tailScanner));
             }
         }
         catch (Exception ex)

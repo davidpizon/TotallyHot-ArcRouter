@@ -91,8 +91,8 @@ public sealed class SessionMaintenance(
     }
 
     /// <summary>Points Clear at the served-request writer when the host built one.</summary>
-    /// <param name="writer">The writer, or null when the inline path is in use.</param>
-    internal void AttachServedWriter(ServedRequestWriter? writer) => _servedWriter = writer;
+    /// <param name="servedWriter">The writer, or null when the inline path is in use.</param>
+    internal void AttachServedWriter(ServedRequestWriter? servedWriter) => _servedWriter = servedWriter;
 
     /// <summary>
     /// Waits for the served-request writer when the host registered one, otherwise for the session-file writer

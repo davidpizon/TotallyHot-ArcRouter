@@ -134,7 +134,7 @@ internal sealed class RequestTelemetryPublisher
     /// then either <see cref="ApplyInlineAsync"/> or the background writer.
     /// </summary>
     /// <returns>The facts the writer or the inline path applies.</returns>
-    internal QueuedTelemetryWork BuildQueuedWork(
+    private QueuedTelemetryWork BuildQueuedWork(
         HttpContext context,
         ResolvedModelRoute route,
         string requestedModelName,
@@ -381,7 +381,7 @@ internal sealed class RequestTelemetryPublisher
     /// <param name="work">Facts already computed.</param>
     /// <param name="cancellationToken">The request token. The live event observes it; spend and the index do not.</param>
     /// <returns>The turn, with a failure when a side effect threw.</returns>
-    internal async Task<PublishedTurn> ApplyInlineAsync(QueuedTelemetryWork work, CancellationToken cancellationToken)
+    private async Task<PublishedTurn> ApplyInlineAsync(QueuedTelemetryWork work, CancellationToken cancellationToken)
     {
         try
         {

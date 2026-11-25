@@ -791,31 +791,31 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     }
                     else
                     {
-                    var publishedTurn = await _requestTelemetryPublisher.PublishAsync(context: context, route: route,
-                        requestedModelName: requestedModelName, isFallback: isFallback,
-                        telemetryShapeProvider: telemetryShapeProvider, rewrittenRequestBody: rewrittenBody,
-                        capturedResponseBytes: capturedResponseBytes, nativeResponseBytes: nativeResponseBytes,
-                        isStreaming: isStreaming, latencyToHeadersMs: latencyToHeadersMs,
-                        totalDurationMs: totalDurationMs, statusCode: statusCode,
-                        cancellationToken: context.RequestAborted, upstreamHeaders: responseMessage.Headers,
-                        tailScanner: tailScanner, taskEmbedding: resolution.TaskEmbedding,
-                        routerTokens: resolution.RouterTokens, resolutionReason: resolution.SubstitutionReason,
-                        isExploratory: resolution.IsExploratory, propensity: resolution.Propensity,
-                        classification: resolution.Classification, taskText: resolution.TaskText,
-                        dimBestModel: resolution.DimBestModel,
-                        untrainedBaselineModel: resolution.UntrainedBaselineModel,
-                        untrainedBaselinePredictedScore: resolution.UntrainedBaselinePredictedScore,
-                        resolveArchive: capture is null ? null : capture.BindArchive);
+                        var publishedTurn = await _requestTelemetryPublisher.PublishAsync(context: context, route: route,
+                            requestedModelName: requestedModelName, isFallback: isFallback,
+                            telemetryShapeProvider: telemetryShapeProvider, rewrittenRequestBody: rewrittenBody,
+                            capturedResponseBytes: capturedResponseBytes, nativeResponseBytes: nativeResponseBytes,
+                            isStreaming: isStreaming, latencyToHeadersMs: latencyToHeadersMs,
+                            totalDurationMs: totalDurationMs, statusCode: statusCode,
+                            cancellationToken: context.RequestAborted, upstreamHeaders: responseMessage.Headers,
+                            tailScanner: tailScanner, taskEmbedding: resolution.TaskEmbedding,
+                            routerTokens: resolution.RouterTokens, resolutionReason: resolution.SubstitutionReason,
+                            isExploratory: resolution.IsExploratory, propensity: resolution.Propensity,
+                            classification: resolution.Classification, taskText: resolution.TaskText,
+                            dimBestModel: resolution.DimBestModel,
+                            untrainedBaselineModel: resolution.UntrainedBaselineModel,
+                            untrainedBaselinePredictedScore: resolution.UntrainedBaselinePredictedScore,
+                            resolveArchive: capture is null ? null : capture.BindArchive);
 
-                    // Telemetry failures travel with the turn instead of being thrown, so they cannot stop capture.
-                    if (publishedTurn.TelemetryFailure is { } telemetryFailure)
-                        _logger.LogDebug(exception: telemetryFailure,
-                            message: "Failed to publish routing telemetry; the forwarded response was unaffected.");
+                        // Telemetry failures travel with the turn instead of being thrown, so they cannot stop capture.
+                        if (publishedTurn.TelemetryFailure is { } telemetryFailure)
+                            _logger.LogDebug(exception: telemetryFailure,
+                                message: "Failed to publish routing telemetry; the forwarded response was unaffected.");
 
-                    if (capture is not null)
-                        await capture.SubmitAsync(
-                            turn: publishedTurn, context: context,
-                            telemetryCaptureTruncated: written.IsTelemetryCaptureTruncated);
+                        if (capture is not null)
+                            await capture.SubmitAsync(
+                                turn: publishedTurn, context: context,
+                                telemetryCaptureTruncated: written.IsTelemetryCaptureTruncated);
                     }
                 }
                 catch (Exception ex)
