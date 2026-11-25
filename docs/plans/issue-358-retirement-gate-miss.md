@@ -8,7 +8,7 @@
 
 **Tech Stack:** C# / .NET 10, xUnit v3 4.0.2, Microsoft.ML 5.0.0 SDCA (`NumberOfThreads` left unset, shuffle default true).
 
-**Status:** Waiting for David's approval. This pull request is docs only. It does not change source, tests, project files, or workflows. Implementation waits for David's explicit sign-off on this file, per [standing rules](../router/standing-rules.md).
+**Status:** Implemented. The retirement retry is `41553283` and the gate-failed sentence is `03e93095`. This program confirmed the sign-off on 2026-11-24.
 
 **Issue:** [#358](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/358).
 

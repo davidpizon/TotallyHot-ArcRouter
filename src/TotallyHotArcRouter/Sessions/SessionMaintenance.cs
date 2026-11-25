@@ -61,6 +61,8 @@ public sealed class SessionMaintenance(
 
     private static readonly TimeSpan DefaultDrainTimeout = TimeSpan.FromSeconds(5);
 
+    private ServedRequestWriter? _servedWriter;
+
     private readonly string _folder = SessionStore.FolderBeside(database.DatabasePath);
 
     private readonly string _databasePath = database.DatabasePath;
@@ -83,10 +85,25 @@ public sealed class SessionMaintenance(
 
         if (!Directory.Exists(_folder)) return new SessionClearResult(NothingToDelete, QueueDrained: true);
 
-        var drained = writer is null ||
-                      await writer.WaitForIdleAsync(drainTimeout ?? DefaultDrainTimeout).ConfigureAwait(false);
+        var drained = await DrainWriterAsync().ConfigureAwait(false);
 
         return new SessionClearResult(Open().DeleteAllSessions(), drained);
+    }
+
+    /// <summary>Points Clear at the served-request writer when the host built one.</summary>
+    /// <param name="servedWriter">The writer, or null when the inline path is in use.</param>
+    internal void AttachServedWriter(ServedRequestWriter? servedWriter) => _servedWriter = servedWriter;
+
+    /// <summary>
+    /// Waits for the served-request writer when the host registered one, otherwise for the session-file writer
+    /// tests still construct directly. Nothing is awaited when neither is present.
+    /// </summary>
+    /// <returns><see langword="true"/> when the queue emptied in time, or when there was no writer.</returns>
+    private async Task<bool> DrainWriterAsync()
+    {
+        IDrainableQueue? queue = _servedWriter ?? (IDrainableQueue?)writer;
+        if (queue is null) return true;
+        return await queue.WaitForIdleAsync(drainTimeout ?? DefaultDrainTimeout).ConfigureAwait(false);
     }
 
     /// <summary>

@@ -11,6 +11,7 @@ using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Quality.Ingress;
 using TotallyHot.ArcRouter.Router;
 using TotallyHot.ArcRouter.Router.Embeddings;
+using TotallyHot.ArcRouter.Sessions;
 using TotallyHot.ArcRouter.Telemetry;
 using TotallyHot.ArcRouter.Transcripts;
 
@@ -319,4 +320,17 @@ public sealed record ProxyMiddlewareDependencies
     /// captured and the hot path makes no second copy of any body, so existing callers and tests are unaffected.
     /// </summary>
     public TurnCaptureFactory? TurnCapture { get; init; }
+
+    /// <summary>
+    /// Optional background writer for spend, the transcript index, and the session file (ADR-0018). When
+    /// null, <see cref="ProxyMiddleware"/> keeps the inline publish path so tests that construct the
+    /// middleware directly stay synchronous.
+    /// </summary>
+    internal ServedRequestWriter? ServedRequestWriter { get; init; }
+
+    /// <summary>
+    /// The telemetry publisher the served-request writer and the middleware share. When null, the middleware
+    /// builds its own.
+    /// </summary>
+    internal RequestTelemetryPublisher? RequestTelemetryPublisher { get; init; }
 }

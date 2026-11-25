@@ -112,7 +112,7 @@ internal sealed class TurnCapture : IDisposable
     private static readonly TimeSpan SubmitTimeout = TimeSpan.FromSeconds(30);
 
     private readonly CaptureBodyPump _pump;
-    private readonly SessionCaptureWriter _writer;
+    private readonly SessionCaptureWriter? _writer;
     private readonly CaptureEpoch _epoch;
     private readonly long _startEpoch;
     private readonly Func<SessionBodySpool> _createSpool;
@@ -130,10 +130,10 @@ internal sealed class TurnCapture : IDisposable
     private bool _submitted;
 
     /// <summary>Whether <see cref="BindArchive"/> handed this turn's id to a transcript insert, so a row may carry it.</summary>
-    private bool _archiveBound;
+    private volatile bool _archiveBound;
 
-    /// <summary>Whether the drop callback has already been told about this turn.</summary>
-    private bool _dropNotified;
+    /// <summary>Whether the drop callback has already been told about this turn. One-shot across threads.</summary>
+    private int _dropNotified;
     private readonly Func<string, Guid>? _resolveArchiveSession;
     private readonly Action<Guid>? _onTurnDropped;
 
@@ -161,7 +161,7 @@ internal sealed class TurnCapture : IDisposable
     /// </param>
     internal TurnCapture(
         CaptureBodyPump pump,
-        SessionCaptureWriter writer,
+        SessionCaptureWriter? writer,
         CaptureEpoch epoch,
         Func<SessionBodySpool> createSpool,
         ILogger logger,
@@ -283,7 +283,26 @@ internal sealed class TurnCapture : IDisposable
     /// </param>
     internal async Task SubmitAsync(PublishedTurn turn, HttpContext context, bool telemetryCaptureTruncated)
     {
-        if (_submitted) return;
+        var item = await FinishAsync(turn, context, telemetryCaptureTruncated).ConfigureAwait(false);
+        if (item is null || _writer is null) return;
+
+        if (!await _writer.EnqueueAsync(item, CancellationToken.None).ConfigureAwait(false))
+        {
+            _logger.LogWarning("A captured turn was refused by the session writer and dropped.");
+        }
+    }
+
+    /// <summary>
+    /// Finishes the spools and builds the session item without enqueueing it. The served-request writer
+    /// takes the item. A stale epoch returns null and notifies the drop callback when the archive was bound.
+    /// </summary>
+    /// <param name="turn">What telemetry worked out.</param>
+    /// <param name="context">The request, read for the user-agent harness token only.</param>
+    /// <param name="telemetryCaptureTruncated">Whether the telemetry capture stopped early.</param>
+    /// <returns>The finished item, or null when the turn is not stored.</returns>
+    internal async Task<SessionCaptureItem?> FinishAsync(PublishedTurn turn, HttpContext context, bool telemetryCaptureTruncated)
+    {
+        if (_submitted) return null;
 
         // Clear ran while this turn was in flight. Its request holds the whole conversation so far, which Clear just
         // wiped, so storing it would write that history straight back; Dispose releases the bodies instead.
@@ -291,7 +310,7 @@ internal sealed class TurnCapture : IDisposable
         {
             _logger.LogInformation("A captured turn that began before Clear was dropped instead of stored.");
             NotifyTurnDropped();
-            return;
+            return null;
         }
 
         // A short bound so a stalled pump or writer cannot hold this request's bookkeeping open.
@@ -343,17 +362,15 @@ internal sealed class TurnCapture : IDisposable
                 new SessionTurnInput(ArchiveTurnId, _startedAtUtc, bodies),
                 _startEpoch);
 
-            // From here the writer owns every spool, including when it refuses the turn (and marks the drop).
+            // From here the caller owns every spool. Dispose is a no-op so it cannot release them.
             _submitted = true;
-            if (!await _writer.EnqueueAsync(item, cancellationToken).ConfigureAwait(false))
-            {
-                _logger.LogWarning("A captured turn was refused by the session writer and dropped.");
-            }
+            return item;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "A captured turn could not be queued for session storage and was dropped.");
             NotifyTurnDropped();
+            return null;
         }
     }
 
@@ -385,11 +402,13 @@ internal sealed class TurnCapture : IDisposable
     /// many places notice the drop. A callback that fails is logged, not thrown: it must not skip the release in
     /// <see cref="Dispose"/> or fail the request, and the row is covered by the missing-extract grace window.
     /// </summary>
+    /// <summary>Marks the transcript row terminal once. Safe to call from the writer thread.</summary>
+    internal void NotifyDroppedOnce() => NotifyTurnDropped();
+
     private void NotifyTurnDropped()
     {
-        if (_onTurnDropped is null || !_archiveBound || _dropNotified) return;
-
-        _dropNotified = true;
+        if (_onTurnDropped is null || !_archiveBound) return;
+        if (Interlocked.Exchange(ref _dropNotified, 1) != 0) return;
         try
         {
             _onTurnDropped(ArchiveTurnId);

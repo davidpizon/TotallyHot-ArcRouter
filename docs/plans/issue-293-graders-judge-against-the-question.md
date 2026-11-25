@@ -1,6 +1,6 @@
 # Plan: Grades that judge each response against the original question (#293)
 
-**Status:** Signed off by David on 2026-10-14 (chat). Implementation in progress.
+**Status:** Signed off by David on 2026-10-14 (chat). Landed in [#307](https://github.com/davidpizon/TotallyHot-ArcRouter/pull/307).
 **Issue:** [#293](https://github.com/davidpizon/TotallyHot-ArcRouter/issues/293) — "Graders must judge each response against the original question".
 **Parent plan:** [router-evaluator-and-live-pricing.md](router-evaluator-and-live-pricing.md) §14 and §15 phase 4. This plan owns phase 4. The parent plan says live grades may not train the quality head or move voter weights until grades are computed with the question and stored linked to it. That is this work.
 **ADR first:** [ADR-0026](../adr/0026-grade-a-response-only-against-its-question-and-learn-only-from-complete-grades.md) (proposed). This changes what the router learns from, so AGENTS.md wants the ADR before code.

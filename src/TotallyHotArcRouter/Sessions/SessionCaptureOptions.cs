@@ -10,12 +10,16 @@ public sealed class SessionCaptureOptions
     public const string SectionName = "SessionCapture";
 
     /// <summary>
-    /// Gets how many captured turns may wait for the writer. When the queue is full the producer waits rather
-    /// than dropping a turn, which holds a finished request's bookkeeping but never the client's response.
+    /// Gets how many served requests, including their session turns, may wait for the single writer. When the
+    /// queue is full the producer waits rather than dropping a spend row, which holds a finished request's
+    /// bookkeeping but never the client's response.
     /// </summary>
     public int QueueCapacity { get; init; } = 256;
 
-    /// <summary>Gets how long shutdown waits for queued turns to be written before abandoning the rest.</summary>
+    /// <summary>
+    /// Gets how long shutdown waits for queued telemetry rows and session turns to be written before
+    /// abandoning the rest.
+    /// </summary>
     public TimeSpan ShutdownDrainTimeout { get; init; } = TimeSpan.FromSeconds(10);
 
     /// <summary>

@@ -24,7 +24,7 @@ public sealed record SessionCaptureItem(string ClientSessionId, SessionTurnInput
 /// stopped right after it starts never runs <c>ExecuteAsync</c>, which would leave queued turns unwritten
 /// until the shutdown deadline. This type starts its consumer in <see cref="StartAsync"/> and always runs it.
 /// </remarks>
-public sealed class SessionCaptureWriter : IHostedService, IDisposable
+public sealed class SessionCaptureWriter : IHostedService, IDisposable, IDrainableQueue
 {
     private readonly Lazy<SessionStore> _store;
     private readonly SessionCaptureOptions _options;

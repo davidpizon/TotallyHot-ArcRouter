@@ -39,7 +39,6 @@ internal static class SessionsServiceCollectionExtensions
         services.AddHostedService<SessionStoreStartupService>();
         services.AddSingleton<CaptureEpoch>();
         services.AddSingleton(CreateCaptureWriter);
-        services.AddHostedService(sp => sp.GetRequiredService<SessionCaptureWriter>());
 
         // Registered after the writer, so a stop drains the pump first and its last turns still reach the writer.
         services.AddSingleton<CaptureBodyPump>();

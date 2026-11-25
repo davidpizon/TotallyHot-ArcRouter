@@ -14,6 +14,7 @@ using TotallyHot.ArcRouter.Proxy.Management;
 using TotallyHot.ArcRouter.Proxy.Translation;
 using TotallyHot.ArcRouter.Proxy.Translation.ToolCalling;
 using TotallyHot.ArcRouter.Router;
+using TotallyHot.ArcRouter.Sessions;
 using TotallyHot.ArcRouter.Telemetry;
 
 namespace TotallyHot.ArcRouter.Proxy;
@@ -192,6 +193,7 @@ public class ProxyMiddleware : IMiddleware, IDisposable
     // Resolves session/turn identity, extracts usage/cost, and publishes telemetry for a served request -
     // see RequestTelemetryPublisher's own remarks for why this was the second cut out of this class.
     private readonly RequestTelemetryPublisher _requestTelemetryPublisher;
+    private readonly ServedRequestWriter? _servedRequestWriter;
     private readonly IRoutingGate? _routingGate;
     private readonly ToolCallNormalizerFactory _toolCallNormalizerFactory;
     private readonly IReadOnlyDictionary<string, IPayloadTranslator> _translators;
@@ -251,7 +253,8 @@ public class ProxyMiddleware : IMiddleware, IDisposable
             capabilityStore: dependencies?.CapabilityStore, contextWindowStore: dependencies?.ContextWindowStore);
         _upstreamResponseWriter = new UpstreamResponseWriter(logger);
         _interactionStatusStore = dependencies?.InteractionStatusStore;
-        _requestTelemetryPublisher = new RequestTelemetryPublisher(
+        _servedRequestWriter = dependencies?.ServedRequestWriter;
+        _requestTelemetryPublisher = dependencies?.RequestTelemetryPublisher ?? new RequestTelemetryPublisher(
             logger: logger,
             sessionIdResolver: dependencies?.SessionIdResolver ?? new SessionIdResolver(),
             continuityMatcher: dependencies?.ContinuityMatcher ?? new MessageHistoryContinuityMatcher(),
@@ -292,7 +295,9 @@ public class ProxyMiddleware : IMiddleware, IDisposable
 
         _bedrockInvocationHandler = new BedrockInvocationHandler(logger: logger,
             bedrockClientFactory: _bedrockClientFactory, circuitBreaker: _circuitBreaker,
-            requestTelemetryPublisher: _requestTelemetryPublisher);
+            requestTelemetryPublisher: _requestTelemetryPublisher,
+            servedRequestWriter: _servedRequestWriter,
+            inFlightGauge: _inFlightGauge);
         _semanticCache = new SemanticCacheCoordinator(cache: dependencies?.SemanticResponseCache, logger: logger);
         _turnCapture = dependencies?.TurnCapture;
     }
@@ -765,31 +770,53 @@ public class ProxyMiddleware : IMiddleware, IDisposable
                     // ResponseTextExtractor pick the right parser per request instead of assuming one shape per
                     // provider, which broke once "anthropic" became dual-mode.
                     var telemetryShapeProvider = translator is not null ? "openai" : route.Provider;
-                    var publishedTurn = await _requestTelemetryPublisher.PublishAsync(context: context, route: route,
-                        requestedModelName: requestedModelName, isFallback: isFallback,
-                        telemetryShapeProvider: telemetryShapeProvider, rewrittenRequestBody: rewrittenBody,
-                        capturedResponseBytes: capturedResponseBytes, nativeResponseBytes: nativeResponseBytes,
-                        isStreaming: isStreaming, latencyToHeadersMs: latencyToHeadersMs,
-                        totalDurationMs: totalDurationMs, statusCode: statusCode,
-                        cancellationToken: context.RequestAborted, upstreamHeaders: responseMessage.Headers,
-                        tailScanner: tailScanner, taskEmbedding: resolution.TaskEmbedding,
-                        routerTokens: resolution.RouterTokens, resolutionReason: resolution.SubstitutionReason,
-                        isExploratory: resolution.IsExploratory, propensity: resolution.Propensity,
-                        classification: resolution.Classification, taskText: resolution.TaskText,
-                        dimBestModel: resolution.DimBestModel,
-                        untrainedBaselineModel: resolution.UntrainedBaselineModel,
-                        untrainedBaselinePredictedScore: resolution.UntrainedBaselinePredictedScore,
-                        resolveArchive: capture is null ? null : capture.BindArchive);
+                    if (_servedRequestWriter is not null)
+                    {
+                        await _requestTelemetryPublisher.EnqueueServedAsync(
+                            writer: _servedRequestWriter, gauge: _inFlightGauge, capture: capture,
+                            telemetryCaptureTruncated: written.IsTelemetryCaptureTruncated,
+                            context: context, route: route, requestedModelName: requestedModelName,
+                            isFallback: isFallback, telemetryShapeProvider: telemetryShapeProvider,
+                            rewrittenRequestBody: rewrittenBody, capturedResponseBytes: capturedResponseBytes,
+                            nativeResponseBytes: nativeResponseBytes, isStreaming: isStreaming,
+                            latencyToHeadersMs: latencyToHeadersMs, totalDurationMs: totalDurationMs,
+                            statusCode: statusCode, upstreamHeaders: responseMessage.Headers,
+                            tailScanner: tailScanner, taskEmbedding: resolution.TaskEmbedding,
+                            routerTokens: resolution.RouterTokens, resolutionReason: resolution.SubstitutionReason,
+                            isExploratory: resolution.IsExploratory, propensity: resolution.Propensity,
+                            classification: resolution.Classification, taskText: resolution.TaskText,
+                            dimBestModel: resolution.DimBestModel,
+                            untrainedBaselineModel: resolution.UntrainedBaselineModel,
+                            untrainedBaselinePredictedScore: resolution.UntrainedBaselinePredictedScore);
+                    }
+                    else
+                    {
+                        var publishedTurn = await _requestTelemetryPublisher.PublishAsync(context: context, route: route,
+                            requestedModelName: requestedModelName, isFallback: isFallback,
+                            telemetryShapeProvider: telemetryShapeProvider, rewrittenRequestBody: rewrittenBody,
+                            capturedResponseBytes: capturedResponseBytes, nativeResponseBytes: nativeResponseBytes,
+                            isStreaming: isStreaming, latencyToHeadersMs: latencyToHeadersMs,
+                            totalDurationMs: totalDurationMs, statusCode: statusCode,
+                            cancellationToken: context.RequestAborted, upstreamHeaders: responseMessage.Headers,
+                            tailScanner: tailScanner, taskEmbedding: resolution.TaskEmbedding,
+                            routerTokens: resolution.RouterTokens, resolutionReason: resolution.SubstitutionReason,
+                            isExploratory: resolution.IsExploratory, propensity: resolution.Propensity,
+                            classification: resolution.Classification, taskText: resolution.TaskText,
+                            dimBestModel: resolution.DimBestModel,
+                            untrainedBaselineModel: resolution.UntrainedBaselineModel,
+                            untrainedBaselinePredictedScore: resolution.UntrainedBaselinePredictedScore,
+                            resolveArchive: capture is null ? null : capture.BindArchive);
 
-                    // Telemetry failures travel with the turn instead of being thrown, so they cannot stop capture.
-                    if (publishedTurn.TelemetryFailure is { } telemetryFailure)
-                        _logger.LogDebug(exception: telemetryFailure,
-                            message: "Failed to publish routing telemetry; the forwarded response was unaffected.");
+                        // Telemetry failures travel with the turn instead of being thrown, so they cannot stop capture.
+                        if (publishedTurn.TelemetryFailure is { } telemetryFailure)
+                            _logger.LogDebug(exception: telemetryFailure,
+                                message: "Failed to publish routing telemetry; the forwarded response was unaffected.");
 
-                    if (capture is not null)
-                        await capture.SubmitAsync(
-                            turn: publishedTurn, context: context,
-                            telemetryCaptureTruncated: written.IsTelemetryCaptureTruncated);
+                        if (capture is not null)
+                            await capture.SubmitAsync(
+                                turn: publishedTurn, context: context,
+                                telemetryCaptureTruncated: written.IsTelemetryCaptureTruncated);
+                    }
                 }
                 catch (Exception ex)
                 {

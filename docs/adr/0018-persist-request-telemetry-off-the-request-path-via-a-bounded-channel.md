@@ -80,6 +80,7 @@ Guarantees this ADR commits to:
 ## More Information
 
 - Step 1 (`CompleteAsync` before telemetry) is implemented in `ProxyMiddleware`.
+- The writer landed as `ServedRequestWriter`. One channel carries the telemetry row and, when capture is on, the session-file spool references.
 - Existing pattern: `src/TotallyHotArcRouter/Telemetry/RateLimitHeaderCapture.cs`.
 - Validation plan: measure last-`data:` frame to EOF before and after; run the golden-path smoke plus
   `ProxyMiddlewareCaptureRecoveryTests` and `RequestTelemetryPublisherTests`.

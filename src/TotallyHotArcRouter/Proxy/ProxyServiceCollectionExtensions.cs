@@ -211,6 +211,20 @@ internal static class ProxyServiceCollectionExtensions
             .ValidateOnStart();
         services.AddSingleton<SemanticResponseCache>();
 
+        services.AddSingleton(CreateRequestTelemetryPublisher);
+        services.AddSingleton(sp =>
+        {
+            var writer = new ServedRequestWriter(
+                sp.GetRequiredService<RequestTelemetryPublisher>(),
+                sp.GetRequiredService<Lazy<SessionStore>>(),
+                sp.GetRequiredService<IOptions<SessionCaptureOptions>>(),
+                sp.GetRequiredService<ILogger<ServedRequestWriter>>(),
+                sp.GetService<CaptureEpoch>());
+            sp.GetService<SessionMaintenance>()?.AttachServedWriter(writer);
+            return writer;
+        });
+        services.AddHostedService(sp => sp.GetRequiredService<ServedRequestWriter>());
+
         // ProxyMiddleware takes its ~25 optional collaborators as one ProxyMiddlewareDependencies
         // bag rather than individual constructor parameters, so the container can no longer
         // auto-assemble it via plain constructor injection - this factory does that assembly
@@ -257,7 +271,9 @@ internal static class ProxyServiceCollectionExtensions
             InteractionStatusStore = sp.GetService<IProviderInteractionStatusStore>(),
             SemanticResponseCache = sp.GetService<SemanticResponseCache>(),
             BodyExcerptOptions = sp.GetService<IOptionsMonitor<BodyExcerptOptions>>(),
-            TurnCapture = sp.GetService<TurnCaptureFactory>()
+            TurnCapture = sp.GetService<TurnCaptureFactory>(),
+            RequestTelemetryPublisher = sp.GetService<RequestTelemetryPublisher>(),
+            ServedRequestWriter = sp.GetService<ServedRequestWriter>()
         });
 
         services.AddSingleton<ProxyMiddleware>();
@@ -547,5 +563,43 @@ internal static class ProxyServiceCollectionExtensions
                 }));
 
         return services;
+    }
+
+    /// <summary>
+    /// Builds the one telemetry publisher the middleware and <see cref="ServedRequestWriter"/> share.
+    /// </summary>
+    /// <param name="sp">The application provider.</param>
+    /// <returns>The publisher.</returns>
+    private static RequestTelemetryPublisher CreateRequestTelemetryPublisher(IServiceProvider sp)
+    {
+        var routing = sp.GetService<IOptions<RoutingOptions>>();
+        return new RequestTelemetryPublisher(
+            logger: sp.GetRequiredService<ILogger<RequestTelemetryPublisher>>(),
+            sessionIdResolver: sp.GetService<ISessionIdResolver>() ?? new SessionIdResolver(),
+            continuityMatcher: sp.GetService<IConversationContinuityMatcher>() ?? new MessageHistoryContinuityMatcher(),
+            turnTracker: sp.GetService<IConversationTurnTracker>() ?? new ConversationTurnTracker(),
+            usageExtractor: sp.GetService<IUsageExtractor>() ?? new UsageExtractor(),
+            responseTextExtractor: sp.GetService<IResponseTextExtractor>() ?? new ResponseTextExtractor(),
+            telemetryPublisher: sp.GetService<ITelemetryPublisher>() ?? new TelemetryPublisher(new TelemetryBroadcaster()),
+            qualityIngress: sp.GetService<IQualityIngress>(),
+            spendTracker: sp.GetService<ISpendTracker>() ?? NullSpendTracker.Instance,
+            priceLookup: sp.GetService<IModelPriceLookup>(),
+            budgetStore: sp.GetService<IBudgetEnforcer>(),
+            usageLedger: sp.GetService<IUsageLedger>(),
+            pendingTaskEmbeddingCache: sp.GetService<PendingValueCache<float[]>>(),
+            pendingRequestCostCache: sp.GetService<PendingValueCache<decimal>>(),
+            pendingRequestProvenanceCache: sp.GetService<PendingValueCache<PendingRequestProvenance>>(),
+            pendingResponseTextCache: sp.GetService<PendingResponseTextCache>(),
+            pendingResponseLengthCache: sp.GetService<PendingValueCache<int>>(),
+            pendingPromptCache: sp.GetService<PendingPromptCache>(),
+            pendingConversationWindowCache: sp.GetService<PendingConversationWindowCache>(),
+            transcriptStore: sp.GetService<ITranscriptStore>(),
+            routingOptionsMonitor: sp.GetService<IOptionsMonitor<RoutingOptions>>(),
+            judgeOptionsMonitor: sp.GetService<IOptionsMonitor<JudgeOptions>>(),
+            selfHostedRouterPricePerMillionTokens: routing?.Value.SelfHostedRouterPricePerMillionTokens
+                ?? new RoutingOptions().SelfHostedRouterPricePerMillionTokens,
+            portfolioGraderOptionsMonitor: sp.GetService<IOptionsMonitor<PortfolioGraderOptions>>(),
+            bodyExcerptOptions: sp.GetService<IOptionsMonitor<BodyExcerptOptions>>(),
+            userGradeFeedback: sp.GetService<UserGradeFeedbackService>());
     }
 }
