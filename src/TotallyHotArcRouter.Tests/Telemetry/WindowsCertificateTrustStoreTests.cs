@@ -108,4 +108,28 @@ public sealed class WindowsCertificateTrustStoreTests
         // Would throw (and fail the test) if uninstalling an absent certificate weren't a no-op.
         store.Uninstall(certificate);
     }
+
+    [Fact]
+    public void Install_WhenThumbprintMissingAfterAdd_Throws()
+    {
+        if (!IsWindows) return;
+
+        using var certificate = CreateSelfSignedTestCertificate();
+        // Force the post-add confirmation to fail. CurrentUser skips the certutil fallback, so Install
+        // must throw rather than report success with an empty store read - the MSI Return="check" path
+        // depends on that throw becoming a non-zero exit from --install-certificate.
+        var store = new WindowsCertificateTrustStore(name: StoreName.My, location: StoreLocation.CurrentUser,
+            containsThumbprintOverride: _ => false);
+        try
+        {
+            var thrown = Assert.Throws<InvalidOperationException>(() => store.Install(certificate));
+            Assert.Contains(certificate.Thumbprint, thrown.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            // AddViaX509Store may still have written the cert before the confirmation failed.
+            new WindowsCertificateTrustStore(name: StoreName.My, location: StoreLocation.CurrentUser)
+                .Uninstall(certificate);
+        }
+    }
 }

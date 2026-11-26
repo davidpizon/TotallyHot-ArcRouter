@@ -8,7 +8,9 @@
   replaces any prior version already installed. Built and verified against WiX Toolset v7.0.0 in this
   repo (see the .wixproj's AcceptEula comment for the OSMF EULA acceptance this requires).
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="TotallyHot Arc Router"
            Manufacturer="TotallyHot"
            Version="$(var.ProductVersion)"
@@ -29,6 +31,18 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed. Uninstall it first if you need to downgrade." />
 
     <MediaTemplate EmbedCab="yes" />
+
+    <!--
+      Installer chrome and Installed-apps icon: the red flame from Gui.Web/wwwroot/img/logo.svg, rendered
+      into Assets/. ARPPRODUCTICON is the Icon table entry Windows shows in Settings → Installed apps;
+      WixUI_Minimal is the Setup window; the two bitmaps are its banner strip and side panel.
+    -->
+    <Icon Id="AppIcon.ico" SourceFile="Assets\appicon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <ui:WixUI Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="Assets\License.rtf" />
+    <WixVariable Id="WixUIBannerBmp" Value="Assets\banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp" Value="Assets\dialog.bmp" />
 
     <!--
       %ProgramFiles%\TotallyHotArcRouter\Router\ and \Tray\ - no \Updater\ directory, unlike the design
@@ -115,6 +129,7 @@
                   Name="TotallyHot Arc Router Tray"
                   Description="TotallyHot Arc Router tray icon: status, routing controls, and updates."
                   WorkingDirectory="TRAYFOLDER"
+                  Icon="AppIcon.ico"
                   Advertise="no" />
       </File>
     </Component>
@@ -161,10 +176,14 @@
       this limitation).
     -->
     <Component Id="OpenDashboardShortcutComponent" Directory="ProgramMenuFolder" Guid="4b8b0e0a-6b34-4b0a-9c2b-5d6a6f6a1e02">
+      <!-- IconFile points at the tray's published Resources\appicon.ico (same flame as ARPPRODUCTICON);
+           Windows reads .url IconFile as an absolute path after [TRAYFOLDER] expands at install time. -->
       <util:InternetShortcut Id="OpenDashboardShortcut"
                               Directory="ProgramMenuFolder"
                               Name="TotallyHot Arc Router Dashboard"
                               Target="https://localhost:47104"
+                              IconFile="[TRAYFOLDER]Resources\appicon.ico"
+                              IconIndex="0"
                               Type="url" />
     </Component>
 
@@ -236,17 +255,18 @@
       as - rather than as the (possibly non-administrator) interactive user who launched the installer;
       FileRef="RouterServiceExe" resolves the exe to run from the RouterServiceComponent File above,
       already laid down earlier in the same transaction (see InstallExecuteSequence's scheduling below).
-      Return="ignore" - a certificate-trust failure (e.g. a locked-down machine policy blocking root-store
-      writes) must not fail the whole install; the router still works over HTTPS, a client just needs its
-      own manual trust step (docs/router/client-tls-setup.md) until this is retried, e.g. by re-running
-      the same install-certificate flag elevated by hand.
+      Return="check": a certificate-trust failure (e.g. a locked-down machine policy blocking root-store
+      writes) fails the install and rolls it back. Finishing with an untrusted CA leaves Edge/Chrome
+      showing "Not secure" on https://localhost:47104 even though the leaf itself is valid - that is a
+      broken install, not a soft warning. Re-run the install-certificate flag elevated only as a recovery
+      step after fixing the policy that blocked the store write (docs/router/client-tls-setup.md).
     -->
     <CustomAction Id="InstallCertificate"
                   FileRef="RouterServiceExe"
                   ExeCommand="--install-certificate"
                   Execute="deferred"
                   Impersonate="no"
-                  Return="ignore" />
+                  Return="check" />
 
     <!--
       Uninstalling the CA is best-effort and only on a genuine uninstall, never on an upgrade's internal
@@ -311,8 +331,10 @@
       <!-- After MigrateDataDirectory (and so after InstallFiles, so the router exe this action runs actually
            exists on disk yet); before StartServices so the leaf the router mints on its first real start is
            already trusted the moment a client connects, not racing the CA install against the service's own
-           startup. -->
-      <Custom Action="InstallCertificate" After="MigrateDataDirectory" Condition="NOT Installed" />
+           startup. Runs on every install, repair, and upgrade - NOT Installed alone skipped repairs and
+           upgrades, which left a machine that lost its LocalMachine\Root entry (or never got one) with a
+           permanent Not secure dashboard. Re-adding the same thumbprint is replace-in-place. -->
+      <Custom Action="InstallCertificate" After="MigrateDataDirectory" Condition="NOT (REMOVE~=&quot;ALL&quot;)" />
       <Custom Action="UninstallCertificate" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
       <Custom Action="ShredConversations" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>

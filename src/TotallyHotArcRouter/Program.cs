@@ -477,9 +477,11 @@ public static class Program
     /// Adds the router's local CA to this OS's trust store - the router's <c>--install-certificate</c>
     /// flag (web GUI migration plan Phase P7). Generates the CA first if none exists yet. Requires
     /// whatever elevation this OS's <see cref="ICertificateTrustStore"/> implementation needs (an
-    /// Administrator/LocalSystem token on Windows, root on Linux/macOS) - a failure here is reported,
-    /// not swallowed, since a silent no-op would leave an operator believing the certificate is trusted
-    /// when it is not.
+    /// Administrator/LocalSystem token on Windows, root on Linux/macOS) - a failure here is reported
+    /// (and, on Windows, verified by reading the store back) rather than swallowed, since a silent
+    /// no-op would leave an operator believing the certificate is trusted when Edge still shows Not
+    /// secure. The MSI's <c>InstallCertificate</c> custom action treats a non-zero exit as a failed
+    /// install (<c>Return="check"</c>).
     /// </summary>
     private static void RunInstallCertificate()
     {
